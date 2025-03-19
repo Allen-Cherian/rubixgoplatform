@@ -36,6 +36,8 @@ type SCTDataReply struct {
 	BlockId           string
 	SmartContractData string
 	Epoch             int
+	ExecutorSignature string
+	ExecutorDID       string
 }
 
 type NFTData struct {

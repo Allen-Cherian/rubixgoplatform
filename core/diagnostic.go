@@ -180,17 +180,20 @@ func (c *Core) DumpNFTTokenChain(dr *model.TCDumpRequest) *model.TCDumpReply {
 	ds.NextBlockID = nextID
 	return ds
 }
+
 func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenChainDataReq) *model.SmartContractDataReply {
 	reply := &model.SmartContractDataReply{
 		BasicResponse: model.BasicResponse{
 			Status: false,
 		},
 	}
+
 	_, err := c.w.GetSmartContractToken(getReq.Token)
 	if err != nil {
 		reply.Message = "Failed to get smart contract token data, token does not exist"
 		return reply
 	}
+
 	sctDataArray := make([]model.SCTDataReply, 0)
 	c.log.Debug("latest flag ", getReq.Latest)
 	if getReq.Latest {
@@ -199,27 +202,42 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 			reply.Message = "Failed to get smart contract token data, block is empty"
 			return reply
 		}
+
 		blockNo, err := latestBlock.GetBlockNumber(getReq.Token)
 		if err != nil {
 			reply.Message = "Failed to get smart contract token latest block number"
 			return reply
 		}
+
 		blockId, err := latestBlock.GetBlockID(getReq.Token)
 		if err != nil {
 			reply.Message = "Failed to get smart contract token latest block number"
 			return reply
 		}
+
 		epoch := latestBlock.GetEpoch()
 		scData := latestBlock.GetSmartContractData()
-		if scData == "" && blockNo == 0 {
-			reply.Message = "Gensys Block, No Smart contract Data"
+
+		var executorSignature string
+		signObj := latestBlock.GetInitiatorSignature()
+		if signObj == nil {
+			reply.Message = "unable to fetch intiateor signature"
+			return reply
+		} else {
+			executorSignature = signObj.PrivateSign
 		}
+
+		executorDID := latestBlock.GetExecutorDID()
+
 		sctData := model.SCTDataReply{
 			BlockNo:           blockNo,
 			BlockId:           blockId,
 			SmartContractData: scData,
 			Epoch:             epoch,
+			ExecutorSignature: executorSignature,
+			ExecutorDID:       executorDID,
 		}
+
 		sctDataArray = append(sctDataArray, sctData)
 		reply.SCTDataReply = sctDataArray
 		reply.Status = true
@@ -228,6 +246,10 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 	}
 
 	blks, _, err := c.w.GetAllTokenBlocks(getReq.Token, c.TokenType(SmartContractString), "")
+	if err != nil {
+		reply.Message = "unable to fetch token blocks for contract: " + getReq.Token
+		return reply
+	}
 
 	for _, blk := range blks {
 		block := block.InitBlock(blk, nil)
@@ -246,14 +268,29 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 			return reply
 		}
 		scData := block.GetSmartContractData()
-		if scData == "" && blockNo == 0 {
-			reply.Message = "Gensys Block, No Smart contract Data"
+
+		epoch := block.GetEpoch()
+
+		var executorSignature string
+		signObj := block.GetInitiatorSignature()
+		if signObj == nil {
+			reply.Message = "unable to fetch intiateor signature"
+			return reply
+		} else {
+			executorSignature = signObj.PrivateSign
 		}
+
+		executorDID := block.GetExecutorDID()
+
 		sctData := model.SCTDataReply{
 			BlockNo:           blockNo,
 			BlockId:           blockId,
 			SmartContractData: scData,
+			Epoch:             epoch,
+			ExecutorSignature: executorSignature,
+			ExecutorDID:       executorDID,
 		}
+
 		sctDataArray = append(sctDataArray, sctData)
 	}
 	reply.SCTDataReply = sctDataArray
