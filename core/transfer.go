@@ -304,11 +304,19 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			prevQuorums, _ := b.GetSigner()
 
 			for _, prevQuorum := range prevQuorums {
-				//check if the sender has prev pledged quorum's did type; if not, fetch it from the prev sender
+				//check if the sender has prev pledged quorum's did type; if not, fetch it from explorer
 				prevQuorumDIDType, err := c.w.GetPeerDIDType(prevQuorum)
 				if prevQuorumDIDType == -1 || err != nil {
 					_, err := c.w.GetDID(prevQuorum)
 					if err != nil {
+						// if previous quorum is advisory node, save to DB
+						isPrevQuorumAdvisory, advisoryInfo, _ := c.isDIDInArbitaryAddr(prevQuorum)
+						if isPrevQuorumAdvisory {
+							if advisoryInfo != nil {
+								c.AddPeerDetails(*advisoryInfo)
+							}
+							continue
+						}
 						c.log.Debug("sender does not have previous block quorums details, fetching from explorer")
 						prevQuorumInfo, err := c.GetPeerFromExplorer(prevQuorum)
 						if err != nil {

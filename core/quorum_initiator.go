@@ -624,17 +624,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
 
-			blockHeight, err :=  b.GetBlockNumber(tokeninfo.Token)
-			if err !=  nil {
-				c.log.Error("failed to get latest block height of token ", tokeninfo.Token)
-			}
-
-			// if latest block is genesis block of a whole token, then the signer(s) is(are) advisory node(s), not quorum(s)
-			// this is the case of all migrated RBTs
-			if blockHeight == 0 && tokeninfo.TokenValue == 1.0 {
-				continue
-			}
-
 			previousQuorumDIDs, err := b.GetSigner()
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("unable to fetch previous quorum's DIDs for token: %v, err: %v", tokeninfo.Token, err)
@@ -668,7 +657,16 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				if previousQuorumPeerID == "" {
 					_, err := c.w.GetDID(previousQuorumDID)
 					if err != nil {
-						return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+						//if previous quorum is advisory node, fetch peer id
+						isPrevQuorumAdvisory, advisoryInfo, _ := c.isDIDInArbitaryAddr(previousQuorumDID)
+						if isPrevQuorumAdvisory {
+							if advisoryInfo != nil {
+								c.AddPeerDetails(*advisoryInfo)
+							}
+							continue
+						} else {
+							return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+						}
 					} else {
 						previousQuorumPeerID = c.peerID
 					}
