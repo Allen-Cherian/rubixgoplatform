@@ -32,12 +32,13 @@ type NFTDataReply struct {
 }
 
 type SCTDataReply struct {
-	BlockNo           uint64
-	BlockId           string
-	SmartContractData string
-	Epoch             int
-	ExecutorSignature string
-	ExecutorDID       string
+	BlockNo            uint64
+	BlockId            string
+	SmartContractData  string
+	Epoch              int
+	InitiatorSignature string
+	ExecutorDID        string
+	InitiatorSignData  string
 }
 
 type NFTData struct {

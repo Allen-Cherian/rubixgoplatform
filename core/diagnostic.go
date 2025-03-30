@@ -218,24 +218,28 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 		epoch := latestBlock.GetEpoch()
 		scData := latestBlock.GetSmartContractData()
 
-		var executorSignature string
+		var initiatorSignature string
+		var initiatorSignData string
+
 		signObj := latestBlock.GetInitiatorSignature()
 		if signObj == nil {
 			reply.Message = "unable to fetch intiateor signature"
 			return reply
 		} else {
-			executorSignature = signObj.PrivateSign
+			initiatorSignature = signObj.PrivateSign
+			initiatorSignData = signObj.Hash
 		}
 
 		executorDID := latestBlock.GetExecutorDID()
 
 		sctData := model.SCTDataReply{
-			BlockNo:           blockNo,
-			BlockId:           blockId,
-			SmartContractData: scData,
-			Epoch:             epoch,
-			ExecutorSignature: executorSignature,
-			ExecutorDID:       executorDID,
+			BlockNo:            blockNo,
+			BlockId:            blockId,
+			SmartContractData:  scData,
+			Epoch:              epoch,
+			InitiatorSignature: initiatorSignature,
+			ExecutorDID:        executorDID,
+			InitiatorSignData:  initiatorSignData,
 		}
 
 		sctDataArray = append(sctDataArray, sctData)
@@ -283,12 +287,12 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 		executorDID := block.GetExecutorDID()
 
 		sctData := model.SCTDataReply{
-			BlockNo:           blockNo,
-			BlockId:           blockId,
-			SmartContractData: scData,
-			Epoch:             epoch,
-			ExecutorSignature: executorSignature,
-			ExecutorDID:       executorDID,
+			BlockNo:            blockNo,
+			BlockId:            blockId,
+			SmartContractData:  scData,
+			Epoch:              epoch,
+			InitiatorSignature: executorSignature,
+			ExecutorDID:        executorDID,
 		}
 
 		sctDataArray = append(sctDataArray, sctData)
