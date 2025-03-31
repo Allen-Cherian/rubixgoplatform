@@ -37,6 +37,12 @@ type TCBSyncReply struct {
 	TCBlock     [][]byte `json:"tc_block"`
 }
 
+type TCBSyncLatestBlockReply struct {
+	Status  bool   `json:"status"`
+	Message string `json:"message"`
+	TCBlock []byte `json:"tc_last_block"`
+}
+
 // TokenVerificationRequest struct
 type TokenVerificationRequest struct {
 	Tokens []string `json:"tokens"`
@@ -295,40 +301,91 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 			return nil
 		}
 	}
-	tr := TCBSyncRequest{
+	syncReq := TCBSyncRequest{
 		Token:     token,
 		TokenType: tokenType,
 		BlockID:   blkID,
 	}
+	// sync only latest blcok of the token chain for the transaction
+	latestBlockID, err := c.syncLatestTokenChainBlockFrom(p, syncReq)
+	if err != nil {
+		c.log.Error("")
+	}
+
+	// sync the full token chain in the background
+	go c.syncFullTokenChain(p, syncReq, latestBlockID)
+
+	return nil
+}
+
+func (c *Core) syncFullTokenChain(p *ipfsport.Peer, syncReq TCBSyncRequest, latestBlockID string) {
 	for {
 		var trep TCBSyncReply
-		err = p.SendJSONRequest("POST", APISyncTokenChain, nil, &tr, &trep, false)
+		err := p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
 		if err != nil {
 			c.log.Error("Failed to sync token chain block", "err", err)
-			return err
 		}
 		if !trep.Status {
 			c.log.Error("Failed to sync token chain block", "msg", trep.Message)
-			return fmt.Errorf(trep.Message)
 		}
 		for _, bb := range trep.TCBlock {
 			blk := block.InitBlock(bb, nil)
 			if blk == nil {
 				c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
-				return fmt.Errorf("failed to add token chain block, invalid block, sync failed")
 			}
-			err = c.w.AddTokenBlock(token, blk)
+			err = c.w.AddTokenBlock(syncReq.Token, blk)
 			if err != nil {
 				c.log.Error("Failed to add token chain block, syncing failed", "err", err)
-				return err
 			}
 		}
-		if trep.NextBlockID == "" {
+		if trep.NextBlockID == latestBlockID {
 			break
 		}
-		tr.BlockID = trep.NextBlockID
+		syncReq.BlockID = trep.NextBlockID
 	}
-	return nil
+}
+
+func (c *Core) syncLatestTokenChainBlock(req *ensweb.Request) *ensweb.Result {
+	var tr TCBSyncRequest
+
+	err := c.l.ParseJSON(req, &tr)
+	if err != nil {
+		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "Failed to parse request"}, http.StatusOK)
+	}
+	latestBlock := c.w.GetLatestTokenBlock(tr.Token, tr.TokenType)
+	if latestBlock == nil {
+		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: err.Error()}, http.StatusOK)
+	}
+	return c.l.RenderJSON(req, &TCBSyncLatestBlockReply{Status: true, Message: "Got latest block", TCBlock: latestBlock.GetBlock()}, http.StatusOK)
+}
+
+func (c *Core) syncLatestTokenChainBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRequest) (string, error) {
+	var trep TCBSyncLatestBlockReply
+	err := p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
+	if err != nil {
+		c.log.Error("Failed to sync latest token chain block", "err", err)
+		return "", err
+	}
+	if !trep.Status {
+		c.log.Error("Failed to sync latest token chain block", "msg", trep.Message)
+		return "", fmt.Errorf(trep.Message)
+	}
+	latestBlock := block.InitBlock(trep.TCBlock, nil)
+	if latestBlock == nil {
+		c.log.Error("Failed to add latest token chain block, invalid block, sync failed", "err", err)
+		return "", fmt.Errorf("failed to add latest token chain block, invalid block, sync failed")
+	}
+	err = c.w.AddTokenBlock(syncReq.Token, latestBlock)
+	if err != nil {
+		c.log.Error("Failed to add latest token chain block, syncing failed", "err", err)
+		return "", err
+	}
+	latestBlockID, err := latestBlock.GetBlockID(syncReq.Token)
+	if err != nil {
+		c.log.Error("failed to fetch blockID, err ", err)
+		return "", err
+	}
+	return latestBlockID, nil
 }
 
 func (c *Core) getFromIPFS(path string) ([]byte, error) {
