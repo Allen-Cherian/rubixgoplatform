@@ -252,7 +252,7 @@ func (c *Core) deployNFT(reqID string, deployReq model.DeployNFTRequest) *model.
 
 	c.log.Info("NFT Deployed successfully", "duration", dif)
 	resp.Status = true
-	msg := fmt.Sprintf("NFT Deployed successfully in %v", dif)
+	msg := fmt.Sprintf("NFT Deployed successfully in %v with trnxid %v", dif, txnDetails.TransactionID)
 	resp.Message = msg
 	return resp
 }
