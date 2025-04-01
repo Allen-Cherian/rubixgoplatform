@@ -55,6 +55,7 @@ type TokenVerificationResponse struct {
 
 func (c *Core) SetupToken() {
 	c.l.AddRoute(APISyncTokenChain, "POST", c.syncTokenChain)
+	c.l.AddRoute(APISyncLatestBlock, "POST", c.syncLatestBlock)
 }
 
 func (c *Core) GetAllTokens(did string, tt string) (*model.TokenResponse, error) {
@@ -307,7 +308,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		BlockID:   blkID,
 	}
 	// sync only latest blcok of the token chain for the transaction
-	latestBlockID, err := c.syncLatestTokenChainBlockFrom(p, syncReq)
+	latestBlockID, err := c.syncLatestBlockFrom(p, syncReq)
 	if err != nil {
 		c.log.Error("")
 	}
@@ -345,7 +346,7 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, syncReq TCBSyncRequest, late
 	}
 }
 
-func (c *Core) syncLatestTokenChainBlock(req *ensweb.Request) *ensweb.Result {
+func (c *Core) syncLatestBlock(req *ensweb.Request) *ensweb.Result {
 	var tr TCBSyncRequest
 
 	err := c.l.ParseJSON(req, &tr)
@@ -359,7 +360,7 @@ func (c *Core) syncLatestTokenChainBlock(req *ensweb.Request) *ensweb.Result {
 	return c.l.RenderJSON(req, &TCBSyncLatestBlockReply{Status: true, Message: "Got latest block", TCBlock: latestBlock.GetBlock()}, http.StatusOK)
 }
 
-func (c *Core) syncLatestTokenChainBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRequest) (string, error) {
+func (c *Core) syncLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRequest) (string, error) {
 	var trep TCBSyncLatestBlockReply
 	err := p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
 	if err != nil {
