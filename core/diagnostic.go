@@ -332,12 +332,13 @@ func (c *Core) GetNFTTokenChainData(getReq *model.SmartContractTokenChainDataReq
 		}
 
 		nftDataArray = append(nftDataArray, model.NFTData{
-			BlockNo:  blockNo,
-			BlockId:  blockId,
-			NFTData:  latestBlock.GetNFTData(),
-			NFTOwner: latestBlock.GetOwner(),
-			NFTValue: latestBlock.GetTokenValue(),
-			Epoch:    latestBlock.GetEpoch(),
+			BlockNo:       blockNo,
+			BlockId:       blockId,
+			NFTData:       latestBlock.GetNFTData(),
+			NFTOwner:      latestBlock.GetOwner(),
+			NFTValue:      latestBlock.GetTokenValue(),
+			Epoch:         latestBlock.GetEpoch(),
+			TransactionID: latestBlock.GetTid(),
 		})
 	} else {
 		blks, _, err := c.w.GetAllTokenBlocks(getReq.Token, c.TokenType(NFTString), "")
@@ -361,12 +362,13 @@ func (c *Core) GetNFTTokenChainData(getReq *model.SmartContractTokenChainDataReq
 			}
 
 			nftDataArray = append(nftDataArray, model.NFTData{
-				BlockNo:  blockNo,
-				BlockId:  blockId,
-				NFTData:  block.GetNFTData(),
-				NFTOwner: block.GetOwner(),
-				NFTValue: block.GetTokenValue(),
-				Epoch:    block.GetEpoch(), // Fixed the missing Epoch value
+				BlockNo:       blockNo,
+				BlockId:       blockId,
+				NFTData:       block.GetNFTData(),
+				NFTOwner:      block.GetOwner(),
+				NFTValue:      block.GetTokenValue(),
+				Epoch:         block.GetEpoch(), // Fixed the missing Epoch value
+				TransactionID: block.GetTid(),
 			})
 		}
 	}

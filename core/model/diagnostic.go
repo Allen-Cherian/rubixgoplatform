@@ -42,12 +42,13 @@ type SCTDataReply struct {
 }
 
 type NFTData struct {
-	BlockNo  uint64
-	BlockId  string
-	NFTData  string
-	NFTOwner string
-	NFTValue float64
-	Epoch    int
+	BlockNo       uint64
+	BlockId       string
+	NFTData       string
+	NFTOwner      string
+	NFTValue      float64
+	Epoch         int
+	TransactionID string
 }
 
 type RegisterCallBackUrlReq struct {
