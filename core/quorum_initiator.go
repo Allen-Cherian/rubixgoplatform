@@ -1426,6 +1426,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			Did:                    sc.GetExecutorDID(),
 			Type:                   ExecuteType,
 			SmartContractBlockHash: newBlockId,
+			SmartContractData:      sc.GetSmartContractData(),
 		}
 
 		err = c.publishNewEvent(&newEvent)
