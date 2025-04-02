@@ -310,7 +310,8 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 	// sync only latest blcok of the token chain for the transaction
 	latestBlockID, err := c.syncLatestBlockFrom(p, syncReq)
 	if err != nil {
-		c.log.Error("")
+		c.log.Error("failed to sync latest block, err ", err)
+		return err
 	}
 
 	// sync the full token chain in the background
@@ -351,18 +352,20 @@ func (c *Core) syncLatestBlock(req *ensweb.Request) *ensweb.Result {
 
 	err := c.l.ParseJSON(req, &tr)
 	if err != nil {
-		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "Failed to parse request"}, http.StatusOK)
+		c.log.Error("failed to parse latest block sync request")
+		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "Failed to parse sync request"}, http.StatusOK)
 	}
 	latestBlock := c.w.GetLatestTokenBlock(tr.Token, tr.TokenType)
 	if latestBlock == nil {
-		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: err.Error()}, http.StatusOK)
+		c.log.Error("latest block is nil, invalid token chain, failed to share token chain")
+		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "latest block is nil, invalid token chain"}, http.StatusOK)
 	}
 	return c.l.RenderJSON(req, &TCBSyncLatestBlockReply{Status: true, Message: "Got latest block", TCBlock: latestBlock.GetBlock()}, http.StatusOK)
 }
 
 func (c *Core) syncLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRequest) (string, error) {
 	var trep TCBSyncLatestBlockReply
-	err := p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
+	err := p.SendJSONRequest("POST", APISyncLatestBlock, nil, &syncReq, &trep, false)
 	if err != nil {
 		c.log.Error("Failed to sync latest token chain block", "err", err)
 		return "", err
