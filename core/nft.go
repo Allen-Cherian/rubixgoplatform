@@ -423,7 +423,7 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 	blockNoInt, _ := strconv.Atoi(blockNoPart)
 	//Rename : TODO
 	eTrans := &ExplorerNFTExecute{
-		NFT:            NFTString,
+		NFT:            executeReq.NFT,
 		ExecutorDID:    currentOwner,
 		ReceiverDID:    receiver,
 		Network:        executeReq.QuorumType,
@@ -437,6 +437,7 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 		QuorumList:     extractQuorumDID(conensusRequest.QuorumList),
 		PledgeInfo:     PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
 		SCTokenHash:    "' '",
+		Amount:         executeReq.NFTValue,
 	}
 
 	receiverPeerId := c.w.GetPeerID(executeReq.Receiver)
