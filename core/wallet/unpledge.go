@@ -18,6 +18,14 @@ type UnpledgeSequenceInfo struct {
 	QuorumDID     string `gorm:"column:quorum_did"`
 }
 
+type TokenSyncInfo struct {
+	TokenID      string `gorm:"column:token_id;primaryKey"`
+	SyncFromPeer string `gorm:"column:sync_from_peer"`
+	BlockNumber  int64  `gorm:"column:block_number"`
+	BlockID      string `gorm:"column:block_id"`
+	Status       string `gorm:"column:status"`
+}
+
 // Methods specific to Periodic Pledging
 func (w *Wallet) GetUnpledgeSequenceDetails() ([]*UnpledgeSequenceInfo, error) {
 	var unpledgeSequenceDetails []*UnpledgeSequenceInfo
@@ -75,7 +83,7 @@ func (w *Wallet) Migration_GetUnpledgeQueueInfo() ([]migration_UnpledgeQueueInfo
 				w.log.Info("no PoW based pledged tokens left to unpledge")
 				return nil, nil
 			} else {
-				errMsg := fmt.Errorf("unable to read to pledge tokens from unpledgequeue table: %v", err) 
+				errMsg := fmt.Errorf("unable to read to pledge tokens from unpledgequeue table: %v", err)
 				w.log.Error(errMsg.Error())
 				return nil, errMsg
 			}
@@ -93,5 +101,42 @@ func (w *Wallet) Migration_DropUnpledgeQueueTable() error {
 		return errMsg
 	}
 
+	return nil
+}
+
+// Add to tabel
+func (w *Wallet) GetTokenSyncDetails() ([]TokenSyncInfo, error) {
+	var tokensyncinfo []TokenSyncInfo
+	err := w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", "")
+	if err != nil {
+		if strings.Contains(err.Error(), "no records found") {
+			return []TokenSyncInfo{}, nil
+		} else {
+			w.log.Error("Failed to get token states", "err", err)
+			return nil, err
+		}
+	}
+	return tokensyncinfo, nil
+}
+
+// Fetch from table
+func (w *Wallet) AddTokenSyncDetails(tokenSyncInfo TokenSyncInfo) error {
+	var tokensyncinfo []TokenSyncInfo
+	err := w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", tokenSyncInfo.TokenID)
+	if err != nil {
+		if strings.Contains(err.Error(), "no records found") {
+			err = w.s.Write(SyncTokenStorage, &tokenSyncInfo)
+			if err != nil {
+				return fmt.Errorf("error while adding token sync info for transaction: %v, err: %v", tokenSyncInfo.TokenID, err)
+			}
+		} else {
+			w.log.Error("Failed to get token states", "err", err)
+			return err
+		}
+	}
+	err = w.s.Update(SyncTokenStorage, &tokenSyncInfo, "token_id != ?", tokenSyncInfo.TokenID)
+	if err != nil {
+		return fmt.Errorf("error while updating token sync info for transaction: %v, err: %v", tokenSyncInfo.TokenID, err)
+	}
 	return nil
 }
