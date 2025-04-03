@@ -158,9 +158,11 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 	if err != nil {
 		w.log.Error("Failed to initialize FT storage", "err", err)
 	}
-	err = w.s.Init(SyncTokenStorage, &FT{}, true)
+
+	//Queue for syncing token chain of tokens in the table
+	err = w.s.Init(SyncTokenStorage, &TokenSyncInfo{}, true)
 	if err != nil {
-		w.log.Error("Failed to initialize FT storage", "err", err)
+		w.log.Error("Failed to initialize SyncTokenStorage storage", "err", err)
 	}
 
 	smartcontracTokenchainstorageDB, err := leveldb.OpenFile(dir+SmartContractTokenChainStorage, op)
