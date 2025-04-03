@@ -412,7 +412,9 @@ func (c *Core) ContractCallBack(peerID string, topic string, data []byte) {
 		"smart_contract_hash": newEvent.SmartContractToken,
 		"port":                c.cfg.NodePort,
 		"smart_contract_data": newEvent.SmartContractData,
+		"initiator_did":       newEvent.Did,
 	}
+
 	payLoadBytes, err := json.Marshal(payload)
 	if err != nil {
 		c.log.Error("Failed to marshal JSON", "err", err)
