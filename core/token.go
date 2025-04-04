@@ -372,13 +372,14 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo wallet.TokenSy
 
 func (c *Core) syncTokensFromQueue(p *ipfsport.Peer) {
 	defer p.Close()
-	tokenSyncInfo, err := c.w.SyncTokensFromQueue()
+	tokenSyncInfo, err := c.w.SyncTokensFromQueue(p)
 	if err != nil {
 		c.log.Error("failed to fetch tokens to sync, error ", err)
 		return
 	}
 	// start syncing all tokens in queue
 	for _, tokenToSync := range tokenSyncInfo {
+		//TODO : check when p is nil and p is not nil
 		err := c.syncFullTokenChain(p, tokenToSync)
 		if err != nil {
 			c.log.Error("failed to sync token chain for token ", tokenToSync.TokenID, "error", err)
