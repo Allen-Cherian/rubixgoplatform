@@ -113,7 +113,7 @@ func (w *Wallet) SyncTokensFromQueue(p *ipfsport.Peer) ([]TokenSyncInfo, error) 
 	var tokensyncinfo []TokenSyncInfo
 	var err error
 	if p != nil {
-		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ? and sync_from_peer = ", "", p)
+		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ? and sync_from_peer = ", "", p.GetPeerID())
 	} else {
 		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", "")
 	}
@@ -136,9 +136,7 @@ func (w *Wallet) AddTokenSyncDetails(tokenSyncInfo TokenSyncInfo) error {
 	err := w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", tokenSyncInfo.TokenID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no records found") {
-			if err != nil {
-				return fmt.Errorf("error while removing token sync info for tokenID: %v, err: %v", tokenSyncInfo.TokenID, err)
-			}
+			return fmt.Errorf("error while removing token sync info for tokenID: %v, err: %v", tokenSyncInfo.TokenID, err)
 		} else {
 			w.log.Error("Failed to get token states", "err", err)
 			return err

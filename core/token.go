@@ -371,19 +371,40 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo wallet.TokenSy
 }
 
 func (c *Core) syncTokensFromQueue(p *ipfsport.Peer) {
-	defer p.Close()
+	PeerMap := make(map[string]*ipfsport.Peer)
+	if p != nil {
+		PeerMap[p.GetPeerID()] = p
+	}
+
 	tokenSyncInfo, err := c.w.SyncTokensFromQueue(p)
 	if err != nil {
 		c.log.Error("failed to fetch tokens to sync, error ", err)
 		return
 	}
+
+	defer func() {
+		for _, peer := range PeerMap {
+			peer.Close()
+		}
+	}()
+
 	// start syncing all tokens in queue
 	for _, tokenToSync := range tokenSyncInfo {
 		//TODO : check when p is nil and p is not nil
-		err := c.syncFullTokenChain(p, tokenToSync)
+
+		//Peer ID from which token chain needs to be synced
+		peerID := tokenToSync.SyncFromPeer
+
+		if _, exists := PeerMap[peerID]; !exists {
+			peer, _ := c.pm.OpenPeerConn(peerID, "", c.getCoreAppName(peerID))
+			PeerMap[peerID] = peer
+		}
+
+		err := c.syncFullTokenChain(PeerMap[peerID], tokenToSync)
 		if err != nil {
 			c.log.Error("failed to sync token chain for token ", tokenToSync.TokenID, "error", err)
 			// TODO
+			// check errors returned
 			// update token sync info in sync table
 			continue
 		}
@@ -691,7 +712,7 @@ func (c *Core) GenerateFaucetTestTokens(reqID string, tokenCount int, did string
 		br.Message = br.Message + ",  " + "Successfully updated token details."
 	} else {
 		br.Status = false
-		br.Message = br.Message + ",  " + "Failed to update token details. Status code:" + string(resp.StatusCode)
+		br.Message = br.Message + ",  " + "Failed to update token details. Status code:" + strconv.Itoa(resp.StatusCode)
 	}
 	dc := c.GetWebReq(reqID)
 	if dc == nil {
