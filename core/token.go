@@ -307,20 +307,42 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		TokenType: tokenType,
 		BlockID:   blkID,
 	}
+
 	// sync only latest blcok of the token chain for the transaction
-	latestBlockID, err := c.syncLatestBlockFrom(p, syncReq)
+	_, err = c.syncLatestBlockFrom(p, syncReq)
 	if err != nil {
 		c.log.Error("failed to sync latest block, err ", err)
 		return err
 	}
 
-	// sync the full token chain in the background
-	go c.syncFullTokenChain(p, syncReq, latestBlockID)
+	//prapre token sync info
+	tokenSyncInfo := wallet.TokenSyncInfo{
+		TokenID:     token,
+		TokenType:   int64(tokenType),
+		BlockNumber: 0,
+		BlockID:     "", // TODO
+		Status:      "ToBeSynced",
+	}
+
+	// add token to sync table
+	err = c.w.AddTokenSyncDetails(tokenSyncInfo)
+	if err != nil {
+		c.log.Error("Failed to sync token chain for ", "token ", token)
+		return err
+	}
 
 	return nil
 }
 
-func (c *Core) syncFullTokenChain(p *ipfsport.Peer, syncReq TCBSyncRequest, latestBlockID string) {
+func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo wallet.TokenSyncInfo) error {
+
+	//prepare sync request
+	syncReq := TCBSyncRequest{
+		Token:     tokenSyncInfo.TokenID,
+		TokenType: int(tokenSyncInfo.TokenType),
+		BlockID:   "",
+	}
+
 	for {
 		var trep TCBSyncReply
 		err := p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
@@ -340,11 +362,36 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, syncReq TCBSyncRequest, late
 				c.log.Error("Failed to add token chain block, syncing failed", "err", err)
 			}
 		}
-		if trep.NextBlockID == latestBlockID {
+		if trep.NextBlockID == tokenSyncInfo.BlockID {
 			break
 		}
 		syncReq.BlockID = trep.NextBlockID
 	}
+	return nil
+}
+
+func (c *Core) syncTokensFromQueue(p *ipfsport.Peer) {
+	tokenSyncInfo, err := c.w.SyncTokensFromQueue()
+	if err != nil {
+		c.log.Error("failed to fetch tokens to sync, error ", err)
+		return
+	}
+	// start syncing all tokens in queue
+	for _, tokenToSync := range tokenSyncInfo {
+		err := c.syncFullTokenChain(p, tokenToSync)
+		if err != nil {
+			c.log.Error("failed to sync token chain for token ", tokenToSync.TokenID, "error", err)
+			// TODO
+			// update token sync info in sync table
+			continue
+		}
+		// if token chain synced completely, then remove token from sync queue
+		err = c.w.RemoveTokenSyncDetails(tokenToSync)
+		if err != nil {
+			c.log.Error("failed to remove synced token, error ", err)
+		}
+	}
+
 }
 
 func (c *Core) syncLatestBlock(req *ensweb.Request) *ensweb.Result {

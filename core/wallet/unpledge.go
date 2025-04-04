@@ -3,8 +3,6 @@ package wallet
 import (
 	"fmt"
 	"strings"
-
-	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
 )
 
 // Unpledging info associated with PoW Pledging
@@ -109,18 +107,19 @@ func (w *Wallet) Migration_DropUnpledgeQueueTable() error {
 }
 
 // Fetch from tabel
-func (w *Wallet) SyncTokensFromQueue(p *ipfsport.Peer) error {
+func (w *Wallet) SyncTokensFromQueue() ([]TokenSyncInfo, error) {
 	var tokensyncinfo []TokenSyncInfo
 	err := w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", "")
 	if err != nil {
 		if strings.Contains(err.Error(), "no records found") {
-			return nil
+			return nil, err
 		} else {
 			w.log.Error("Failed to get token sync details", "err", err)
-			return err
+			return nil, err
 		}
 	}
-	return nil
+
+	return tokensyncinfo, nil
 }
 
 // Add to table

@@ -972,12 +972,12 @@ func (c *Core) updateReceiverToken(
 				}
 				err = c.syncParentToken(senderPeer, pt)
 				if err != nil {
-					return nil, fmt.Errorf("failed to sync parent token %v childtoken %v err : ", pt, t, err)
+					return nil, fmt.Errorf("failed to sync parent token %v childtoken %v err : %v", pt, t, err)
 				}
 			}
 			ptcbArray, err := c.w.GetTokenBlock(t, ti.TokenType, pblkID)
 			if err != nil {
-				return nil, fmt.Errorf("failed to fetch previous block for token: % err : %v", t, err)
+				return nil, fmt.Errorf("failed to fetch previous block for token: %v err : %v", t, err)
 			}
 			ptcb := block.InitBlock(ptcbArray, nil)
 			if c.checkIsPledged(ptcb) {
@@ -988,7 +988,7 @@ func (c *Core) updateReceiverToken(
 
 	senderPeerId, _, ok := util.ParseAddress(senderAddress)
 	if !ok {
-		return nil, fmt.Errorf("Unable to parse sender address: %v", senderAddress)
+		return nil, fmt.Errorf("unable to parse sender address: %v", senderAddress)
 	}
 
 	results := make([]MultiPinCheckRes, len(tokenInfo))
@@ -1039,8 +1039,10 @@ func (c *Core) updateReceiverToken(
 
 	bid, err := b.GetBlockID(tokenInfo[0].Token)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to update token status, failed to get block ID, err: %v", err)
+		return nil, fmt.Errorf("failed to update token status, failed to get block ID, err: %v", err)
 	}
+
+	go c.syncTokensFromQueue(senderPeer)
 
 	// Store the transaction info only when we are dealing with RBT transfer between
 	// two DIDs that are situated on different nodes, as this avoid Unique Constraint
