@@ -379,6 +379,13 @@ func (c *Core) syncTokensFromQueue(p *ipfsport.Peer) {
 	tokenSyncInfo, err := c.w.SyncTokensFromQueue(p)
 	if err != nil {
 		c.log.Error("failed to fetch tokens to sync, error ", err)
+
+		defer func() {
+			for _, peer := range PeerMap {
+				peer.Close()
+			}
+		}()
+
 		return
 	}
 
