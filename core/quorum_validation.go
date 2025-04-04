@@ -198,31 +198,36 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		c.log.Error("Failed to get peer", "err", err)
 		return false, err
 	}
-	defer p.Close()
+	// defer p.Close()
 	for i := range ti {
 		err := c.syncTokenChainFrom(p, ti[i].BlockID, ti[i].Token, ti[i].TokenType)
 		if err != nil {
+			p.Close()
 			c.log.Error("Failed to sync token chain block", "err", err)
 			return false, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", ti[i].Token, TokenChainNotSynced)
 		}
 		fb := c.w.GetGenesisTokenBlock(ti[i].Token, ti[i].TokenType)
 		if fb == nil {
+			p.Close()
 			c.log.Error("Failed to get first token chain block")
 			return false, fmt.Errorf("failed to get first token chain block %v", ti[i].Token)
 		}
 		if c.TokenType(PartString) == ti[i].TokenType {
 			pt, _, err := fb.GetParentDetials(ti[i].Token)
 			if err != nil {
+				p.Close()
 				c.log.Error("failed to fetch parent token detials", "err", err, "token", ti[i].Token)
 				return false, err
 			}
 			err = c.syncParentToken(p, pt)
 			if err != nil {
+				p.Close()
 				c.log.Error("failed to sync parent token chain", "token", pt)
 				return false, err
 			}
 			_, err = c.w.Pin(pt, wallet.ParentTokenPinByQuorumRole, quorumDID, cr.TransactionID, address, receiverAddress, ti[i].TokenValue)
 			if err != nil {
+				p.Close()
 				c.log.Error("Failed to Pin parent token in Quorum", "err", err)
 				return false, err
 			}
@@ -232,6 +237,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		if ti[i].TokenType == token.RBTTokenType {
 			tl, tn, err := fb.GetTokenDetials(ti[i].Token)
 			if err != nil {
+				p.Close()
 				c.log.Error("Failed to get token detials", "err", err)
 				return false, err
 			}
@@ -239,16 +245,19 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			tb := bytes.NewBuffer([]byte(ct))
 			tid, err := c.ipfs.Add(tb, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			if err != nil {
+				p.Close()
 				c.log.Error("Failed to validate, failed to get token hash", "err", err)
 				return false, err
 			}
 			if tid != ti[i].Token {
+				p.Close()
 				c.log.Error("Invalid token", "token", ti[i].Token, "exp_token", tid, "tl", tl, "tn", tn)
 				return false, fmt.Errorf("Invalid token", "token", ti[i].Token, "exp_token", tid, "tl", tl, "tn", tn)
 			}
 		}
 		b := c.w.GetLatestTokenBlock(ti[i].Token, ti[i].TokenType)
 		if b == nil {
+			p.Close()
 			c.log.Error("Invalid token chain block")
 			return false, fmt.Errorf("Invalid token chain block for ", ti[i].Token)
 		}
@@ -260,12 +269,14 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		if pinningNodeDID != "" {
 			c.log.Info("The token is Pinned as a service on Node ", pinningNodeDID)
 			if ownerDID != senderDID {
+				p.Close()
 				c.log.Error("Invalid token owner: The token is Pinned as a service", "owner", ownerDID, "The node which is trying to transfer", senderDID)
 				return false, fmt.Errorf("invalid token owner: The token is Pinned as a service")
 			}
 		}
 		signatureValidation, err := c.validateSigner(b, quorumDID, p)
 		if !signatureValidation || err != nil {
+			p.Close()
 			c.log.Error("Failed to validate token ownership ", "token ID:", ti[i].Token)
 			return false, err
 		}
