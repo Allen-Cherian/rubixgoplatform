@@ -136,9 +136,12 @@ func (w *Wallet) AddTokenSyncDetails(tokenSyncInfo TokenSyncInfo) error {
 	err := w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", tokenSyncInfo.TokenID)
 	if err != nil {
 		if strings.Contains(err.Error(), "no records found") {
-			return fmt.Errorf("error while removing token sync info for tokenID: %v, err: %v", tokenSyncInfo.TokenID, err)
+			err := w.s.Write(SyncTokenStorage, &tokensyncinfo)
+			if err != nil {
+				return fmt.Errorf("error while adding token sync info for tokenID: %v, err: %v", tokenSyncInfo.TokenID, err)
+			}
 		} else {
-			w.log.Error("Failed to get token states", "err", err)
+			w.log.Error("Failed to read SyncTokenTable", "err", err)
 			return err
 		}
 	}
