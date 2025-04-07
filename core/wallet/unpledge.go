@@ -113,7 +113,7 @@ func (w *Wallet) SyncTokensFromQueue(p *ipfsport.Peer) ([]TokenSyncInfo, error) 
 	var tokensyncinfo []TokenSyncInfo
 	var err error
 	if p != nil {
-		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ? and sync_from_peer = ", "", p.GetPeerID())
+		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ? and sync_from_peer = ? ", "", p.GetPeerID())
 	} else {
 		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", "")
 	}

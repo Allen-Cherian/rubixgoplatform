@@ -958,6 +958,7 @@ func (c *Core) updateReceiverToken(
 
 			err = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
 			if err != nil {
+				c.log.Error("receiver failed to sync token chain of token ", ti.Token, "error ", err)
 				return nil, senderPeer, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
 			}
 
@@ -1142,6 +1143,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 
 		err = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
 		if err != nil {
+			c.log.Error("receiver failed to sync token chain of FT ", ti.Token, "error ", err)
 			return nil, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
 		}
 

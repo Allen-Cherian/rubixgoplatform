@@ -317,11 +317,12 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 
 	//prapre token sync info
 	tokenSyncInfo := wallet.TokenSyncInfo{
-		TokenID:     token,
-		TokenType:   int64(tokenType),
-		BlockNumber: 0,
-		BlockID:     "", // TODO
-		Status:      "ToBeSynced",
+		TokenID:      token,
+		TokenType:    int64(tokenType),
+		BlockNumber:  0,
+		BlockID:      "", // TODO
+		Status:       "ToBeSynced",
+		SyncFromPeer: p.GetPeerID(),
 	}
 
 	// add token to sync table
