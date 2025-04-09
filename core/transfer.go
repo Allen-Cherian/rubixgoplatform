@@ -287,8 +287,6 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	}
 
 	//check if sender has previous block pledged quorums' details
-	unknownDIDType := -1
-	liteDIDType := did.LiteDIDMode
 	for _, tokeninfo := range tis {
 		b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
 		//check if the transaction in prev block involved any quorums
@@ -304,43 +302,19 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			prevQuorums, _ := b.GetSigner()
 
 			for _, prevQuorum := range prevQuorums {
-				//check if the sender has prev pledged quorum's did type; if not, fetch it from explorer
-				prevQuorumDIDType, err := c.w.GetPeerDIDType(prevQuorum)
-				if prevQuorumDIDType == -1 || err != nil {
-					_, err := c.w.GetDID(prevQuorum)
-					if err != nil {
-						// if previous quorum is advisory node, save to DB
-						isPrevQuorumAdvisory, advisoryInfo, _ := c.isDIDInArbitaryAddr(prevQuorum)
-						if isPrevQuorumAdvisory {
-							if advisoryInfo != nil {
-								c.AddPeerDetails(*advisoryInfo)
-							}
-							continue
-						}
-						c.log.Debug("sender does not have previous block quorums details, fetching from explorer")
-						prevQuorumInfo, err := c.GetPeerFromExplorer(prevQuorum)
-						if err != nil {
-							c.log.Error("failed to fetch prev-quorum details from explorer, prev-quorum ", prevQuorum)
-						}
-
-						prevQuorumDIDInfo := wallet.DIDPeerMap{
-							DID:    prevQuorum,
-							PeerID: prevQuorumInfo.PeerID,
-						}
-
-						if prevQuorumInfo.DIDType == "BIP39" {
-							prevQuorumDIDInfo.DIDType = &liteDIDType
-						} else {
-							prevQuorumDIDInfo.DIDType = &unknownDIDType
-						}
-
-						c.AddPeerDetails(prevQuorumDIDInfo)
-
-						//if a signle pledged quorum is also not found, we can assume that other pledged quorums will also be not found,
-						//and request prev sender to share details of all the pledged quorums, and thus breaking the for loop
-						break
+				//check if the sender has prev pledged quorum's did type; if not, fetch it from the prev sender
+				prevQuorumInfo, err := c.GetPeerDIDInfo(prevQuorum)
+				if err != nil {
+					if strings.Contains(err.Error(), "retry") {
+						c.AddPeerDetails(*prevQuorumInfo)
 					}
 				}
+				if prevQuorumInfo == nil || *prevQuorumInfo.DIDType == -1 {
+					//if a signle pledged quorum is also not found, we can assume that other pledged quorums will also be not found,
+					//and request prev sender to share details of all the pledged quorums, and thus breaking the for loop
+					break
+				}
+
 			}
 		}
 	}
