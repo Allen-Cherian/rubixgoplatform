@@ -223,6 +223,18 @@ func (c *Core) deployNFT(reqID string, deployReq model.DeployNFTRequest) *model.
 		return resp
 	}
 
+	nftTokenDetails := wallet.NFT{
+		TokenID:     nft.TokenID,
+		DID:         nft.DID,
+		TokenStatus: nft.TokenStatus,
+		TokenValue:  floatPrecision(deployReq.NFTValue, MaxDecimalPlaces),
+	}
+
+	if err := c.w.CreateNFT(&nftTokenDetails, true); err != nil {
+		c.log.Error("Failed to write nft to storage in NFTTokenStorage", err)
+		return resp
+	}
+
 	et := time.Now()
 	dif := et.Sub(st)
 	//txnDetails.Amount = deployReq.RBTAmount
