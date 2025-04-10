@@ -43,21 +43,22 @@ const (
 )
 
 type ConensusRequest struct {
-	ReqID              string       `json:"req_id"`
-	Type               int          `json:"type"`
-	Mode               int          `json:"mode"`
-	SenderPeerID       string       `json:"sender_peerd_id"`
-	ReceiverPeerID     string       `json:"receiver_peerd_id"`
-	ContractBlock      []byte       `json:"contract_block"`
-	QuorumList         []string     `json:"quorum_list"`
-	DeployerPeerID     string       `json:"deployer_peerd_id"`
-	SmartContractToken string       `json:"smart_contract_token"`
-	ExecuterPeerID     string       `json:"executor_peer_id"`
-	TransactionID      string       `json:"transaction_id"`
-	TransactionEpoch   int          `json:"transaction_epoch"`
-	PinningNodePeerID  string       `json:"pinning_node_peer_id"`
-	NFT                string       `json:"nft"`
-	FTinfo             model.FTInfo `json:"ft_info"`
+	ReqID              string                            `json:"req_id"`
+	Type               int                               `json:"type"`
+	Mode               int                               `json:"mode"`
+	SenderPeerID       string                            `json:"sender_peerd_id"`
+	ReceiverPeerID     string                            `json:"receiver_peerd_id"`
+	ContractBlock      []byte                            `json:"contract_block"`
+	QuorumList         []string                          `json:"quorum_list"`
+	DeployerPeerID     string                            `json:"deployer_peerd_id"`
+	SmartContractToken string                            `json:"smart_contract_token"`
+	ExecuterPeerID     string                            `json:"executor_peer_id"`
+	TransactionID      string                            `json:"transaction_id"`
+	TransactionEpoch   int                               `json:"transaction_epoch"`
+	PinningNodePeerID  string                            `json:"pinning_node_peer_id"`
+	NFT                string                            `json:"nft"`
+	FTinfo             model.FTInfo                      `json:"ft_info"`
+	TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"tokens_sync_info"`
 }
 
 type ConensusReply struct {
@@ -115,14 +116,22 @@ type UpdatePledgeRequest struct {
 }
 
 type SendTokenRequest struct {
-	Address            string               `json:"peer_id"`
-	TokenInfo          []contract.TokenInfo `json:"token_info"`
-	TokenChainBlock    []byte               `json:"token_chain_block"`
-	QuorumList         []string             `json:"quorum_list"`
-	QuorumInfo         []QuorumDIDPeerMap   `json:"quorum_info"`
-	TransactionEpoch   int                  `json:"transaction_epoch"`
-	PinningServiceMode bool                 `json:"pinning_service_mode"`
-	FTInfo             model.FTInfo         `json:"ft_info"`
+	Address            string                            `json:"peer_id"`
+	TokenInfo          []contract.TokenInfo              `json:"token_info"`
+	TokenChainBlock    []byte                            `json:"token_chain_block"`
+	QuorumList         []string                          `json:"quorum_list"`
+	QuorumInfo         []QuorumDIDPeerMap                `json:"quorum_info"`
+	TransactionEpoch   int                               `json:"transaction_epoch"`
+	PinningServiceMode bool                              `json:"pinning_service_mode"`
+	FTInfo             model.FTInfo                      `json:"ft_info"`
+	TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"token_chain_sync_info"`
+}
+
+type GenesisAndLatestBlocks struct {
+	GenesisBlock       []byte `json:"genesis"`
+	LatestBlock        []byte `json:"latest"`
+	ParentGenesisBlock []byte `json:"parent_genesis"`
+	ParentLatestBlock  []byte `json:"parent_latest"`
 }
 
 type SendFTRequest struct {
@@ -496,6 +505,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			QuorumList:         cr.QuorumList,
 			TransactionEpoch:   cr.TransactionEpoch,
 			PinningServiceMode: false,
+			TransTokenSyncInfo: cr.TransTokenSyncInfo,
 		}
 
 		//fetching quorums' info from PeerDIDTable to share with the receiver
@@ -1186,7 +1196,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		// Self update for self transfer tokens
-		updatedTokenHashes, _, err := c.updateReceiverToken(selfAddress, "", ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, false)
+		updatedTokenHashes, _, err := c.updateReceiverToken(selfAddress, "", ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, false, nil)
 		if err != nil {
 			errMsg := fmt.Errorf("failed while update of self transfer tokens, err: %v", err)
 			c.log.Error(errMsg.Error())
@@ -1943,7 +1953,7 @@ func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contr
 		token := cresp.Message[ptStart : strings.Index(cresp.Message[ptStart:], ",")+ptStart]
 		issueType := cresp.Message[issueTypeStart:]
 
-		c.log.Debug("String: token is ", token, " issuetype is ", issueType)
+		c.log.Debug("In connectQuorum, token is ", token, " issuetype is ", issueType)
 		issueTypeInt, err1 := strconv.Atoi(issueType)
 		if err1 != nil {
 			c.log.Error("Consensus failed due to token chain sync issue, issueType string conversion", "err", err1)
@@ -1957,10 +1967,10 @@ func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contr
 			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
 			return
 		}
-		c.log.Debug("sync issue token details ", syncIssueTokenDetails)
+		c.log.Debug("In connectQuorum, sync issue token details ", syncIssueTokenDetails)
 		if issueTypeInt == TokenChainNotSynced {
 			syncIssueTokenDetails.TokenStatus = wallet.TokenChainSyncIssue
-			c.log.Debug("sync issue token details status updated", syncIssueTokenDetails)
+			c.log.Debug("In connectQuorum, sync issue token details status updated", syncIssueTokenDetails)
 			c.w.UpdateToken(syncIssueTokenDetails)
 			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
 			return

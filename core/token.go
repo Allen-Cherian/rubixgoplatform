@@ -37,10 +37,10 @@ type TCBSyncReply struct {
 	TCBlock     [][]byte `json:"tc_block"`
 }
 
-type TCBSyncLatestBlockReply struct {
-	Status  bool   `json:"status"`
-	Message string `json:"message"`
-	TCBlock []byte `json:"tc_last_block"`
+type TCBSyncGenesisAndLatestBlockReply struct {
+	Status  bool     `json:"status"`
+	Message string   `json:"message"`
+	TCBlock [][]byte `json:"tc_last_block"`
 }
 
 // TokenVerificationRequest struct
@@ -53,9 +53,15 @@ type TokenVerificationResponse struct {
 	Results map[string]bool `json:"results"`
 }
 
+// Token sync info associated with Background Syncing of tokens
+type TokenSyncInfo struct {
+	TokenID   string `gorm:"column:token_id;primaryKey"`
+	TokenType int    `gorm:"column:token_type"`
+}
+
 func (c *Core) SetupToken() {
 	c.l.AddRoute(APISyncTokenChain, "POST", c.syncTokenChain)
-	c.l.AddRoute(APISyncLatestBlock, "POST", c.syncLatestBlock)
+	c.l.AddRoute(APISyncGenesisAndLatestBlock, "POST", c.syncGenesisAndLatestBlock)
 }
 
 func (c *Core) GetAllTokens(did string, tt string) (*model.TokenResponse, error) {
@@ -309,39 +315,54 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 	}
 
 	// sync only latest blcok of the token chain for the transaction
-	_, err = c.syncLatestBlockFrom(p, syncReq)
+	err = c.syncGenesisAndLatestBlockFrom(p, syncReq)
 	if err != nil {
 		c.log.Error("failed to sync latest block, err ", err)
 		return err
 	}
 
-	//prapre token sync info
-	tokenSyncInfo := wallet.TokenSyncInfo{
-		TokenID:      token,
-		TokenType:    int64(tokenType),
-		BlockNumber:  0,
-		BlockID:      "", // TODO
-		Status:       "ToBeSynced",
-		SyncFromPeer: p.GetPeerID(),
-	}
+	// //prapre token sync info
+	// tokenSyncInfo := wallet.TokenSyncInfo{
+	// 	TokenID:      token,
+	// 	TokenType:    int64(tokenType),
+	// 	BlockNumber:  0,
+	// 	BlockID:      "", // TODO
+	// 	Status:       "ToBeSynced",
+	// 	SyncFromPeer: p.GetPeerID(),
+	// }
 
-	// add token to sync table
-	err = c.w.AddTokenSyncDetails(tokenSyncInfo)
-	if err != nil {
-		c.log.Error("Failed to sync token chain for ", "token ", token)
-		return err
-	}
+	// // add token to sync table
+	// err = c.w.AddTokenSyncDetails(tokenSyncInfo)
+	// if err != nil {
+	// 	c.log.Error("Failed to sync token chain for ", "token ", token)
+	// 	return err
+	// }
 
 	return nil
 }
 
-func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo wallet.TokenSyncInfo) error {
+func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo TokenSyncInfo) error {
+	// read the level db and check the block number sequence and return the block numbers that needs to be synced
+	// if all blocks are synced then mark the token sync status as completed
+	minMissingBlockId, maxMissingblockId, err := c.GetMissingBlockSequence(tokenSyncInfo)
+	if err != nil {
+		c.log.Error("failed to fetch missing block sequence, error", err)
+		return err
+	}
 
+	if minMissingBlockId == "" && maxMissingblockId == "" {
+		c.log.Debug("token chain is completely synced")
+		// update token sync status
+		err := c.w.UpdateTokenSyncStatusAsComplete(tokenSyncInfo.TokenID)
+		if err != nil {
+			c.log.Error("failed to update token sync status")
+		}
+	}
 	//prepare sync request
 	syncReq := TCBSyncRequest{
 		Token:     tokenSyncInfo.TokenID,
 		TokenType: int(tokenSyncInfo.TokenType),
-		BlockID:   "",
+		BlockID:   minMissingBlockId,
 	}
 
 	for {
@@ -358,12 +379,20 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo wallet.TokenSy
 			if blk == nil {
 				c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
 			}
+			blkId, err := blk.GetBlockID(tokenSyncInfo.TokenID)
+			if err != nil {
+				c.log.Error("failed to get block Id ")
+			}
+			if blkId == maxMissingblockId {
+				break
+			}
 			err = c.w.AddTokenBlock(syncReq.Token, blk)
 			if err != nil {
 				c.log.Error("Failed to add token chain block, syncing failed", "err", err)
+				return err
 			}
 		}
-		if trep.NextBlockID == tokenSyncInfo.BlockID {
+		if trep.NextBlockID == maxMissingblockId || trep.NextBlockID == "" {
 			break
 		}
 		syncReq.BlockID = trep.NextBlockID
@@ -371,61 +400,75 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo wallet.TokenSy
 	return nil
 }
 
-func (c *Core) syncTokensFromQueue(p *ipfsport.Peer) {
-	PeerMap := make(map[string]*ipfsport.Peer)
-	if p != nil {
-		PeerMap[p.GetPeerID()] = p
-	}
+func (c *Core) syncFullTokenChains(peerDID, peerId string, tokenSyncInfo []TokenSyncInfo) {
+	// PeerMap := make(map[string]*ipfsport.Peer)
+	// if p != nil {
+	// 	PeerMap[p.GetPeerID()] = p
+	// }
 
-	tokenSyncInfo, err := c.w.SyncTokensFromQueue(p)
+	p, err := c.getPeer(peerDID+"."+peerId, "")
 	if err != nil {
-		c.log.Error("failed to fetch tokens to sync, error ", err)
-
-		defer func() {
-			for _, peer := range PeerMap {
-				peer.Close()
-			}
-		}()
-
+		c.log.Error("failed to sync full token chain, failed to open peer connection with peer ", peerDID)
 		return
 	}
+	defer p.Close()
 
-	defer func() {
-		for _, peer := range PeerMap {
-			peer.Close()
-		}
-	}()
+	// tokenSyncInfo, err := c.w.SyncTokensFromQueue(p)
+	// if err != nil {
+	// 	c.log.Error("failed to fetch tokens to sync, error ", err)
+
+	// 	defer func() {
+	// 		for _, peer := range PeerMap {
+	// 			peer.Close()
+	// 		}
+	// 	}()
+
+	// 	return
+	// }
+
+	// defer func() {
+	// 	for _, peer := range PeerMap {
+	// 		peer.Close()
+	// 	}
+	// }()
 
 	// start syncing all tokens in queue
 	for _, tokenToSync := range tokenSyncInfo {
-		//TODO : check when p is nil and p is not nil
+		c.log.Debug("syncing token ", tokenToSync.TokenID)
+		// //TODO : check when p is nil and p is not nil
 
-		//Peer ID from which token chain needs to be synced
-		peerID := tokenToSync.SyncFromPeer
+		// //Peer ID from which token chain needs to be synced
+		// peerID := tokenToSync.SyncFromPeer
 
-		if _, exists := PeerMap[peerID]; !exists {
-			peer, _ := c.pm.OpenPeerConn(peerID, "", c.getCoreAppName(peerID))
-			PeerMap[peerID] = peer
-		}
+		// if _, exists := PeerMap[peerID]; !exists {
+		// 	peer, _ := c.pm.OpenPeerConn(peerID, "", c.getCoreAppName(peerID))
+		// 	PeerMap[peerID] = peer
+		// }
 
-		err := c.syncFullTokenChain(PeerMap[peerID], tokenToSync)
+		err := c.syncFullTokenChain(p, tokenToSync)
 		if err != nil {
 			c.log.Error("failed to sync token chain for token ", tokenToSync.TokenID, "error", err)
-			// TODO
+			// TODO : check number of blocks synced and manage accordingly
 			// check errors returned
-			// update token sync info in sync table
 			continue
 		}
-		// if token chain synced completely, then remove token from sync queue
-		err = c.w.RemoveTokenSyncDetails(tokenToSync)
+		// // if token chain synced completely, then remove token from sync queue
+		// err = c.w.RemoveTokenSyncDetails(tokenToSync)
+		// if err != nil {
+		// 	c.log.Error("failed to remove synced token, error ", err)
+		// }
+
+		// TODO: change token sync status
+		err = c.w.UpdateTokenSyncStatusAsComplete(tokenToSync.TokenID)
 		if err != nil {
-			c.log.Error("failed to remove synced token, error ", err)
+			c.log.Error("failed to update sync status of token ", tokenToSync.TokenID, "error ", err)
 		}
 	}
 
 }
 
-func (c *Core) syncLatestBlock(req *ensweb.Request) *ensweb.Result {
+func (c *Core) syncGenesisAndLatestBlock(req *ensweb.Request) *ensweb.Result {
+	c.log.Debug("received sync request")
 	var tr TCBSyncRequest
 
 	err := c.l.ParseJSON(req, &tr)
@@ -438,36 +481,54 @@ func (c *Core) syncLatestBlock(req *ensweb.Request) *ensweb.Result {
 		c.log.Error("latest block is nil, invalid token chain, failed to share token chain")
 		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "latest block is nil, invalid token chain"}, http.StatusOK)
 	}
-	return c.l.RenderJSON(req, &TCBSyncLatestBlockReply{Status: true, Message: "Got latest block", TCBlock: latestBlock.GetBlock()}, http.StatusOK)
+	genesisBlock := c.w.GetGenesisTokenBlock(tr.Token, tr.TokenType)
+	if genesisBlock == nil {
+		c.log.Error("genesis block is nil, invalid token chain, failed to share token chain")
+		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "genesis block is nil, invalid token chain"}, http.StatusOK)
+	}
+	trep := TCBSyncGenesisAndLatestBlockReply{
+		Status:  true,
+		Message: "Got latest block",
+	}
+	trep.TCBlock[0] = genesisBlock.GetBlock()
+	c.log.Debug("adding genesis block bytes ", trep.TCBlock[0])
+	if latestBlock != genesisBlock {
+		trep.TCBlock[1] = latestBlock.GetBlock()
+		c.log.Debug("adding latest block bytes ", trep.TCBlock[1])
+	}
+	return c.l.RenderJSON(req, &trep, http.StatusOK)
 }
 
-func (c *Core) syncLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRequest) (string, error) {
-	var trep TCBSyncLatestBlockReply
-	err := p.SendJSONRequest("POST", APISyncLatestBlock, nil, &syncReq, &trep, false)
+func (c *Core) syncGenesisAndLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRequest) error {
+	c.log.Debug("sending sync req ", syncReq)
+	var trep TCBSyncGenesisAndLatestBlockReply
+	err := p.SendJSONRequest("POST", APISyncGenesisAndLatestBlock, nil, &syncReq, &trep, false)
 	if err != nil {
-		c.log.Error("Failed to sync latest token chain block", "err", err)
-		return "", err
+		c.log.Error("Failed to sync genesis and latest token chain block", "err", err)
+		return err
 	}
 	if !trep.Status {
-		c.log.Error("Failed to sync latest token chain block", "msg", trep.Message)
-		return "", fmt.Errorf(trep.Message)
+		c.log.Error("Failed to sync genesis and latest token chain block", "msg", trep.Message)
+		return fmt.Errorf(trep.Message)
 	}
-	latestBlock := block.InitBlock(trep.TCBlock, nil)
-	if latestBlock == nil {
-		c.log.Error("Failed to add latest token chain block, invalid block, sync failed", "err", err)
-		return "", fmt.Errorf("failed to add latest token chain block, invalid block, sync failed")
+	for i := range trep.TCBlock {
+		block := block.InitBlock(trep.TCBlock[i], nil)
+		if block == nil {
+			c.log.Error("Failed to add latest token chain block, invalid block, sync failed", "err", err)
+			return fmt.Errorf("failed to add latest token chain block, invalid block, sync failed")
+		}
+		err = c.w.AddTokenBlock(syncReq.Token, block)
+		if err != nil {
+			c.log.Error("Failed to add latest token chain block, syncing failed", "err", err)
+			return err
+		}
 	}
-	err = c.w.AddTokenBlock(syncReq.Token, latestBlock)
-	if err != nil {
-		c.log.Error("Failed to add latest token chain block, syncing failed", "err", err)
-		return "", err
-	}
-	latestBlockID, err := latestBlock.GetBlockID(syncReq.Token)
-	if err != nil {
-		c.log.Error("failed to fetch blockID, err ", err)
-		return "", err
-	}
-	return latestBlockID, nil
+	// latestBlockID, err := latestBlock.GetBlockID(syncReq.Token)
+	// if err != nil {
+	// 	c.log.Error("failed to fetch blockID, err ", err)
+	// 	return "", err
+	// }
+	return nil
 }
 
 func (c *Core) getFromIPFS(path string) ([]byte, error) {
@@ -1053,4 +1114,76 @@ func VerifyTokens(serverURL string, tokens []string) (TokenVerificationResponse,
 
 	return responseBody, nil
 
+}
+
+func (c *Core) GetMissingBlockSequence(tokenSyncInfo TokenSyncInfo) (string, string, error) {
+	blockId := ""
+
+	var blocks [][]byte
+	var nextBlockID string
+	var minMissingBlockId string
+	var maxMissingBlockId string
+	var err error
+
+	//This for loop ensures that we fetch all the blocks in the token chain
+	//starting from genesis block to latest block
+	for {
+		//GetAllTokenBlocks returns next 100 blocks and nextBlockID of the 100th block,
+		//starting from the given block Id, in the direction: genesis to latest block
+		blocks, nextBlockID, err = c.w.GetAllTokenBlocks(tokenSyncInfo.TokenID, tokenSyncInfo.TokenType, blockId)
+		if err != nil {
+			c.log.Error("Failed to get token chain block")
+			return "", "", err
+		}
+		//the nextBlockID of the latest block is empty string
+		blockId = nextBlockID
+		if nextBlockID == "" {
+			break
+		}
+	}
+
+	c.log.Info("token chain length", len(blocks))
+	if len(blocks) == 0 {
+		c.log.Error("invalid token chain of token ", tokenSyncInfo.TokenID)
+		return "", "", fmt.Errorf("missing token chain of token: %v", tokenSyncInfo.TokenID)
+	}
+
+	for i, blockByte := range blocks {
+		blk := block.InitBlock(blockByte, nil)
+		blockHeight, err := blk.GetBlockNumber(tokenSyncInfo.TokenID)
+		if err != nil {
+			c.log.Error("failed to fetch block height")
+			return "", "", err
+			// TODO : handle
+		}
+		if blocks[i+1] == nil {
+			if len(blocks) == i+1 {
+				break
+			}
+			c.log.Error("invalid block at height ", i+1)
+			return "", "", fmt.Errorf("invalid block at height %v", i+1)
+		}
+		nextBlk := block.InitBlock(blocks[i+1], nil)
+		nextBlockHeight, err := nextBlk.GetBlockNumber(tokenSyncInfo.TokenID)
+		if err != nil {
+			c.log.Error("failed to fetch next block height")
+			return "", "", err
+		}
+		if nextBlockHeight-blockHeight > 1 {
+			c.log.Debug("number of blocks missing are ", nextBlockHeight-blockHeight-1, "from", blockHeight+1, "to", nextBlockHeight-1)
+			minMissingBlockId, err = blk.GetBlockID(tokenSyncInfo.TokenID)
+			if err != nil {
+				c.log.Error("failed to get min block id")
+				return "", "", err
+			}
+			maxMissingBlockId, err = nextBlk.GetBlockID(tokenSyncInfo.TokenID)
+			if err != nil {
+				c.log.Error("failed to get max block id")
+				return "", "", err
+			}
+			return minMissingBlockId, maxMissingBlockId, nil
+		}
+	}
+
+	return "", "", nil
 }

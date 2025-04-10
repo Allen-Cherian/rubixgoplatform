@@ -30,6 +30,7 @@ const (
 	TokenIsBeingDoubleSpent
 	TokenIsPinnedAsService
 	TokenIsBurntForFT
+	QuorumPledgedForThisToken
 )
 const (
 	Zero int = iota
@@ -42,6 +43,12 @@ const (
 	RACNFTType
 )
 
+const (
+	SyncUnrequired int = iota
+	SyncIncomplete
+	SyncCompleted
+)
+
 type Token struct {
 	TokenID        string  `gorm:"column:token_id;primaryKey"`
 	ParentTokenID  string  `gorm:"column:parent_token_id"`
@@ -51,6 +58,7 @@ type Token struct {
 	TokenStateHash string  `gorm:"column:token_state_hash"`
 	TransactionID  string  `gorm:"column:transaction_id"`
 	Added          bool    `gorm:"column:added"`
+	SyncStatus     int     `gorm:"column:sync_status"`
 }
 
 func (w *Wallet) CreateToken(t *Token) error {
@@ -1000,4 +1008,54 @@ func (w *Wallet) GetAllPinnedTokens(did string) ([]Token, error) {
 	}
 	return t, nil
 
+}
+
+func (w *Wallet) GetTokensToBeSyncedByQuorum() ([]Token, error) {
+	var tokensList []Token
+	err := w.s.Read(TokenStateHash, &tokensList, "sync_status = ? and token_status = ?", SyncIncomplete, QuorumPledgedForThisToken)
+	if err != nil {
+		if strings.Contains(err.Error(), "no records found") {
+			return []Token{}, nil
+		} else {
+			w.log.Error("Failed to get token states", "err", err)
+			return nil, err
+		}
+	}
+	return tokensList, nil
+}
+
+func (w *Wallet) GetTokensToBeSyncedByReceiver() ([]Token, error) {
+	var tokensList []Token
+	err := w.s.Read(TokenStorage, &tokensList, "sync_status = ? and (token_status = ? or token_status = ?)", SyncIncomplete, TokenIsFree, TokenIsLocked)
+	if err != nil {
+		if strings.Contains(err.Error(), "no records found") {
+			return []Token{}, nil
+		} else {
+			w.log.Error("Failed to get token states", "err", err)
+			return nil, err
+		}
+	}
+	return tokensList, nil
+}
+
+func (w *Wallet) UpdateTokenSyncStatusAsComplete(tokenID string) error {
+	var tokenInfo Token
+	err := w.s.Read(TokenStorage, &tokenInfo, " token_id = ?", tokenID)
+	if err != nil {
+		if strings.Contains(err.Error(), "no records found") {
+			return err
+		} else {
+			w.log.Error("Failed to get token states", "err", err)
+			return err
+		}
+	}
+	if tokenInfo.SyncStatus == SyncIncomplete {
+		tokenInfo.SyncStatus = SyncCompleted
+		err = w.s.Update(TokenStorage, &tokenInfo, "token_id=?", tokenID)
+		if err != nil {
+			w.log.Error("Failed to update token sync status", "err", err)
+			return err
+		}
+	}
+	return nil
 }
