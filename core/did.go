@@ -353,7 +353,7 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 	// check if peer is in same node
 	didInfo, err := c.w.GetDID(didStr)
 	if err == nil {
-		*peerDIDInfo.DIDType = didInfo.Type
+		peerDIDInfo.DIDType = &didInfo.Type
 		peerDIDInfo.PeerID = c.peerID
 		return peerDIDInfo, nil
 	}
@@ -378,7 +378,7 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 	}
 
 	//if did type is not fetched yet or is incorrect, then try to fetch it from db or from the peer itself
-	if *peerDIDInfo.DIDType == -1 || peerDIDInfo.DIDType == nil {
+	if peerDIDInfo.DIDType == nil || *peerDIDInfo.DIDType == -1 {
 		didType, _ := c.w.GetPeerDIDType(didStr)
 		if didType == -1 {
 			c.log.Debug("Connecting with peer to get DID type of peer did", didStr)
