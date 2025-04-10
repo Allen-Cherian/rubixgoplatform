@@ -204,7 +204,7 @@ func (s *Server) APIGetNFTsByDid(req *ensweb.Request) *ensweb.Result {
 
 type ExecuteNFTSwaggoInput struct {
 	NFT        string  `json:"nft"`
-	Owner      string  `json:"owner"`
+	Executor   string  `json:"executor"`
 	Receiver   string  `json:"receiver"`
 	QuorumType int     `json:"quorum_type"`
 	Comment    string  `json:"comment"`
@@ -227,7 +227,7 @@ func (s *Server) APIExecuteNFT(req *ensweb.Request) *ensweb.Result {
 	if err != nil {
 		return s.BasicResponse(req, false, "Invalid input", err)
 	}
-	_, did, ok := util.ParseAddress(executeReq.Owner)
+	_, did, ok := util.ParseAddress(executeReq.Executor)
 	if !ok {
 		return s.BasicResponse(req, false, "Invalid Owner address", nil)
 	}
@@ -237,8 +237,8 @@ func (s *Server) APIExecuteNFT(req *ensweb.Request) *ensweb.Result {
 		return s.BasicResponse(req, false, "Invalid NFT", nil)
 	}
 	is_alphanumeric = regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(did)
-	s.log.Info("The did trying to transfer the nft :", executeReq.Owner)
-	if !strings.HasPrefix(executeReq.Owner, "bafybmi") || len(executeReq.Owner) != 59 || !is_alphanumeric {
+	s.log.Info("The did trying to transfer the nft :", executeReq.Executor)
+	if !strings.HasPrefix(executeReq.Executor, "bafybmi") || len(executeReq.Executor) != 59 || !is_alphanumeric {
 		s.log.Error("Invalid owner DID")
 		return s.BasicResponse(req, false, "Invalid owner DID", nil)
 	}

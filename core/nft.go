@@ -131,7 +131,7 @@ func (c *Core) deployNFT(reqID string, deployReq model.DeployNFTRequest) *model.
 		return resp
 	}
 	//check the NFT from the db
-	nft, err := c.w.GetNFT(did, deployReq.NFT, false)
+	nft, err := c.w.GetNFT(deployReq.NFT, false)
 	if err != nil {
 		c.log.Error("Failed to retrieve nft details from storage", err)
 		resp.Message = err.Error()
@@ -302,7 +302,7 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 		Status: false,
 	}
 
-	_, did, ok := util.ParseAddress(executeReq.Owner)
+	_, did, ok := util.ParseAddress(executeReq.Executor)
 	if !ok {
 		resp.Message = "Invalid Executor DID"
 		return resp
@@ -313,7 +313,7 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 		return resp
 	}
 	//check the nft token from the DB base
-	_, err = c.w.GetNFT(executeReq.Owner, executeReq.NFT, false)
+	_, err = c.w.GetNFT(executeReq.NFT, false)
 	if err != nil {
 		c.log.Error("Failed to retrieve NFT Token details from storage", err)
 		resp.Message = err.Error()
@@ -324,25 +324,20 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 	tokenType := c.TokenType(NFTString)
 	gensysBlock := c.w.GetGenesisTokenBlock(executeReq.NFT, tokenType)
 	if gensysBlock == nil {
-		c.log.Debug("Gensys block is empty - NFT not synced")
-		resp.Message = "Gensys block is empty - NFT not synced"
+		c.log.Debug("Genesis block is empty - NFT not synced")
+		resp.Message = "Genesis block is empty - NFT not synced"
 		return resp
 	}
 	latestBlock := c.w.GetLatestTokenBlock(executeReq.NFT, tokenType)
 	currentOwner := latestBlock.GetOwner()
 	c.log.Info("The current owner of the NFT is :", currentOwner)
 
-	if currentOwner != executeReq.Owner {
-		c.log.Error("NFT not owned by the executor")
-		resp.Message = "NFT not owned by the executor"
-		return resp
-	}
+	// if currentOwner != executeReq.Executor {
+	// 	c.log.Error("NFT not owned by the executor")
+	// 	resp.Message = "NFT not owned by the executor"
+	// 	return resp
+	// }
 
-	if err != nil {
-		c.log.Error("Failed to retrieve NFT Value , ", err)
-		resp.Message = err.Error()
-		return resp
-	}
 	var receiver string
 	var currentNFTValue float64
 
@@ -358,7 +353,7 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 		}
 
 		currentNFTValue = nftToken.TokenValue
-		receiver = executeReq.Owner
+		receiver = nftToken.DID
 	} else {
 		currentNFTValue = executeReq.NFTValue
 		receiver = executeReq.Receiver
@@ -436,7 +431,7 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 	//Rename : TODO
 	eTrans := &ExplorerNFTExecute{
 		NFT:            executeReq.NFT,
-		ExecutorDID:    currentOwner,
+		ExecutorDID:    executeReq.Executor,
 		ReceiverDID:    receiver,
 		Network:        executeReq.QuorumType,
 		Comments:       executeReq.Comment,
