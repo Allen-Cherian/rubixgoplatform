@@ -9,6 +9,7 @@ import (
 	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
+	"github.com/rubixchain/rubixgoplatform/did"
 	"github.com/rubixchain/rubixgoplatform/util"
 	"github.com/rubixchain/rubixgoplatform/wrapper/ensweb"
 )
@@ -163,4 +164,37 @@ func (c *Core) AddPeerDetails(peerDetail wallet.DIDPeerMap) error {
 		return err
 	}
 	return nil
+}
+
+func (c *Core) isDIDInArbitaryAddr(peerDID string) (bool, *wallet.DIDPeerMap, error) {
+	arbitaryAddr := []string{"12D3KooWHwsKu3GS9rh5X5eS9RTKGFy6NcdX1bV1UHcH8sQ8WqCM.bafybmicttgw2qx4grueyytrgln35vq2hbyhznv6ks4fabeakm47u72c26u",
+		"12D3KooWQ2as3FNtvL1MKTeo7XAuBZxSv8QqobxX4AmURxyNe5mX.bafybmicro2m4kove5vsetej63xq4csobtlzchb2c34lp6dnakzkwtq2mmy",
+		"12D3KooWJUJz2ipK78LAiwhc1QUVDvSMjZNBHt4vSAeVAq6FsneA.bafybmics43ef7ldgrogzurh7vukormpgscq4um44bss6mfuopsbjorbyaq",
+		"12D3KooWC5fHUg2yzAHydgenodN52MYPKhpK4DKRfS8TSm3idSUV.bafybmif5qnkfnkkrffxvoofah3fjzkmieohjbgyte35rrjrn3goufaiykq",
+		"12D3KooWDd7c7DAVb38a9vfCFpqxh5nHbDQ4CYjMJuFfBgzpiagK.bafybmie4iynumz2v3obbtkqirxrejjoljjs3l76frvl43wgalqqgprze6q"}
+
+	basicDID := did.BasicDIDMode
+	for _, addr := range arbitaryAddr {
+		// Split into two parts: [PeerID, DID]
+		arbPeerID, arbDID, ok := util.ParseAddress(addr)
+		if !ok {
+			c.log.Error("failed to parse asdvisory addr ", addr)
+			continue //check if the peerDID matches with any other addr in the list
+		}
+		// Compare the arbitrary DID (second part) with the peerDID
+		if arbDID == peerDID {
+			peer := wallet.DIDPeerMap{
+				DID:     arbDID,
+				PeerID:  arbPeerID,
+				DIDType: &basicDID,
+			}
+			err := c.AddPeerDetails(peer)
+			if err != nil {
+				c.log.Error("failed to save peer details of Advisory node ", addr)
+				return true, &peer, fmt.Errorf("failed to save peer details of Advisory node")
+			}
+			return true, nil, nil
+		}
+	}
+	return false, nil, nil
 }
