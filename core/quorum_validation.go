@@ -179,7 +179,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 	var ti []contract.TokenInfo
 	var address string
 	var receiverAddress string
-	tokensSyncInfo := make([]TokenSyncInfo, 0)
 	if cr.Mode == SmartContractDeployMode || cr.Mode == NFTDeployMode {
 		ti = sc.GetCommitedTokensInfo()
 		address = cr.DeployerPeerID + "." + sc.GetDeployerDID()
@@ -200,6 +199,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		return false, err
 	}
 	defer p.Close()
+	tokensSyncInfo := make([]TokenSyncInfo, len(ti))
 	for i := range ti {
 		err := c.syncTokenChainFrom(p, ti[i].BlockID, ti[i].Token, ti[i].TokenType)
 		if err != nil {

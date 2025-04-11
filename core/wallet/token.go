@@ -566,6 +566,8 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 	// TODO :: Needs to be address
 	err := w.CreateTokenBlock(b)
 	if err != nil {
+		blockId, _ := b.GetBlockID(ti[0].Token)
+		fmt.Println("failed to create token block, block Id", blockId)
 		return nil, err
 	}
 
@@ -622,6 +624,7 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 
 			err = w.s.Write(TokenStorage, &t)
 			if err != nil {
+				fmt.Println("failed to write to db, token ", tokenInfo.Token)
 				return nil, err
 			}
 		}
@@ -643,6 +646,7 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 
 		err = w.s.Update(TokenStorage, &t, "token_id=?", tokenInfo.Token)
 		if err != nil {
+			fmt.Println("failed to update to db, token ", tokenInfo.Token)
 			return nil, err
 		}
 		senderAddress := senderPeerId + "." + b.GetSenderDID()
@@ -650,6 +654,7 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 		//Pinnig the whole tokens and pat tokens
 		ok, err := w.Pin(tokenInfo.Token, role, did, b.GetTid(), senderAddress, receiverAddress, tokenInfo.TokenValue)
 		if err != nil {
+			fmt.Println("failed to pin token ", tokenInfo.Token)
 			return nil, err
 		}
 		if !ok {
@@ -1056,6 +1061,29 @@ func (w *Wallet) UpdateTokenSyncStatusAsComplete(tokenID string) error {
 			w.log.Error("Failed to update token sync status", "err", err)
 			return err
 		}
+	}
+	return nil
+}
+
+func (w *Wallet) UpdateTokenSyncStatus(tokenID string, syncStatus int) error {
+	if syncStatus < SyncUnrequired || syncStatus > SyncCompleted {
+		return fmt.Errorf("invalid sync status, cannot update")
+	}
+	var tokenInfo Token
+	err := w.s.Read(TokenStorage, &tokenInfo, " token_id = ?", tokenID)
+	if err != nil {
+		if strings.Contains(err.Error(), "no records found") {
+			return err
+		} else {
+			w.log.Error("Failed to get token states", "err", err)
+			return err
+		}
+	}
+	tokenInfo.SyncStatus = syncStatus
+	err = w.s.Update(TokenStorage, &tokenInfo, "token_id=?", tokenID)
+	if err != nil {
+		w.log.Error("Failed to update token sync status", "err", err)
+		return err
 	}
 	return nil
 }

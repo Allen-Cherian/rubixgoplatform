@@ -11,9 +11,6 @@ import (
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
 	"github.com/rubixchain/rubixgoplatform/did"
-	"github.com/rubixchain/rubixgoplatform/rac"
-	"github.com/rubixchain/rubixgoplatform/token"
-	"github.com/rubixchain/rubixgoplatform/util"
 	"github.com/rubixchain/rubixgoplatform/wrapper/uuid"
 )
 
@@ -258,7 +255,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	tis := make([]contract.TokenInfo, 0)
 	tokenListForExplorer := []Token{}
-	transTokensSyncInfo := make(map[string]GenesisAndLatestBlocks, len(tokensForTxn))
+	// transTokensSyncInfo := make(map[string]GenesisAndLatestBlocks, len(tokensForTxn))
 
 	for i := range tokensForTxn {
 		tts := "rbt"
@@ -289,49 +286,49 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		tis = append(tis, ti)
 		tokenListForExplorer = append(tokenListForExplorer, Token{TokenHash: ti.Token, TokenValue: ti.TokenValue})
 
-		genesis := c.w.GetGenesisTokenBlock(ti.Token, ti.TokenType)
-		genesisNLatestBlocks := GenesisAndLatestBlocks{
-			GenesisBlock: genesis.GetBlock(),
-		}
-		if c.TokenType(PartString) == ti.TokenType {
-			// get parent token id
-			parentToken, _, err := genesis.GetParentDetials(ti.Token)
-			if err != nil {
-				c.log.Error("failed to fetch parent token detials", "err", err, "token", ti.Token)
-				resp.Message = fmt.Sprintf("failed to fetch parent token detials, err : %v, token : %v", err, ti.Token)
-				return resp
-			}
-			// get parent token type
-			b, err := c.getFromIPFS(parentToken)
-			if err != nil {
-				c.log.Error("failed to get parent token details from ipfs", "err", err, "parent token", parentToken)
-				resp.Message = fmt.Sprintf("failed to get parent token details from ipfs", "err", err, "parent token", parentToken)
-				return resp
-			}
-			_, iswholeToken, _ := token.CheckWholeToken(string(b), c.testNet)
+		// genesis := c.w.GetGenesisTokenBlock(ti.Token, ti.TokenType)
+		// genesisNLatestBlocks := GenesisAndLatestBlocks{
+		// 	GenesisBlock: genesis.GetBlock(),
+		// }
+		// if c.TokenType(PartString) == ti.TokenType {
+		// 	// get parent token id
+		// 	parentToken, _, err := genesis.GetParentDetials(ti.Token)
+		// 	if err != nil {
+		// 		c.log.Error("failed to fetch parent token detials", "err", err, "token", ti.Token)
+		// 		resp.Message = fmt.Sprintf("failed to fetch parent token detials, err : %v, token : %v", err, ti.Token)
+		// 		return resp
+		// 	}
+		// 	// get parent token type
+		// 	b, err := c.getFromIPFS(parentToken)
+		// 	if err != nil {
+		// 		c.log.Error("failed to get parent token details from ipfs", "err", err, "parent token", parentToken)
+		// 		resp.Message = fmt.Sprintf("failed to get parent token details from ipfs", "err", err, "parent token", parentToken)
+		// 		return resp
+		// 	}
+		// 	_, iswholeToken, _ := token.CheckWholeToken(string(b), c.testNet)
 
-			parentTokenType := token.RBTTokenType
-			if !iswholeToken {
-				blk := util.StrToHex(string(b))
-				rb, err := rac.InitRacBlock(blk, nil)
-				if err != nil {
-					c.log.Error("invalid token, invalid rac block of parent token", "err", err)
-					resp.Message = "failed to get parent token info for token " + ti.Token
-					return resp
-				}
-				parentTokenType = rac.RacType2TokenType(rb.GetRacType())
-			}
+		// 	parentTokenType := token.RBTTokenType
+		// 	if !iswholeToken {
+		// 		blk := util.StrToHex(string(b))
+		// 		rb, err := rac.InitRacBlock(blk, nil)
+		// 		if err != nil {
+		// 			c.log.Error("invalid token, invalid rac block of parent token", "err", err)
+		// 			resp.Message = "failed to get parent token info for token " + ti.Token
+		// 			return resp
+		// 		}
+		// 		parentTokenType = rac.RacType2TokenType(rb.GetRacType())
+		// 	}
 
-			// get parent genesis and latest blocks
-			parentGenesis := c.w.GetGenesisTokenBlock(parentToken, parentTokenType)
-			parentLatest := c.w.GetLatestTokenBlock(parentToken, parentTokenType)
-			genesisNLatestBlocks.ParentGenesisBlock = parentGenesis.GetBlock()
-			genesisNLatestBlocks.ParentLatestBlock = parentLatest.GetBlock()
-		} else {
-			if genesis != blk { // TODO : try using block id or number to compare
-				genesisNLatestBlocks.LatestBlock = blk.GetBlock()
-			}
-		}
+		// 	// get parent genesis and latest blocks
+		// 	parentGenesis := c.w.GetGenesisTokenBlock(parentToken, parentTokenType)
+		// 	parentLatest := c.w.GetLatestTokenBlock(parentToken, parentTokenType)
+		// 	genesisNLatestBlocks.ParentGenesisBlock = parentGenesis.GetBlock()
+		// 	genesisNLatestBlocks.ParentLatestBlock = parentLatest.GetBlock()
+		// } else {
+		// 	if genesis != blk { // TODO : try using block id or number to compare
+		// 		genesisNLatestBlocks.LatestBlock = blk.GetBlock()
+		// 	}
+		// }
 	}
 
 	//check if sender has previous block pledged quorums' details
@@ -404,7 +401,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	}
 
 	cr := getConsensusRequest(req.Type, c.peerID, rpeerid, sc.GetBlock(), txEpoch, isSelfRBTTransfer)
-	cr.TransTokenSyncInfo = transTokensSyncInfo
+	// cr.TransTokenSyncInfo = transTokensSyncInfo
 
 	td, _, pds, err := c.initiateConsensus(cr, sc, dc)
 	if err != nil {

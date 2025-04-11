@@ -915,7 +915,7 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 
 func (c *Core) updateReceiverToken(
 	senderAddress string, receiverAddress string, tokenInfo []contract.TokenInfo, tokenChainBlock []byte,
-	quorumList []string, quorumInfo []QuorumDIDPeerMap, transactionEpoch int, pinningServiceMode bool, transTokensSyncInfo map[string]GenesisAndLatestBlocks,
+	quorumList []string, quorumInfo []QuorumDIDPeerMap, transactionEpoch int, pinningServiceMode bool,
 ) ([]string, *ipfsport.Peer, error) {
 	var receiverPeerId string = ""
 	var receiverDID string = ""
@@ -1137,7 +1137,7 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 		sr.QuorumInfo,
 		sr.TransactionEpoch,
 		sr.PinningServiceMode,
-		sr.TransTokenSyncInfo,
+		// sr.TransTokenSyncInfo,
 	)
 	if err != nil {
 		c.log.Error(err.Error())
@@ -1149,7 +1149,7 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 	}
 
 	// receiver fetches tokens to be synced
-	tokensSyncInfo := make([]TokenSyncInfo, 0)
+	tokensSyncInfo := make([]TokenSyncInfo, len(sr.TokenInfo))
 	for i, token := range sr.TokenInfo {
 		tokensSyncInfo[i].TokenID = token.Token
 		tokensSyncInfo[i].TokenType = token.TokenType

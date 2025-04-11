@@ -58,7 +58,7 @@ type ConensusRequest struct {
 	PinningNodePeerID  string                            `json:"pinning_node_peer_id"`
 	NFT                string                            `json:"nft"`
 	FTinfo             model.FTInfo                      `json:"ft_info"`
-	TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"tokens_sync_info"`
+	// TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"tokens_sync_info"`
 }
 
 type ConensusReply struct {
@@ -124,7 +124,7 @@ type SendTokenRequest struct {
 	TransactionEpoch   int                               `json:"transaction_epoch"`
 	PinningServiceMode bool                              `json:"pinning_service_mode"`
 	FTInfo             model.FTInfo                      `json:"ft_info"`
-	TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"token_chain_sync_info"`
+	// TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"token_chain_sync_info"`
 }
 
 type GenesisAndLatestBlocks struct {
@@ -505,7 +505,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			QuorumList:         cr.QuorumList,
 			TransactionEpoch:   cr.TransactionEpoch,
 			PinningServiceMode: false,
-			TransTokenSyncInfo: cr.TransTokenSyncInfo,
+			// TransTokenSyncInfo: cr.TransTokenSyncInfo,
 		}
 
 		//fetching quorums' info from PeerDIDTable to share with the receiver
@@ -1196,7 +1196,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		// Self update for self transfer tokens
-		updatedTokenHashes, _, err := c.updateReceiverToken(selfAddress, "", ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, false, nil)
+		updatedTokenHashes, _, err := c.updateReceiverToken(selfAddress, "", ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, false)
 		if err != nil {
 			errMsg := fmt.Errorf("failed while update of self transfer tokens, err: %v", err)
 			c.log.Error(errMsg.Error())
