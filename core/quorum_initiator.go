@@ -190,6 +190,7 @@ func (c *Core) QuroumSetup() {
 	c.l.AddRoute(APIRecoverPinnedRBT, "POST", c.recoverPinnedToken)
 	c.l.AddRoute(APIRequestSigningHash, "GET", c.requestSigningHash)
 	c.l.AddRoute(APISendFTToken, "POST", c.updateReceiverFTHandle)
+	c.l.AddRoute(APICheckPinRole, "GET", c.checkPinRole)
 	if c.arbitaryMode {
 		c.l.AddRoute(APIMapDIDArbitration, "POST", c.mapDIDArbitration)
 		c.l.AddRoute(APICheckDIDArbitration, "GET", c.chekDIDArbitration)
@@ -624,6 +625,16 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
 
+			blockHeight, err := b.GetBlockNumber(tokeninfo.Token)
+			if err != nil {
+				c.log.Error("failed to get latest block height of token ", tokeninfo.Token)
+			}
+
+			// if latest block is genesis block of a whole token, then the signer(s) is(are) advisory node(s), not quorum(s)
+			// this is the case of all migrated RBTs
+			if blockHeight == 0 && tokeninfo.TokenValue == 1.0 {
+				continue
+			}
 			previousQuorumDIDs, err := b.GetSigner()
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("unable to fetch previous quorum's DIDs for token: %v, err: %v", tokeninfo.Token, err)
