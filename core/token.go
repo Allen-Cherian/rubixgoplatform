@@ -331,7 +331,10 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		return err
 	}
 	// update sync status to incomplete
-	_ = c.w.UpdateTokenSyncStatus(syncReq.Token, wallet.SyncIncomplete)
+	err = c.w.UpdateTokenSyncStatus(syncReq.Token, wallet.SyncIncomplete)
+	if err != nil {
+		c.log.Error("failed to update token sync status as incomplete, token ", token)
+	}
 
 	// //prapre token sync info
 	// tokenSyncInfo := wallet.TokenSyncInfo{

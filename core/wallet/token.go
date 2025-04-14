@@ -643,6 +643,7 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 		t.TokenStatus = tokenStatus
 		t.TransactionID = b.GetTid()
 		t.TokenStateHash = tokenHashMap[tokenInfo.Token]
+		t.SyncStatus = SyncIncomplete
 
 		err = w.s.Update(TokenStorage, &t, "token_id=?", tokenInfo.Token)
 		if err != nil {

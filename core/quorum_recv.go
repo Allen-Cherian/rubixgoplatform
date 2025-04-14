@@ -1156,6 +1156,8 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 	}
 	tokenSyncMap := make(map[string][]TokenSyncInfo)
 	tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
+
+	// syncing starts in the background
 	go c.syncFullTokenChains(tokenSyncMap)
 
 	crep.Status = true

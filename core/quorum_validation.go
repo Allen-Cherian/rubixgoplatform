@@ -233,17 +233,18 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			c.log.Error("Failed to get first token chain block")
 			return false, fmt.Errorf("failed to get first token chain block %v", ti[i].Token)
 		}
+		var parentToken string
 		if c.TokenType(PartString) == ti[i].TokenType {
-			pt, _, err := genesisBlock.GetParentDetials(ti[i].Token)
+			parentToken, _, err := genesisBlock.GetParentDetials(ti[i].Token)
 			if err != nil {
 				// p.Close()
 				c.log.Error("failed to fetch parent token detials", "err", err, "token", ti[i].Token)
 				return false, err
 			}
-			err = c.syncParentToken(p, pt)
+			err = c.syncParentToken(p, parentToken)
 			if err != nil {
 				// p.Close()
-				c.log.Error("failed to sync parent token chain", "token", pt)
+				c.log.Error("failed to sync parent token chain", "token", parentToken)
 				return false, err
 			}
 
@@ -265,7 +266,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			// 	c.log.Error("Failed to add parent's latest token chain block of token", ti[i].Token, "err", err)
 			// 	return false, err
 			// }
-			_, err = c.w.Pin(pt, wallet.ParentTokenPinByQuorumRole, quorumDID, cr.TransactionID, address, receiverAddress, ti[i].TokenValue)
+			_, err = c.w.Pin(parentToken, wallet.ParentTokenPinByQuorumRole, quorumDID, cr.TransactionID, address, receiverAddress, ti[i].TokenValue)
 			if err != nil {
 				// p.Close()
 				c.log.Error("Failed to Pin parent token in Quorum", "err", err)
@@ -318,6 +319,54 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		if !signatureValidation || err != nil {
 			// p.Close()
 			c.log.Error("Failed to validate token ownership ", "token ID:", ti[i].Token)
+			return false, err
+		}
+
+		// add trans tokens to TokensTable with token status = 17
+		// Check if token already exists
+		var t wallet.Token
+		tokenInfo, err := c.w.ReadToken(ti[i].Token)
+		if err != nil || tokenInfo.TokenID == "" {
+			// // Token doesn't exist, proceed to handle it
+			// dir := util.GetRandString()
+			// if err := util.CreateDir(dir); err != nil {
+			// 	c.log.Error("Failed to create directory", "err", err)
+			// 	return false, err
+			// }
+			// defer os.RemoveAll(dir)
+
+			// // Get the token
+			// if err := w.Get(tokenInfo.Token, did, OwnerRole, dir); err != nil {
+			// 	w.log.Error("Failed to get token", "err", err)
+			// 	return nil, err
+			// }
+
+			// Create new token entry
+			t = wallet.Token{
+				TokenID:       ti[i].Token,
+				TokenValue:    ti[i].TokenValue,
+				ParentTokenID: parentToken,
+				DID:           ti[i].OwnerDID,
+			}
+
+			err = c.w.CreateToken(&t)
+			if err != nil {
+				c.log.Error("failed to write to db, token ", ti[i].Token)
+				return false, err
+			}
+		}
+
+		// Update token status
+		t.DID = ownerDID
+		t.TokenStatus = wallet.QuorumPledgedForThisToken
+		t.TransactionID = b.GetTid()
+	
+		// t.TokenStateHash = tokenHashMap[ti[i].Token]
+		t.SyncStatus = wallet.SyncIncomplete
+
+		err = c.w.UpdateToken(&t)
+		if err != nil {
+			fmt.Println("failed to update to db, token ", ti[i].Token)
 			return false, err
 		}
 
