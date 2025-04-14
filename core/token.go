@@ -365,9 +365,10 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo TokenSyncInfo)
 	if minMissingBlockId == "" && maxMissingblockId == "" {
 		c.log.Debug("token chain is completely synced")
 		// update token sync status
-		err := c.w.UpdateTokenSyncStatusAsComplete(tokenSyncInfo.TokenID)
+		err = c.w.UpdateTokenSyncStatus(tokenSyncInfo.TokenID, wallet.SyncCompleted)
 		if err != nil {
-			c.log.Error("failed to update token sync status")
+			c.log.Error("failed to update token sync status for token ", tokenSyncInfo.TokenID)
+			return err
 		}
 	}
 	//prepare sync request
@@ -474,11 +475,6 @@ func (c *Core) syncFullTokenChains(tokenSyncMap map[string][]TokenSyncInfo) {
 			// 	c.log.Error("failed to remove synced token, error ", err)
 			// }
 
-			// TODO: change token sync status
-			err = c.w.UpdateTokenSyncStatusAsComplete(tokenToSync.TokenID)
-			if err != nil {
-				c.log.Error("failed to update sync status of token ", tokenToSync.TokenID, "error ", err)
-			}
 		}
 	}
 
@@ -1290,8 +1286,7 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 		if err != nil {
 			c.log.Error("failed to restart incomplete syncing, failed to get txn info of token ", token.TokenID)
 		}
-		senderDID := txnInfo.SenderDID
-		tokenSyncMap[senderDID] = append(tokenSyncMap[senderDID], TokenSyncInfo{TokenID: token.TokenID, TokenType: tokenType})
+		tokenSyncMap[txnInfo.SenderDID] = append(tokenSyncMap[txnInfo.SenderDID], TokenSyncInfo{TokenID: token.TokenID, TokenType: tokenType})
 	}
 
 	// restart all incomplete token chain sync as a background process

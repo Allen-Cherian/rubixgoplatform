@@ -1043,28 +1043,6 @@ func (w *Wallet) GetTokensToBeSynced() ([]Token, error) {
 	return tokensList, nil
 }
 
-func (w *Wallet) UpdateTokenSyncStatusAsComplete(tokenID string) error {
-	var tokenInfo Token
-	err := w.s.Read(TokenStorage, &tokenInfo, " token_id = ?", tokenID)
-	if err != nil {
-		if strings.Contains(err.Error(), "no records found") {
-			return err
-		} else {
-			w.log.Error("Failed to get token states", "err", err)
-			return err
-		}
-	}
-	if tokenInfo.SyncStatus == SyncIncomplete {
-		tokenInfo.SyncStatus = SyncCompleted
-		err = w.s.Update(TokenStorage, &tokenInfo, "token_id=?", tokenID)
-		if err != nil {
-			w.log.Error("Failed to update token sync status", "err", err)
-			return err
-		}
-	}
-	return nil
-}
-
 func (w *Wallet) UpdateTokenSyncStatus(tokenID string, syncStatus int) error {
 	if syncStatus < SyncUnrequired || syncStatus > SyncCompleted {
 		return fmt.Errorf("invalid sync status, cannot update")
