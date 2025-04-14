@@ -327,7 +327,9 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 	}
 
 	// sync full token chain of all the tokens in syncing Queue
-	go c.syncFullTokenChains(p.GetPeerDID(), p.GetPeerID(), tokensSyncInfo)
+	tokenSyncMap := make(map[string][]TokenSyncInfo)
+	tokenSyncMap[p.GetPeerID()+"."+p.GetPeerDID()] = tokensSyncInfo
+	go c.syncFullTokenChains(tokenSyncMap)
 
 	// for i := range wt {
 	// 	c.log.Debug("Requesting Token status")

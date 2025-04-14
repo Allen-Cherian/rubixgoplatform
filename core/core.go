@@ -334,6 +334,7 @@ func (c *Core) SetupCore() error {
 	c.SetupToken()
 	c.QuroumSetup()
 	c.PinService()
+	c.RestartIncompleteTokenChainSyncs()
 	// c.selfTransferService()
 	return nil
 }

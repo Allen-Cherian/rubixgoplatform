@@ -1154,7 +1154,9 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 		tokensSyncInfo[i].TokenID = token.Token
 		tokensSyncInfo[i].TokenType = token.TokenType
 	}
-	go c.syncFullTokenChains(senderPeer.GetPeerDID(), senderPeer.GetPeerID(), tokensSyncInfo)
+	tokenSyncMap := make(map[string][]TokenSyncInfo)
+	tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
+	go c.syncFullTokenChains(tokenSyncMap)
 
 	crep.Status = true
 	crep.Message = "Token received successfully"

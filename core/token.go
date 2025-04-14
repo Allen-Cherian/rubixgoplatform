@@ -412,18 +412,11 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo TokenSyncInfo)
 	return nil
 }
 
-func (c *Core) syncFullTokenChains(peerDID, peerId string, tokenSyncInfo []TokenSyncInfo) {
+func (c *Core) syncFullTokenChains(tokenSyncMap map[string][]TokenSyncInfo) {
 	// PeerMap := make(map[string]*ipfsport.Peer)
 	// if p != nil {
 	// 	PeerMap[p.GetPeerID()] = p
 	// }
-
-	p, err := c.getPeer(peerId+"."+peerDID, "")
-	if err != nil {
-		c.log.Error("failed to sync full token chain, failed to open peer connection with peer ", peerDID)
-		return
-	}
-	defer p.Close()
 
 	// tokenSyncInfo, err := c.w.SyncTokensFromQueue(p)
 	// if err != nil {
@@ -444,39 +437,48 @@ func (c *Core) syncFullTokenChains(peerDID, peerId string, tokenSyncInfo []Token
 	// 	}
 	// }()
 
-	// start syncing all tokens in queue
-	for _, tokenToSync := range tokenSyncInfo {
-		c.log.Debug("syncing token ", tokenToSync.TokenID)
-		// //TODO : check when p is nil and p is not nil
-
-		// //Peer ID from which token chain needs to be synced
-		// peerID := tokenToSync.SyncFromPeer
-
-		// if _, exists := PeerMap[peerID]; !exists {
-		// 	peer, _ := c.pm.OpenPeerConn(peerID, "", c.getCoreAppName(peerID))
-		// 	PeerMap[peerID] = peer
-		// }
-
-		err := c.syncFullTokenChain(p, tokenToSync)
+	// sync sequencially for each peer
+	for peerAddr, tokenSyncInfo := range tokenSyncMap {
+		p, err := c.getPeer(peerAddr, "")
 		if err != nil {
-			c.log.Error("failed to sync token chain for token ", tokenToSync.TokenID, "error", err)
-			// update sync status to incomplete
-			_ = c.w.UpdateTokenSyncStatus(tokenToSync.TokenID, wallet.SyncIncomplete)
-			continue
+			c.log.Error("failed to sync full token chain, failed to open peer connection with peer ", peerAddr)
+			return
 		}
-		// update sync status to completed
-		_ = c.w.UpdateTokenSyncStatus(tokenToSync.TokenID, wallet.SyncCompleted)
+		defer p.Close()
+		// start syncing all tokens in queue
+		for _, tokenToSync := range tokenSyncInfo {
+			c.log.Debug("syncing token ", tokenToSync.TokenID)
+			// //TODO : check when p is nil and p is not nil
 
-		// // if token chain synced completely, then remove token from sync queue
-		// err = c.w.RemoveTokenSyncDetails(tokenToSync)
-		// if err != nil {
-		// 	c.log.Error("failed to remove synced token, error ", err)
-		// }
+			// //Peer ID from which token chain needs to be synced
+			// peerID := tokenToSync.SyncFromPeer
 
-		// TODO: change token sync status
-		err = c.w.UpdateTokenSyncStatusAsComplete(tokenToSync.TokenID)
-		if err != nil {
-			c.log.Error("failed to update sync status of token ", tokenToSync.TokenID, "error ", err)
+			// if _, exists := PeerMap[peerID]; !exists {
+			// 	peer, _ := c.pm.OpenPeerConn(peerID, "", c.getCoreAppName(peerID))
+			// 	PeerMap[peerID] = peer
+			// }
+
+			err := c.syncFullTokenChain(p, tokenToSync)
+			if err != nil {
+				c.log.Error("failed to sync token chain for token ", tokenToSync.TokenID, "error", err)
+				// update sync status to incomplete
+				_ = c.w.UpdateTokenSyncStatus(tokenToSync.TokenID, wallet.SyncIncomplete)
+				continue
+			}
+			// update sync status to completed
+			_ = c.w.UpdateTokenSyncStatus(tokenToSync.TokenID, wallet.SyncCompleted)
+
+			// // if token chain synced completely, then remove token from sync queue
+			// err = c.w.RemoveTokenSyncDetails(tokenToSync)
+			// if err != nil {
+			// 	c.log.Error("failed to remove synced token, error ", err)
+			// }
+
+			// TODO: change token sync status
+			err = c.w.UpdateTokenSyncStatusAsComplete(tokenToSync.TokenID)
+			if err != nil {
+				c.log.Error("failed to update sync status of token ", tokenToSync.TokenID, "error ", err)
+			}
 		}
 	}
 
@@ -1265,4 +1267,34 @@ func (c *Core) GetMissingBlockSequence(tokenSyncInfo TokenSyncInfo) (string, str
 	}
 
 	return "", "", nil
+}
+
+func (c *Core) RestartIncompleteTokenChainSyncs() {
+	// read tokens to be synced from TokensTable
+	tokensList, err := c.w.GetTokensToBeSynced()
+	if err != nil {
+		c.log.Error("failed to restart incomplete syncing, err", err)
+		return
+	}
+
+	tokenSyncMap := make(map[string][]TokenSyncInfo)
+	for _, token := range tokensList {
+		// fetch token type
+		tokenTypeStr := RBTString
+		if token.TokenValue < 1.0 {
+			tokenTypeStr = PartString
+		}
+		tokenType := c.TokenType(tokenTypeStr)
+		// fetch sender did for the respective txn id
+		txnInfo, err := c.w.GetTransactionDetailsbyTransactionId(token.TransactionID)
+		if err != nil {
+			c.log.Error("failed to restart incomplete syncing, failed to get txn info of token ", token.TokenID)
+		}
+		senderDID := txnInfo.SenderDID
+		tokenSyncMap[senderDID] = append(tokenSyncMap[senderDID], TokenSyncInfo{TokenID: token.TokenID, TokenType: tokenType})
+	}
+
+	// restart all incomplete token chain sync as a background process
+	go c.syncFullTokenChains(tokenSyncMap)
+
 }
