@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"sync"
 
 	ipfsnode "github.com/ipfs/go-ipfs-api"
@@ -97,12 +98,12 @@ func (c *Core) validateSigner(b *block.Block, selfDID string, p *ipfsport.Peer) 
 	return true, nil
 }
 
-func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) error {
+func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 	var issueType int
 	b, err := c.getFromIPFS(pt)
 	if err != nil {
 		c.log.Error("failed to get parent token details from ipfs", "err", err, "token", pt)
-		return err
+		return -1, err
 	}
 	_, iswholeToken, _ := token.CheckWholeToken(string(b), c.testNet)
 
@@ -113,7 +114,7 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) error {
 		rb, err := rac.InitRacBlock(blk, nil)
 		if err != nil {
 			c.log.Error("invalid token, invalid rac block", "err", err)
-			return err
+			return -1, err
 		}
 		tt = rac.RacType2TokenType(rb.GetRacType())
 		if c.TokenType(PartString) == tt {
@@ -131,12 +132,12 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) error {
 	err = c.syncTokenChainFrom(p, lbID, pt, tt)
 	if err != nil {
 		c.log.Error("failed to sync token chain block", "err", err)
-		return fmt.Errorf("failed to sync tokenchain Parent Token: %v, issueType: %v", pt, TokenChainNotSynced)
+		return -1, fmt.Errorf("failed to sync tokenchain Parent Token: %v, issueType: %v", pt, TokenChainNotSynced)
 	}
 	ptb := c.w.GetLatestTokenBlock(pt, tt)
 	if ptb == nil {
 		c.log.Error("Failed to get latest token chain block", "token", pt)
-		return fmt.Errorf("failed to get latest block")
+		return -1, fmt.Errorf("failed to get latest block")
 	}
 	td, err := c.w.ReadToken(pt)
 	if err != nil {
@@ -150,12 +151,12 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) error {
 			gb := c.w.GetGenesisTokenBlock(pt, tt)
 			if gb == nil {
 				c.log.Error("failed to get genesis token chain block", "token", pt)
-				return fmt.Errorf("failed to get genesis token chain block")
+				return -1, fmt.Errorf("failed to get genesis token chain block")
 			}
 			ppt, _, err := gb.GetParentDetials(pt)
 			if err != nil {
 				c.log.Error("failed to get genesis token chain block", "token", pt, "err", err)
-				return fmt.Errorf("failed to get genesis token chain block")
+				return -1, fmt.Errorf("failed to get genesis token chain block")
 			}
 			td.ParentTokenID = ppt
 		}
@@ -164,14 +165,24 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) error {
 		td.TokenStatus = wallet.TokenIsBurnt
 		c.w.UpdateToken(td)
 	}
+	// update sync status to incomplete
+	if td.SyncStatus == wallet.SyncUnrequired {
+		err = c.w.UpdateTokenSyncStatus(pt, wallet.SyncIncomplete)
+		if err != nil {
+			if !strings.Contains(err.Error(), "no records found") {
+				c.log.Error("failed to update parent token sync status as incomplete, token ", pt)
+			}
+		}
+		
+	}
 	if ptb.GetTransType() != block.TokenBurntType {
 		issueType = ParentTokenNotBurned // parent token is not in burnt stage
 		//Commenting gps
 		//fmt.Println("block state is ", ptb.GetTransTokens(), " expected value is ", block.TokenBurntType)
 		c.log.Error("parent token is not in burnt stage", "token", pt)
-		return fmt.Errorf("parent token is not in burnt stage. pt: %v, issueType: %v", pt, issueType)
+		return -1, fmt.Errorf("parent token is not in burnt stage. pt: %v, issueType: %v", pt, issueType)
 	}
-	return nil
+	return tt, nil
 }
 
 func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract, quorumDID string) (bool, error) {
@@ -199,7 +210,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		return false, err
 	}
 	defer p.Close()
-	tokensSyncInfo := make([]TokenSyncInfo, len(ti))
+	tokensSyncInfo := make([]TokenSyncInfo, 0)
 	for i := range ti {
 		err := c.syncTokenChainFrom(p, ti[i].BlockID, ti[i].Token, ti[i].TokenType)
 		if err != nil {
@@ -241,12 +252,13 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 				c.log.Error("failed to fetch parent token detials", "err", err, "token", ti[i].Token)
 				return false, err
 			}
-			err = c.syncParentToken(p, parentToken)
+			parentTokenType, err := c.syncParentToken(p, parentToken)
 			if err != nil {
 				// p.Close()
 				c.log.Error("failed to sync parent token chain", "token", parentToken)
 				return false, err
 			}
+			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: parentToken, TokenType: parentTokenType})
 
 			// // add parent blocks
 			// parentGenesisBlock := block.InitBlock(blocksToSync.ParentGenesisBlock, nil)
@@ -324,7 +336,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 
 		// add trans tokens to TokensTable with token status = 17
 		// Check if token already exists
-		var t wallet.Token
 		tokenInfo, err := c.w.ReadToken(ti[i].Token)
 		if err != nil || tokenInfo.TokenID == "" {
 			// // Token doesn't exist, proceed to handle it
@@ -342,37 +353,36 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			// }
 
 			// Create new token entry
-			t = wallet.Token{
+			tokenInfo := wallet.Token{
 				TokenID:       ti[i].Token,
 				TokenValue:    ti[i].TokenValue,
 				ParentTokenID: parentToken,
 				DID:           ti[i].OwnerDID,
 			}
 
-			err = c.w.CreateToken(&t)
+			err = c.w.CreateToken(&tokenInfo)
 			if err != nil {
-				c.log.Error("failed to write to db, token ", ti[i].Token)
+				c.log.Error("failed to write to db, token ", ti[i].Token, "err", err)
 				return false, err
 			}
 		}
 
 		// Update token status
-		t.DID = ownerDID
-		t.TokenStatus = wallet.QuorumPledgedForThisToken
-		t.TransactionID = b.GetTid()
-	
-		// t.TokenStateHash = tokenHashMap[ti[i].Token]
-		t.SyncStatus = wallet.SyncIncomplete
+		tokenInfo.DID = senderDID
+		tokenInfo.TokenStatus = wallet.QuorumPledgedForThisToken
+		tokenInfo.TransactionID = b.GetTid()
 
-		err = c.w.UpdateToken(&t)
+		// t.TokenStateHash = tokenHashMap[ti[i].Token]
+		tokenInfo.SyncStatus = wallet.SyncIncomplete
+
+		err = c.w.UpdateToken(tokenInfo)
 		if err != nil {
-			fmt.Println("failed to update to db, token ", ti[i].Token)
+			c.log.Error("failed to update to db, token ", ti[i].Token, "err", err)
 			return false, err
 		}
 
 		// quorum fetches tokens to be synced
-		tokensSyncInfo[i].TokenID = ti[i].Token
-		tokensSyncInfo[i].TokenType = ti[i].TokenType
+		tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: ti[i].Token, TokenType: ti[i].TokenType})
 	}
 
 	// sync full token chain of all the tokens in syncing Queue

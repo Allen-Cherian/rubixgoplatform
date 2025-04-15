@@ -962,27 +962,6 @@ func (c *Core) updateReceiverToken(
 				return nil, senderPeer, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
 			}
 
-			// blocksToSync := transTokensSyncInfo[ti.Token]
-			// genesisBlock := block.InitBlock(blocksToSync.GenesisBlock, nil)
-			// if genesisBlock == nil {
-			// 	c.log.Error("Failed to add genesis block, invalid genesis block of token", ti.Token)
-			// 	return nil, nil, fmt.Errorf("Failed to add genesis block, invalid genesis block of token : %v", ti.Token)
-			// }
-			// err = c.w.AddTokenBlock(ti.Token, genesisBlock)
-			// if err != nil {
-			// 	c.log.Error("Failed to add genesis block of token", ti.Token, "err", err)
-			// 	return nil, nil, err
-			// }
-
-			// if blocksToSync.LatestBlock != nil {
-			// 	latestBlock := block.InitBlock(blocksToSync.LatestBlock, nil)
-			// 	err := c.w.AddTokenBlock(ti.Token, latestBlock)
-			// 	if err != nil {
-			// 		c.log.Error("Failed to add last token chain block of token", ti.Token, "err", err)
-			// 		return nil, nil, err
-			// 	}
-			// }
-
 			if c.TokenType(PartString) == ti.TokenType {
 				gb := c.w.GetGenesisTokenBlock(t, ti.TokenType)
 				if gb == nil {
@@ -992,29 +971,11 @@ func (c *Core) updateReceiverToken(
 				if err != nil {
 					return nil, senderPeer, fmt.Errorf("failed to get parent details for token %v, err: %v", t, err)
 				}
-				err = c.syncParentToken(senderPeer, pt)
+				_, err = c.syncParentToken(senderPeer, pt)
 				if err != nil {
 					return nil, senderPeer, fmt.Errorf("failed to sync parent token %v childtoken %v err : %v", pt, t, err)
 				}
 
-				// // add parent genesis and latest blocks
-				// parentGenesisBlock := block.InitBlock(blocksToSync.ParentGenesisBlock, nil)
-				// if parentGenesisBlock == nil {
-				// 	c.log.Error("Failed to add block, invalid gensis block of parent token", pt, "token", ti.Token)
-				// 	return nil, nil, fmt.Errorf("failed to add block, invalid parent genesis block of token : %v", ti.Token)
-				// }
-				// err = c.w.AddTokenBlock(pt, parentGenesisBlock)
-				// if err != nil {
-				// 	c.log.Error("Failed to add parent's genesis block of token", ti.Token, "err", err)
-				// 	return nil, nil, err
-				// }
-
-				// parentLatestBlock := block.InitBlock(blocksToSync.ParentLatestBlock, nil)
-				// err = c.w.AddTokenBlock(pt, parentLatestBlock)
-				// if err != nil {
-				// 	c.log.Error("Failed to add parent's latest token chain block of token", ti.Token, "err", err)
-				// 	return nil, nil, err
-				// }
 			}
 			ptcbArray, err := c.w.GetTokenBlock(t, ti.TokenType, pblkID)
 			if err != nil {
@@ -1137,7 +1098,6 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 		sr.QuorumInfo,
 		sr.TransactionEpoch,
 		sr.PinningServiceMode,
-		// sr.TransTokenSyncInfo,
 	)
 	if err != nil {
 		c.log.Error(err.Error())
@@ -1149,10 +1109,26 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 	}
 
 	// receiver fetches tokens to be synced
-	tokensSyncInfo := make([]TokenSyncInfo, len(sr.TokenInfo))
-	for i, token := range sr.TokenInfo {
-		tokensSyncInfo[i].TokenID = token.Token
-		tokensSyncInfo[i].TokenType = token.TokenType
+	tokensSyncInfo := make([]TokenSyncInfo, 0)
+	for _, token := range sr.TokenInfo {
+		tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: token.Token, TokenType: token.TokenType})
+		if token.TokenType == c.TokenType(PartString) {
+			tokenInfo, err := c.w.ReadToken(token.Token)
+			if err != nil {
+				c.log.Error("failed to fetch parent token info, err ", err)
+				continue
+			}
+			// parentTokenId := tokenInfo.ParentTokenID
+			parentTokenInfo, err := c.w.ReadToken(tokenInfo.ParentTokenID)
+			if err != nil {
+				c.log.Error("failed to fetch parent token value, err ", err)
+			}
+			if parentTokenInfo.TokenValue != 1.0 {
+				tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(PartString)})
+			} else {
+				tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(RBTString)})
+			}
+		}
 	}
 	tokenSyncMap := make(map[string][]TokenSyncInfo)
 	tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
@@ -1207,7 +1183,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 			if err != nil {
 				return nil, fmt.Errorf("failed to get parent details for token %v, err: %v", t, err)
 			}
-			err = c.syncParentToken(senderPeer, pt)
+			_, err = c.syncParentToken(senderPeer, pt)
 			if err != nil {
 				return nil, fmt.Errorf("failed to sync parent token %v childtoken %v err %v : ", pt, t, err)
 			}

@@ -34,7 +34,6 @@ const (
 	FTTokenStorage                 string = "FTTokenTable"
 	FTChainStorage                 string = "FTchainstorage"
 	FTStorage                      string = "FTTable"
-	SyncTokenStorage               string = "SyncTokenTable"
 )
 
 type WalletConfig struct {
@@ -159,11 +158,6 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 		w.log.Error("Failed to initialize FT storage", "err", err)
 	}
 
-	//Queue for syncing token chain of tokens in the table
-	err = w.s.Init(SyncTokenStorage, &TokenSyncInfo{}, true)
-	if err != nil {
-		w.log.Error("Failed to initialize SyncTokenStorage storage", "err", err)
-	}
 
 	smartcontracTokenchainstorageDB, err := leveldb.OpenFile(dir+SmartContractTokenChainStorage, op)
 	if err != nil {

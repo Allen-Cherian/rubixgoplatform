@@ -30,7 +30,7 @@ const (
 	TokenIsBeingDoubleSpent
 	TokenIsPinnedAsService
 	TokenIsBurntForFT
-	QuorumPledgedForThisToken
+	QuorumPledgedForThisToken int = 20
 )
 const (
 	Zero int = iota
@@ -1016,23 +1016,9 @@ func (w *Wallet) GetAllPinnedTokens(did string) ([]Token, error) {
 
 }
 
-// func (w *Wallet) GetTokensToBeSyncedByQuorum() ([]Token, error) {
-// 	var tokensList []Token
-// 	err := w.s.Read(TokenStateHash, &tokensList, "sync_status = ? and token_status = ?", SyncIncomplete, QuorumPledgedForThisToken)
-// 	if err != nil {
-// 		if strings.Contains(err.Error(), "no records found") {
-// 			return []Token{}, nil
-// 		} else {
-// 			w.log.Error("Failed to get tokens to be synced", "err", err)
-// 			return nil, err
-// 		}
-// 	}
-// 	return tokensList, nil
-// }
-
 func (w *Wallet) GetTokensToBeSynced() ([]Token, error) {
 	var tokensList []Token
-	err := w.s.Read(TokenStorage, &tokensList, "sync_status = ? and (token_status = ? or token_status = ? or token_status = ?)", SyncIncomplete, TokenIsFree, TokenIsLocked, QuorumPledgedForThisToken)
+	err := w.s.Read(TokenStorage, &tokensList, "sync_status = ? and (token_status = ? or token_status = ? or token_status = ? or token_status = ?)", SyncIncomplete, TokenIsFree, TokenIsLocked, QuorumPledgedForThisToken, TokenIsBurnt)
 	if err != nil {
 		if strings.Contains(err.Error(), "no records found") {
 			return []Token{}, nil
@@ -1057,6 +1043,9 @@ func (w *Wallet) UpdateTokenSyncStatus(tokenID string, syncStatus int) error {
 			w.log.Error("Failed to get token states", "err", err)
 			return err
 		}
+	}
+	if tokenInfo.SyncStatus == syncStatus {
+		return nil
 	}
 	tokenInfo.SyncStatus = syncStatus
 	err = w.s.Update(TokenStorage, &tokenInfo, "token_id=?", tokenID)

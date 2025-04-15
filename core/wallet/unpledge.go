@@ -3,8 +3,6 @@ package wallet
 import (
 	"fmt"
 	"strings"
-
-	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
 )
 
 // Unpledging info associated with PoW Pledging
@@ -105,61 +103,5 @@ func (w *Wallet) Migration_DropUnpledgeQueueTable() error {
 		return errMsg
 	}
 
-	return nil
-}
-
-// Fetch from tabel
-func (w *Wallet) SyncTokensFromQueue(p *ipfsport.Peer) ([]TokenSyncInfo, error) {
-	var tokensyncinfo []TokenSyncInfo
-	var err error
-	if p != nil {
-		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ? and sync_from_peer = ? ", "", p.GetPeerID())
-	} else {
-		err = w.s.Read(SyncTokenStorage, &tokensyncinfo, "token_id != ?", "")
-	}
-
-	if err != nil {
-		if strings.Contains(err.Error(), "no records found") {
-			return nil, err
-		} else {
-			w.log.Error("Failed to get token sync details", "err", err)
-			return nil, err
-		}
-	}
-
-	return tokensyncinfo, nil
-}
-
-// Add to table
-func (w *Wallet) AddTokenSyncDetails(tokenSyncInfo TokenSyncInfo) error {
-	err := w.s.Read(SyncTokenStorage, TokenSyncInfo{}, "token_id != ?", tokenSyncInfo.TokenID)
-	if err != nil {
-		if strings.Contains(err.Error(), "no records found") {
-			err := w.s.Write(SyncTokenStorage, &tokenSyncInfo)
-			if err != nil {
-				return fmt.Errorf("error while adding token sync info for tokenID: %v, err: %v", tokenSyncInfo.TokenID, err)
-			}
-			return nil
-		} else {
-			w.log.Error("Failed to read SyncTokenTable", "err", err)
-			return err
-		}
-	}
-	err = w.s.Update(SyncTokenStorage, &tokenSyncInfo, "token_id != ?", tokenSyncInfo.TokenID)
-	if err != nil {
-		return fmt.Errorf("error while updating token sync info for tokenID: %v, err: %v", tokenSyncInfo.TokenID, err)
-	}
-	return nil
-}
-
-// Remove from table
-func (w *Wallet) RemoveTokenSyncDetails(tokenSyncInfo TokenSyncInfo) error {
-	var tokensyncinfo []TokenSyncInfo
-	err := w.s.Delete(SyncTokenStorage, &tokensyncinfo, "token_id != ?", tokenSyncInfo.TokenID)
-	if err != nil {
-		errMsg := fmt.Errorf("error while removing token sync info for tokenID: %v, err: %v", tokenSyncInfo.TokenID, err)
-		w.log.Error(errMsg.Error())
-		return err
-	}
 	return nil
 }
