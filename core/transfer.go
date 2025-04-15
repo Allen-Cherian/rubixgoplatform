@@ -226,7 +226,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 				if strings.Contains(err.Error(), "no records found") {
 					c.log.Error("receiver Peer ID not found", "did", receiverdid)
 					resp.Message = "invalid address, receiver Peer ID not found"
-					return resp
+					//return resp
 				} else {
 					c.log.Error(fmt.Sprintf("Error occurred while fetching DID info from DIDTable for DID: %v, err: %v", receiverdid, err))
 					resp.Message = fmt.Sprintf("Error occurred while fetching DID info from DIDTable for DID: %v, err: %v", receiverdid, err)
