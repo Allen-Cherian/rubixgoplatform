@@ -39,6 +39,10 @@ type Peer struct {
 	did    string
 }
 
+func (peer Peer) GetPeerID() string {
+	return peer.peerID
+}
+
 func NewPeerManager(startPort uint16, lport uint16, maxNumPort uint16, ipfs *ipfsnode.Shell, log logger.Logger, bootStrap []string, peerID string) *PeerManager {
 	p := &PeerManager{
 		peerID:    peerID,

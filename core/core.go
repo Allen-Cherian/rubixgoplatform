@@ -60,6 +60,7 @@ const (
 	APISendFTToken                  string = "/api/send-ft-token"
 	APIGetPrevQrmFromPrevSenderPath string = "/api/get-prev-qrms-info-from-sender"
 	APICheckPinRole                 string = "/api/check-pin-role"
+	APISyncGenesisAndLatestBlock    string = "/api/sync-gennesis-n-lastest-block"
 )
 
 const (
@@ -335,6 +336,7 @@ func (c *Core) SetupCore() error {
 	c.SetupToken()
 	c.QuroumSetup()
 	c.PinService()
+	c.RestartIncompleteTokenChainSyncs()
 	// c.selfTransferService()
 	return nil
 }
