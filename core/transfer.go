@@ -220,25 +220,34 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	if !isSelfRBTTransfer {
 		rpeerid = c.w.GetPeerID(receiverdid)
 		if rpeerid == "" {
-			// Check if DID is present in the DIDTable as the
-			// receiver might be part of the current node
-			_, err := c.w.GetDID(receiverdid)
+			// Check if DID is present in the DIDTable as the receiver might be part of the current node
+			didDetails, err := c.w.GetDID(receiverdid)
 			if err != nil {
 				if strings.Contains(err.Error(), "no records found") {
 					c.log.Error("receiver Peer ID not found", "did", receiverdid)
 					resp.Message = "invalid address, receiver Peer ID not found"
-					return resp
+					//return resp
 				} else {
-					c.log.Error(fmt.Sprintf("Error occured while fetching DID info from DIDTable for DID: %v, err: %v", receiverdid, err))
-					resp.Message = fmt.Sprintf("Error occured while fetching DID info from DIDTable for DID: %v, err: %v", receiverdid, err)
+					c.log.Error(fmt.Sprintf("Error occurred while fetching DID info from DIDTable for DID: %v, err: %v", receiverdid, err))
+					resp.Message = fmt.Sprintf("Error occurred while fetching DID info from DIDTable for DID: %v, err: %v", receiverdid, err)
 					return resp
 				}
+			}
+
+			if didDetails == nil {
+				receiverPeerInfo, err := c.GetPeerDIDInfo(receiverdid)
+				if err != nil {
+					c.log.Error("receiver Peer ID not found in network", "did", receiverdid)
+					resp.Message = "invalid address, receiver Peer ID not found"
+					return resp
+				}
+				rpeerid = receiverPeerInfo.PeerID
 			} else {
 				// Set the receiverPeerID to self Peer ID
 				rpeerid = c.peerID
 			}
 		} else {
-			p, err := c.getPeer(req.Receiver, senderDID)
+			p, err := c.getPeer(req.Receiver)
 			if err != nil {
 				resp.Message = "Failed to get receiver peer, " + err.Error()
 				return resp
@@ -332,8 +341,6 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	}
 
 	//check if sender has previous block pledged quorums' details
-	unknownDIDType := -1
-	liteDIDType := did.LiteDIDMode
 	for _, tokeninfo := range tis {
 		b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
 		//check if the transaction in prev block involved any quorums
@@ -349,43 +356,20 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			prevQuorums, _ := b.GetSigner()
 
 			for _, prevQuorum := range prevQuorums {
-				//check if the sender has prev pledged quorum's did type; if not, fetch it from explorer
-				prevQuorumDIDType, err := c.w.GetPeerDIDType(prevQuorum)
-				if prevQuorumDIDType == -1 || err != nil {
-					_, err := c.w.GetDID(prevQuorum)
-					if err != nil {
-						// if previous quorum is advisory node, save to DB
-						isPrevQuorumAdvisory, advisoryInfo, _ := c.isDIDInArbitaryAddr(prevQuorum)
-						if isPrevQuorumAdvisory {
-							if advisoryInfo != nil {
-								c.AddPeerDetails(*advisoryInfo)
-							}
-							continue
-						}
-						c.log.Debug("sender does not have previous block quorums details, fetching from explorer")
-						prevQuorumInfo, err := c.GetPeerFromExplorer(prevQuorum)
-						if err != nil {
-							c.log.Error("failed to fetch prev-quorum details from explorer, prev-quorum ", prevQuorum)
-						}
-
-						prevQuorumDIDInfo := wallet.DIDPeerMap{
-							DID:    prevQuorum,
-							PeerID: prevQuorumInfo.PeerID,
-						}
-
-						if prevQuorumInfo.DIDType == "BIP39" {
-							prevQuorumDIDInfo.DIDType = &liteDIDType
-						} else {
-							prevQuorumDIDInfo.DIDType = &unknownDIDType
-						}
-
-						c.AddPeerDetails(prevQuorumDIDInfo)
-
-						//if a signle pledged quorum is also not found, we can assume that other pledged quorums will also be not found,
-						//and request prev sender to share details of all the pledged quorums, and thus breaking the for loop
-						break
+				//check if the sender has prev pledged quorum's did type; if not, fetch it from the prev sender
+				fmt.Println("Checking if the sender has previous block pledged quorum's did type")
+				prevQuorumInfo, err := c.GetPeerDIDInfo(prevQuorum)
+				if err != nil {
+					if strings.Contains(err.Error(), "retry") {
+						c.AddPeerDetails(*prevQuorumInfo)
 					}
 				}
+				if prevQuorumInfo == nil || *prevQuorumInfo.DIDType == -1 {
+					//if a signle pledged quorum is also not found, we can assume that other pledged quorums will also be not found,
+					//and request prev sender to share details of all the pledged quorums, and thus breaking the for loop
+					break
+				}
+
 			}
 		}
 	}
@@ -569,7 +553,7 @@ func (c *Core) completePinning(st time.Time, reqID string, req *model.RBTPinRequ
 	for i := range tokensForTxn {
 		c.w.Pin(tokensForTxn[i].TokenID, wallet.PinningRole, did, "TID-Not Generated", req.Sender, req.PinningNode, tokensForTxn[i].TokenValue)
 	}
-	p, err := c.getPeer(req.PinningNode, did)
+	p, err := c.getPeer(req.PinningNode)
 	if err != nil {
 		resp.Message = "Failed to get pinning peer, " + err.Error()
 		return resp

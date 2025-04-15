@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
+	"strings"
 
 	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
 	"github.com/rubixchain/rubixgoplatform/core/model"
@@ -65,23 +65,21 @@ func (c *Core) peerCallback(peerID string, topic string, data []byte) {
 
 func (c *Core) peerStatus(req *ensweb.Request) *ensweb.Result {
 	did := c.l.GetQuerry(req, "did")
-	peerPeerID := c.l.GetQuerry(req, "self_peerId")
-	peerDID := c.l.GetQuerry(req, "selfDID")
-	peerDIDType := c.l.GetQuerry(req, "selfDID_type")
+	// peerPeerID := c.l.GetQuerry(req, "self_peerId")
+	// peerDID := c.l.GetQuerry(req, "selfDID")
+	// peerDIDType := c.l.GetQuerry(req, "selfDID_type")
 
-	//If the peer's DID type string is not empty, register the peer, if not already registered
-	if peerDIDType != "" {
-		peerDIDTypeInt, err1 := strconv.Atoi(peerDIDType)
-		if err1 != nil {
-			c.log.Debug("could not convert string to integer:", err1)
-		}
-
-		err2 := c.w.AddDIDPeerMap(peerDID, peerPeerID, peerDIDTypeInt)
-		if err2 != nil {
-			c.log.Debug("could not add quorum details to DID peer table:", err2)
-		}
-
-	}
+	// //If the peer's DID type string is not empty, register the peer, if not already registered
+	// if peerDIDType != "" {
+	// 	peerDIDTypeInt, err1 := strconv.Atoi(peerDIDType)
+	// 	if err1 != nil {
+	// 		c.log.Debug("could not convert string to integer:", err1)
+	// 	}
+	// 	err2 := c.w.AddDIDPeerMap(peerDID, peerPeerID, peerDIDTypeInt)
+	// 	if err2 != nil {
+	// 		c.log.Debug("could not add quorum details to DID peer table:", err2)
+	// 	}
+	// }
 	exist := c.w.IsDIDExist(did)
 	ps := model.PeerStatusResponse{
 		Version:   c.version,
@@ -90,18 +88,28 @@ func (c *Core) peerStatus(req *ensweb.Request) *ensweb.Result {
 	return c.l.RenderJSON(req, &ps, http.StatusOK)
 }
 
-func (c *Core) getPeer(addr string, selfDID string) (*ipfsport.Peer, error) {
+func (c *Core) getPeer(addr string) (*ipfsport.Peer, error) {
 	peerID, did, ok := util.ParseAddress(addr)
 	if !ok {
 		return nil, fmt.Errorf("invalid address: %v", addr)
 	}
 	// check if addr contains the peer ID
 	if peerID == "" {
-		peerID = c.w.GetPeerID(did)
-		if peerID == "" {
-			c.log.Error("Peer ID not found", "did", did)
-			return nil, fmt.Errorf("invalid address, Peer ID not found")
+		peerInfo, err := c.GetPeerDIDInfo(did)
+		if err != nil {
+			if peerInfo == nil {
+				c.log.Error("could not get peerId of peer ", did, "error", err)
+				return nil, fmt.Errorf("could not get peerId of peer %v, error : %v", did, err)
+			}
+			if strings.Contains(err.Error(), "retry") {
+				c.AddPeerDetails(*peerInfo)
+			}
 		}
+		if peerInfo.PeerID == "" {
+			c.log.Error("failed to get peerId of peer ", did, "error", err)
+			return nil, fmt.Errorf("failed to get peerId of receiver : %v, error: %v", did, err)
+		}
+		peerID = peerInfo.PeerID
 	}
 	p, err := c.pm.OpenPeerConn(peerID, did, c.getCoreAppName(peerID))
 	if err != nil {
@@ -110,17 +118,17 @@ func (c *Core) getPeer(addr string, selfDID string) (*ipfsport.Peer, error) {
 	q := make(map[string]string)
 	q["did"] = did
 
-	//share self information to the peer, if required
-	if selfDID != "" {
-		q["self_peerId"] = c.peerID
-		q["selfDID"] = selfDID
-		selfDetails, err := c.w.GetDID(selfDID)
-		if err != nil {
-			c.log.Info("could not fetch did type of peer:", selfDID)
-		} else {
-			q["selfDID_type"] = strconv.Itoa(selfDetails.Type)
-		}
-	}
+	// //share self information to the peer, if required
+	// if selfDID != "" {
+	// 	q["self_peerId"] = c.peerID
+	// 	q["selfDID"] = selfDID
+	// 	selfDetails, err := c.w.GetDID(selfDID)
+	// 	if err != nil {
+	// 		c.log.Info("could not fetch did type of peer:", selfDID)
+	// 	} else {
+	// 		q["selfDID_type"] = strconv.Itoa(selfDetails.Type)
+	// 	}
+	// }
 	var ps model.PeerStatusResponse
 	err = p.SendJSONRequest("GET", APIPeerStatus, q, nil, &ps, false)
 	if err != nil {
@@ -158,6 +166,7 @@ func (c *Core) connectPeer(peerID string) (*ipfsport.Peer, error) {
 }
 
 func (c *Core) AddPeerDetails(peerDetail wallet.DIDPeerMap) error {
+	c.log.Debug("Adding peer details to DIDPeerTable", "peerDetail", *peerDetail.DIDType)
 	err := c.w.AddDIDPeerMap(peerDetail.DID, peerDetail.PeerID, *peerDetail.DIDType)
 	if err != nil {
 		c.log.Error("Failed to add PeerDetails to DIDPeerTable", "err", err)
