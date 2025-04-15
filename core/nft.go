@@ -483,7 +483,6 @@ func (c *Core) SubscribeNFTSetup(requestID string, topic string) error {
 
 func (c *Core) NFTCallBack(peerID string, topic string, data []byte) {
 	var newEvent model.NFTEvent
-	requestID := reqID
 	err := json.Unmarshal(data, &newEvent)
 	if err != nil {
 		c.log.Error("Failed to get nft details", "err", err)
@@ -497,7 +496,7 @@ func (c *Core) NFTCallBack(peerID string, topic string, data []byte) {
 	var fetchNFT FetchNFTRequest
 	fetchNFT.NFT = nft
 
-	fetchNFTResponse := c.FetchNFT(requestID, &fetchNFT)
+	fetchNFTResponse := c.FetchNFT(&fetchNFT)
 	if !fetchNFTResponse.Status {
 		c.log.Error("failed to fetch NFT: ", fetchNFTResponse.Message)
 		return
@@ -564,7 +563,7 @@ func (c *Core) NFTCallBack(peerID string, topic string, data []byte) {
 	c.log.Info("Token chain of " + nft + " syncing successful")
 }
 
-func (c *Core) FetchNFT(requestID string, fetchNFTRequest *FetchNFTRequest) *model.BasicResponse {
+func (c *Core) FetchNFT(fetchNFTRequest *FetchNFTRequest) *model.BasicResponse {
 	basicResponse := &model.BasicResponse{
 		Status: false,
 	}
@@ -572,11 +571,13 @@ func (c *Core) FetchNFT(requestID string, fetchNFTRequest *FetchNFTRequest) *mod
 	nftJSON, err := c.ipfs.Cat(fetchNFTRequest.NFT)
 	if err != nil {
 		c.log.Error("Failed to get NFT from network", "err", err)
+		basicResponse.Message = "Failed to get NFT details from network"
 		return basicResponse
 	}
 	nftJSONBytes, err := io.ReadAll(nftJSON)
 	if err != nil {
 		c.log.Error("Failed to read NFT from network", "err", err)
+		basicResponse.Message = "Failed to read NFT from network"
 		return basicResponse
 	}
 	nftJSON.Close()
@@ -585,16 +586,18 @@ func (c *Core) FetchNFT(requestID string, fetchNFTRequest *FetchNFTRequest) *mod
 	err = json.Unmarshal(nftJSONBytes, &nft)
 	if err != nil {
 		c.log.Error("Failed to parse nft", "err", err)
+		basicResponse.Message = "Failed to parse nft"
 		return basicResponse
 	}
-
-	if err := c.GetNFTFromIpfs(fetchNFTRequest.NFT, nft.ArtifactHash); err != nil {
-		c.log.Error("failed to fetch NFT from IPFS", "err", err)
+	err = c.GetNFTFromIpfs(fetchNFTRequest.NFT, nft.ArtifactHash)
+	if err != nil {
+		c.log.Error("failed to fetch NFT files from IPFS", "err", err)
+		basicResponse.Message = "Failed to fetch NFT files from IPFS"
+		return basicResponse
 	}
-
 	// Set the response values
 	basicResponse.Status = true
-	basicResponse.Message = "Successfully fetched NFT"
+	basicResponse.Message = "NFT fetched successfully"
 	basicResponse.Result = &nft
 
 	return basicResponse
@@ -648,4 +651,16 @@ func (c *Core) GetNFTsByDid(did string) model.NFTList {
 
 	return response
 
+}
+
+func (c *Core) CheckNFTFolderExists(nft string) (string, error) {
+	dirPath := c.cfg.DirPath + "NFT/" + nft
+	_, err := os.Stat(dirPath)
+	if err == nil {
+		return dirPath, nil // Folder exists
+	}
+	if os.IsNotExist(err) {
+		return "", nil // Folder does not exist
+	}
+	return "", err // Some other error occurred
 }
