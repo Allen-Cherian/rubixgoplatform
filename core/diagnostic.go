@@ -276,12 +276,14 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 		epoch := block.GetEpoch()
 
 		var executorSignature string
+		var executorSignData string
 		signObj := block.GetInitiatorSignature()
 		if signObj == nil {
 			reply.Message = "unable to fetch intiateor signature"
 			return reply
 		} else {
 			executorSignature = signObj.PrivateSign
+			executorSignData = signObj.Hash
 		}
 
 		executorDID := block.GetExecutorDID()
@@ -293,6 +295,7 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 			Epoch:              epoch,
 			InitiatorSignature: executorSignature,
 			ExecutorDID:        executorDID,
+			InitiatorSignData:  executorSignData,
 		}
 
 		sctDataArray = append(sctDataArray, sctData)
