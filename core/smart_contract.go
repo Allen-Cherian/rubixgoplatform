@@ -301,18 +301,21 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 		return basicResponse
 	}
 
-	smartContractOriginPeer, err := c.getPeer(smartContractToken.PeerID + "." + smartContractToken.DID, "")
-	if err != nil {
-		basicResponse.Message = fmt.Sprintf("unable to get the peer for DID: %v, err: %v ", smartContractToken.DID, err)
-		return basicResponse
-	}
+	if smartContractToken.PeerID != "" {
+		smartContractOriginPeer, err := c.getPeer(smartContractToken.PeerID+"."+smartContractToken.DID, "")
+		if err != nil {
+			basicResponse.Message = fmt.Sprintf("unable to get the peer for DID: %v, err: %v ", smartContractToken.DID, err)
+			return basicResponse
+		}
 
-	errSync := c.syncTokenChainFrom(smartContractOriginPeer, "", fetchSmartContractRequest.SmartContractToken, c.TokenType("sc"))
-	if errSync != nil {
-		basicResponse.Message = fmt.Sprintf("unable to sync token chain for contract: %v", fetchSmartContractRequest.SmartContractToken)
-		return basicResponse
+		errSync := c.syncTokenChainFrom(smartContractOriginPeer, "", fetchSmartContractRequest.SmartContractToken, c.TokenType("sc"))
+		if errSync != nil {
+			basicResponse.Message = fmt.Sprintf("unable to sync token chain for contract: %v", fetchSmartContractRequest.SmartContractToken)
+			return basicResponse
+		}
+	} else {
+		c.log.Debug(fmt.Sprintf("Unable to fetch Smart Contract %v deployer's PeerID, skipping token chain sync", fetchSmartContractRequest.SmartContractToken))
 	}
-
 
 	// Set the response values
 	basicResponse.Status = true
