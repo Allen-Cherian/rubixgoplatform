@@ -186,6 +186,13 @@ func (w *Wallet) GetPeerDIDType(did string) (int, error) {
 	if dm.DIDType == nil {
 		return -1, nil
 	}
+	if *dm.DIDType < 0 || *dm.DIDType > 4 {
+		fmt.Println("DID Type should be between 0 and 4, in our case it is ", *dm.DIDType)
+
+	} else {
+		fmt.Println("DID Type is ", *dm.DIDType)
+	}
+
 	return *dm.DIDType, nil
 }
 
