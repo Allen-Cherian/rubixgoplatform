@@ -588,7 +588,7 @@ func (c *Core) syncGenesisAndLatestBlock(req *ensweb.Request) *ensweb.Result {
 			return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "genesis block is nil, invalid token chain"}, http.StatusOK)
 		}
 		trep.GenesisBlock = genesisBlock.GetBlock()
-		c.log.Debug("adding genesis block bytes ")
+		c.log.Debug("adding genesis block bytes for token", tr.Token)
 	}
 
 	latestBlock := c.w.GetLatestTokenBlock(tr.Token, tr.TokenType)
@@ -621,7 +621,7 @@ func (c *Core) syncGenesisAndLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRe
 		c.log.Error("Failed to sync genesis and latest token chain block", "msg", trep.Message)
 		return fmt.Errorf(trep.Message)
 	}
-	
+
 	// add genesis block
 	if trep.GenesisBlock != nil {
 		fmt.Println("adding genesis block")
