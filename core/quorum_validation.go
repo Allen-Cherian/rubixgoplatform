@@ -209,7 +209,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			continue
 		}
 	}
-	fmt.Println("smart contact sc is ", sc, "ti is ", ti)
 	p, err := c.getPeer(address)
 	if err != nil {
 		c.log.Error("Failed to get peer", "err", err)
@@ -324,7 +323,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		pinningNodeDID := b.GetPinningNodeDID()
 		ownerDID := b.GetOwner()
 		senderDID := sc.GetSenderDID()
-		fmt.Println("pinningNodeDID", pinningNodeDID, "ownerDID", ownerDID, "senderDID", senderDID)
 
 		if pinningNodeDID != "" {
 			c.log.Info("The token is Pinned as a service on Node ", pinningNodeDID)
@@ -377,7 +375,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			}
 		}
 
-		fmt.Println("tokenInfo", tokenInfo)
 		// Update token status
 		tokenInfo.DID = senderDID
 		tokenInfo.TokenStatus = wallet.QuorumPledgedForThisToken

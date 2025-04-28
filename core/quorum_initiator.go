@@ -43,21 +43,21 @@ const (
 )
 
 type ConensusRequest struct {
-	ReqID              string                            `json:"req_id"`
-	Type               int                               `json:"type"`
-	Mode               int                               `json:"mode"`
-	SenderPeerID       string                            `json:"sender_peerd_id"`
-	ReceiverPeerID     string                            `json:"receiver_peerd_id"`
-	ContractBlock      []byte                            `json:"contract_block"`
-	QuorumList         []string                          `json:"quorum_list"`
-	DeployerPeerID     string                            `json:"deployer_peerd_id"`
-	SmartContractToken string                            `json:"smart_contract_token"`
-	ExecuterPeerID     string                            `json:"executor_peer_id"`
-	TransactionID      string                            `json:"transaction_id"`
-	TransactionEpoch   int                               `json:"transaction_epoch"`
-	PinningNodePeerID  string                            `json:"pinning_node_peer_id"`
-	NFT                string                            `json:"nft"`
-	FTinfo             model.FTInfo                      `json:"ft_info"`
+	ReqID              string       `json:"req_id"`
+	Type               int          `json:"type"`
+	Mode               int          `json:"mode"`
+	SenderPeerID       string       `json:"sender_peerd_id"`
+	ReceiverPeerID     string       `json:"receiver_peerd_id"`
+	ContractBlock      []byte       `json:"contract_block"`
+	QuorumList         []string     `json:"quorum_list"`
+	DeployerPeerID     string       `json:"deployer_peerd_id"`
+	SmartContractToken string       `json:"smart_contract_token"`
+	ExecuterPeerID     string       `json:"executor_peer_id"`
+	TransactionID      string       `json:"transaction_id"`
+	TransactionEpoch   int          `json:"transaction_epoch"`
+	PinningNodePeerID  string       `json:"pinning_node_peer_id"`
+	NFT                string       `json:"nft"`
+	FTinfo             model.FTInfo `json:"ft_info"`
 	// TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"tokens_sync_info"`
 }
 
@@ -116,14 +116,14 @@ type UpdatePledgeRequest struct {
 }
 
 type SendTokenRequest struct {
-	Address            string                            `json:"peer_id"`
-	TokenInfo          []contract.TokenInfo              `json:"token_info"`
-	TokenChainBlock    []byte                            `json:"token_chain_block"`
-	QuorumList         []string                          `json:"quorum_list"`
-	QuorumInfo         []QuorumDIDPeerMap                `json:"quorum_info"`
-	TransactionEpoch   int                               `json:"transaction_epoch"`
-	PinningServiceMode bool                              `json:"pinning_service_mode"`
-	FTInfo             model.FTInfo                      `json:"ft_info"`
+	Address            string               `json:"peer_id"`
+	TokenInfo          []contract.TokenInfo `json:"token_info"`
+	TokenChainBlock    []byte               `json:"token_chain_block"`
+	QuorumList         []string             `json:"quorum_list"`
+	QuorumInfo         []QuorumDIDPeerMap   `json:"quorum_info"`
+	TransactionEpoch   int                  `json:"transaction_epoch"`
+	PinningServiceMode bool                 `json:"pinning_service_mode"`
+	FTInfo             model.FTInfo         `json:"ft_info"`
 	// TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"token_chain_sync_info"`
 }
 
@@ -525,10 +525,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 					c.AddPeerDetails(*qDidInfo)
 				}
 			}
-			fmt.Println("qDidInfo", qDidInfo)
-
 			if qDidInfo.DIDType == nil {
-				c.log.Debug("DID type of quorum is nil, fetching from explorer", qdid)
 				qdidPeerMap, err := c.GetPeerDIDInfo(qdid)
 				if err != nil {
 					c.log.Error("could not fetch did type of quorum", qdid, "err", err)
