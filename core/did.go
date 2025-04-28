@@ -447,6 +447,7 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 
 	//if did type is not fetched yet or is incorrect, then try to fetch it from db or from the peer itself
 	if peerDIDInfo.DIDType == nil || *peerDIDInfo.DIDType == -1 {
+		fmt.Println("PeerDIDInfo.DIDType is nil or -1 ", peerDIDInfo.DIDType)
 		peerDIDInfo, err = c.GetPeerFromExplorer(didStr)
 		if err != nil && *peerDIDInfo.DIDType != -1 {
 			c.log.Error("failed to fetch peer details from explorer for ", didStr, "err", err)
@@ -454,7 +455,7 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 			didType, _ := c.w.GetPeerDIDType(didStr)
 			if didType == -1 {
 				c.log.Debug("Connecting with peer to get DID type of peer did", didStr)
-				p, err := c.getPeer(didStr + "." + peerDIDInfo.PeerID)
+				p, err := c.getPeer(peerDIDInfo.PeerID + "." + didStr)
 				if err != nil {
 					c.log.Error("could not connect with peer to fetch did type, error ", err)
 					return peerDIDInfo, nil
