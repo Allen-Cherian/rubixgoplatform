@@ -40,12 +40,12 @@ func (s *Server) APIAddBootStrap(req *ensweb.Request) *ensweb.Result {
 		s.log.Error("bootstrap Peers required to add")
 		return s.BasicResponse(req, false, "Bootstrap Peers required to add", nil)
 	}
-	for _, peer := range m.Peers {
-		if !strings.HasSuffix(peer, "/") {
-			s.log.Error(fmt.Sprintf("Invalid bootstrap peer : %s", peer))
-			return s.BasicResponse(req, false, "Invalid bootstrap peer", nil)
-		}
-	}
+	// for _, peer := range m.Peers {
+	// 	if !strings.HasSuffix(peer, "/") {
+	// 		s.log.Error(fmt.Sprintf("Invalid bootstrap peer : %s", peer))
+	// 		return s.BasicResponse(req, false, "Invalid bootstrap peer", nil)
+	// 	}
+	// }
 	err = s.c.AddBootStrap(m.Peers)
 	if err != nil {
 		return s.BasicResponse(req, false, "Failed to add bootstrap peers, "+err.Error(), nil)
