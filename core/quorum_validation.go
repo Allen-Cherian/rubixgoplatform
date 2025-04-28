@@ -178,7 +178,7 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 				c.log.Error("failed to update parent token sync status as incomplete, token ", pt)
 			}
 		}
-		
+
 	}
 	if ptb.GetTransType() != block.TokenBurntType {
 		issueType = ParentTokenNotBurned // parent token is not in burnt stage
@@ -209,6 +209,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			continue
 		}
 	}
+	fmt.Println("smart contact sc is ", sc, "ti is ", ti)
 	p, err := c.getPeer(address)
 	if err != nil {
 		c.log.Error("Failed to get peer", "err", err)
@@ -323,6 +324,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		pinningNodeDID := b.GetPinningNodeDID()
 		ownerDID := b.GetOwner()
 		senderDID := sc.GetSenderDID()
+		fmt.Println("pinningNodeDID", pinningNodeDID, "ownerDID", ownerDID, "senderDID", senderDID)
 
 		if pinningNodeDID != "" {
 			c.log.Info("The token is Pinned as a service on Node ", pinningNodeDID)
@@ -372,6 +374,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			}
 		}
 
+		fmt.Println("tokenInfo", tokenInfo)
 		// Update token status
 		tokenInfo.DID = senderDID
 		tokenInfo.TokenStatus = wallet.QuorumPledgedForThisToken
