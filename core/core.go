@@ -578,7 +578,7 @@ func (c *Core) SetupForienDID(didStr string, selfDID string) (did.DIDCrypto, err
 			c.AddPeerDetails(*peerInfo)
 		}
 	}
-	if *peerInfo.DIDType == -1 {
+	if peerInfo.DIDType == nil || *peerInfo.DIDType == -1 {
 		c.log.Error("failed to get did type of peer did ", didStr, "error", err)
 		return nil, err
 	}
