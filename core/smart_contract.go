@@ -310,7 +310,7 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 
 		errSync := c.syncTokenChainFrom(smartContractOriginPeer, "", fetchSmartContractRequest.SmartContractToken, c.TokenType("sc"))
 		if errSync != nil {
-			basicResponse.Message = fmt.Sprintf("unable to sync token chain for contract: %v", fetchSmartContractRequest.SmartContractToken)
+			basicResponse.Message = fmt.Sprintf("unable to sync token chain for contract: %v, err: %v", fetchSmartContractRequest.SmartContractToken, errSync)
 			return basicResponse
 		}
 	} else {
