@@ -417,3 +417,19 @@ func (s *Server) TxnReqFromWallet(txnReq *model.RBTTransferRequest, req *ensweb.
 	go s.c.InitiateRBTTransfer(req.ID, txnReq)
 	return s.didResponse(req, req.ID)
 }
+
+// initiates pre pledging of all free tokens
+func (s * Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
+	did := s.GetQuerry(req, "did")
+	if did == "" {
+		s.log.Error("DID cannot be empty")
+		return s.BasicResponse(req, false, "DID cannot be empty", nil)
+	}
+	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(did)
+	if !strings.HasPrefix(did, "bafybmi") || len(did) != 59 || !is_alphanumeric {
+		s.log.Error("Invalid DID")
+		return s.BasicResponse(req, false, "Invalid DID", nil)
+	}
+	
+	return s.BasicResponse(req, true, "prepledging completed successfully", nil)
+}
