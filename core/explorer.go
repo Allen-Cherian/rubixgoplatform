@@ -468,23 +468,20 @@ func (c *Core) ExplorerUserCreate() []string {
 					eu := ExplorerUser{}
 					err = c.s.Read(ExplorerUserDetailsTable, &eu, "did=?", d.DID)
 					if err != nil {
+						accInfo, err := c.GetAccountInfo(d.DID)
+						if err != nil {
+							c.log.Error(fmt.Sprintf("Error getting account info for DID %v: %v", d.DID, err))
+							return
+						}
+						balance := float64(accInfo.RBTAmount) // Convert to float64 if necessary
 						ed := ExplorerDID{
 							DID:     d.DID,
-							Balance: 0,
+							Balance: balance,
 							PeerID:  c.peerID,
 							DIDType: d.Type,
 						}
-						err := c.ec.ExplorerUserCreate(&ed)
-						if err != nil && strings.Contains(err.Error(), "duplicate") {
-							eu.DID = d.DID
-							err = c.s.Write(ExplorerUserDetailsTable, eu)
-							if err != nil {
-								c.log.Error(fmt.Sprintf("Error adding user DID %v: in the DB with error %v", d.DID, err))
-								return
-							}
-							c.UpdateUserInfo([]string{ed.DID})
-							c.GenerateUserAPIKey([]string{ed.DID})
-						} else if err != nil {
+						err = c.ec.ExplorerUserCreate(&ed)
+						if err != nil {
 							c.log.Error(fmt.Sprintf("Error creating user for DID %v: %v", d.DID, err))
 							return
 						}
@@ -513,11 +510,14 @@ func (ec *ExplorerClient) ExplorerUserCreate(ed *ExplorerDID) error {
 	var er ExplorerUserCreateResponse
 	err := ec.SendExplorerJSONRequest("POST", ExplorerCreateUserAPI, &ed, &er)
 	if err != nil {
+		fmt.Println("err in ExplorerUserCreate", err)
 		return err
 	}
-	if !strings.Contains(er.Message, "successfully") {
-		ec.log.Error(fmt.Sprintf("Failed to create user for %v with error message %v", ed.DID, er.Message))
-		return fmt.Errorf("failed to create user")
+	fmt.Println("er in ExplorerUserCreate", er)
+
+	if er.Message != "User created successfully!" && er.Message != "User updated successfully!" {
+		ec.log.Error("Failed to create or update user for %v with error message %v", ed.DID, er.Message)
+		return fmt.Errorf("failed to create or update user")
 	}
 	ec.AddDIDKey(ed.DID, er.APIKey)
 	ec.log.Info(er.Message + " for did " + ed.DID)
@@ -546,7 +546,8 @@ func (c *Core) UpdateUserInfo(dids []string) {
 				c.log.Error("Failed to send request for user DID, " + did + " Error : " + err.Error())
 				return
 			}
-			if !strings.Contains(er.Message, "successfully") {
+
+			if !strings.Contains(er.Message, "User updated successfully") {
 				c.log.Error("Failed to update user info for ", "DID", did, "msg", er.Message)
 			} else {
 				c.log.Info(fmt.Sprintf("%v for did %v", er.Message, did))
@@ -1008,11 +1009,12 @@ func (ec *ExplorerClient) getAPIKey(path string, input interface{}, getDID bool)
 }
 
 func (c *Core) ExpireUserAPIKey() {
-	fmt.Println("Cleaning started...")
+	c.log.Info("Cleaning started...")
 	eus := []ExplorerUser{}
 	//Read for api key in table, if not empty, then expire the apiKey and set the field to empty
 	err := c.s.Read(ExplorerUserDetailsTable, &eus, "apiKey!=?", "")
 	if err != nil {
+		fmt.Println("err in ExpireUserAPIKey", err)
 		c.log.Error("Failed to read table for Expiring the user Key")
 	}
 	var wg sync.WaitGroup
@@ -1040,7 +1042,7 @@ func (c *Core) ExpireUserAPIKey() {
 		}(eu)
 		// Wait for all goroutines to complete
 		wg.Wait()
-		fmt.Println("Cleaning completed...")
+		c.log.Info("Cleaning completed...")
 	}
 }
 

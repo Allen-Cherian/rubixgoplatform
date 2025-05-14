@@ -418,9 +418,9 @@ func (c *Core) executeNFT(reqID string, executeReq *model.ExecuteNFTRequest) *mo
 		Amount:         executeReq.NFTValue,
 	}
 
-	receiverPeerId := c.w.GetPeerID(executeReq.Receiver)
+	receiverInfo, _ := c.GetPeerDIDInfo(executeReq.Receiver)
 	local := false
-	if receiverPeerId == c.peerID || receiverPeerId == "" {
+	if receiverInfo.PeerID == c.peerID {
 		local = true
 	}
 
@@ -480,7 +480,7 @@ func (c *Core) NFTCallBack(peerID string, topic string, data []byte) {
 
 	nftTokenType := c.TokenType(NFTString)
 	publisherAddress := peerID + "." + executorDid
-	publisherPeer, err := c.getPeer(publisherAddress, "")
+	publisherPeer, err := c.getPeer(publisherAddress)
 	if err != nil {
 		c.log.Error(fmt.Sprintf("failed to get peer: %v, err: %v", peerID, err))
 		return
