@@ -302,7 +302,7 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 	}
 
 	if smartContractToken.PeerID != "" {
-		smartContractOriginPeer, err := c.getPeer(smartContractToken.PeerID+"."+smartContractToken.DID, "")
+		smartContractOriginPeer, err := c.getPeer(smartContractToken.PeerID+"."+smartContractToken.DID)
 		if err != nil {
 			basicResponse.Message = fmt.Sprintf("unable to get the peer for DID: %v, err: %v ", smartContractToken.DID, err)
 			return basicResponse
