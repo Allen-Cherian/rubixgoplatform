@@ -84,18 +84,6 @@ func (c *Core) createNFT(requestID string, createNFTRequest NFTReq) *model.Basic
 		return basicResponse
 	}
 
-	nftTokenDetails := wallet.NFT{
-		TokenID:     nftHash,
-		DID:         nft.DID,
-		TokenStatus: 0,
-		TokenValue:  0,
-	}
-
-	if err := c.w.CreateNFT(&nftTokenDetails, false); err != nil {
-		c.log.Error("Failed to write nft to storage", err)
-		return basicResponse
-	}
-
 	basicResponse.Status = true
 	basicResponse.Message = nftTokenResponse.Message
 	basicResponse.Result = nftTokenResponse.Result
@@ -125,37 +113,20 @@ func (c *Core) deployNFT(reqID string, deployReq model.DeployNFTRequest) *model.
 		resp.Message = "Invalid Deployer DID"
 		return resp
 	}
+
+	_, err := c.w.GetNFT(deployReq.NFT, false)
+	if err == nil {
+		c.log.Error(fmt.Sprintf("NFT %v has been already been deployed", deployReq.NFT))
+		resp.Message = fmt.Sprintf("NFT %v has already been deployed", deployReq.NFT)
+		return resp
+	}
+
 	didCryptoLib, err := c.SetupDID(reqID, did)
 	if err != nil {
 		resp.Message = "Failed to setup Deployer DID of the NFT deployer, " + err.Error()
 		return resp
 	}
-	//check the NFT from the db
-	nft, err := c.w.GetNFT(deployReq.NFT, false)
-	if err != nil {
-		c.log.Error("Failed to retrieve nft details from storage", err)
-		resp.Message = err.Error()
-		return resp
-	}
-	nftJSON, err := c.ipfs.Cat(deployReq.NFT)
-	if err != nil {
-		c.log.Error("Failed to get NFT from network", "err", err)
-	}
-
-	nftJSONBytes, err := io.ReadAll(nftJSON)
-	if err != nil {
-		c.log.Error("Failed to read NFT from network", "err", err)
-	}
-	nftJSON.Close()
-	var nftToken NFTIpfsInfo
-	err = json.Unmarshal(nftJSONBytes, &nftToken)
-
-	if err != nil {
-		c.log.Error("Failed to parse nft", "err", err)
-	}
-
-	c.log.Info("The nft info fetched from the db is : ", nft)
-
+	
 	nftInfoArray := make([]contract.TokenInfo, 0)
 	nftInfo := contract.TokenInfo{
 		Token:      deployReq.NFT,
@@ -224,13 +195,13 @@ func (c *Core) deployNFT(reqID string, deployReq model.DeployNFTRequest) *model.
 	}
 
 	nftTokenDetails := wallet.NFT{
-		TokenID:     nft.TokenID,
-		DID:         nft.DID,
-		TokenStatus: nft.TokenStatus,
+		TokenID:     deployReq.NFT,
+		DID:         deployReq.DID,
+		TokenStatus: wallet.TokenIsFree,
 		TokenValue:  floatPrecision(deployReq.NFTValue, MaxDecimalPlaces),
 	}
 
-	if err := c.w.CreateNFT(&nftTokenDetails, true); err != nil {
+	if err := c.w.CreateNFT(&nftTokenDetails, false); err != nil {
 		c.log.Error("Failed to write nft to storage in NFTTokenStorage", err)
 		return resp
 	}
