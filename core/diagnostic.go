@@ -449,10 +449,9 @@ func (c *Core) ReleaseAllLockedTokens() model.BasicResponse {
 	return *response
 }
 
-func (c *Core) GetFinalQuorumList(ql []string) ([]string, error) {
-	// Initialize finalQl as an empty slice to store the groups that meet the condition
-	var finalQl []string
-	var opError error
+func (c *Core) GetActiveQuorums(ql []string) []string {
+	var activeQuorumList []string
+
 	// Loop through ql in groups of the Minimum Quorum Required
 	for i := 0; i < len(ql); i += QuorumRequired {
 		end := i + QuorumRequired
@@ -461,46 +460,35 @@ func (c *Core) GetFinalQuorumList(ql []string) ([]string, error) {
 		}
 		group := ql[i:end]
 
-		// Initialize a variable to keep track of whether all items in the group meet the condition
-		allQuorumSetup := true
-
 		// Loop through the items in the group and check if their response message is "quorum is setup"
 		for _, item := range group {
-			opError = nil
+			if len(activeQuorumList) == QuorumRequired {
+				return activeQuorumList
+			}
+
 			parts := strings.Split(item, ".")
 			if len(parts) != 2 {
 				continue
 			}
+
 			peerID := parts[0]
 			did := parts[1]
+
 			msg, _, err := c.CheckQuorumStatus(peerID, did)
 			if err != nil || strings.Contains(msg, "Quorum Connection Error") {
-				c.log.Error("Failed to check quorum status:", err)
-				opError = fmt.Errorf("failed to check quorum status:  %v", err)
-				allQuorumSetup = false
-				break
+				c.log.Error(fmt.Sprintf("Failed to check quorum status for quorum %v, error: %v", item, err))
+				continue
 			}
-			if msg != "Quorum is setup" {
-				// If any item in the group does not have the response message as "quorum is setup",
-				// set allQuorumSetup to false and break the loop
-				allQuorumSetup = false
-				break
-			}
-			if strings.Contains(msg, "Quorum is not setup") {
-				c.log.Error("quorums are currently unavailable for this trnx")
-				opError = fmt.Errorf("quorums are uncurrently available for this trnx")
-				allQuorumSetup = false
-				break
-			}
-		}
 
-		// If all items in the group have the response message as "quorum is setup",
-		// append the group to finalQl
-		if allQuorumSetup {
-			finalQl = append(finalQl, group...)
-			break
+			if strings.Contains(msg, "Quorum is not setup") {
+				errMsg := fmt.Sprintf("Quorum %v is not setup", item)
+				c.log.Error(errMsg)
+				continue
+			}
+
+			activeQuorumList = append(activeQuorumList, item)
 		}
 	}
-	// Return finalQl
-	return finalQl, opError
+
+	return activeQuorumList
 }
