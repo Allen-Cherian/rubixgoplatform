@@ -30,6 +30,7 @@ const (
 	TokenIsBeingDoubleSpent
 	TokenIsPinnedAsService
 	TokenIsBurntForFT
+	TokenIsSpendable
 	QuorumPledgedForThisToken int = 20
 )
 const (

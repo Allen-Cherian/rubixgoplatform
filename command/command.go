@@ -332,6 +332,8 @@ type Command struct {
 	defaultSetup                 bool
 	apiKey                       string
 	nftValue                     float64
+	thresholdAmount  float64
+	thresholdPercent  int
 }
 
 func showVersion() {
@@ -552,6 +554,8 @@ func Run(args []string) {
 	flag.BoolVar(&cmd.defaultSetup, "defaultSetup", false, "Add Faucet Quorums")
 	flag.StringVar(&cmd.apiKey, "apikey", "", "Give the API Key corresponding to the DID")
 	flag.Float64Var(&cmd.nftValue, "nftValue", 0.0, "Value of the NFT")
+	flag.Float64Var(&cmd.thresholdAmount, "thresholdAmount", 30, "minimum value to be prepledged")
+	flag.IntVar(&cmd.thresholdPercent, "thersholdPercent", 50, "minimum percentage of total token to be prepledged")
 
 	if len(os.Args) < 2 {
 		fmt.Println("Invalid Command")

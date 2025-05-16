@@ -1354,3 +1354,46 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 	go c.syncFullTokenChains(tokenSyncMap)
 
 }
+
+// prepledging
+func (c *Core) PrePledgeFreeTokens(reqID string, request *model.PrePledgeRequest) (*model.BasicResponse, error) {
+	response := &model.BasicResponse{
+		Status: false,
+	}
+
+	// finalise pre pledge amount
+	accountInfo, err := c.GetAccountInfo(request.DID)
+	if err != nil {
+		c.log.Error("failed to get account info for prepledge, err", err)
+		response.Message = "failed to get account info for prepledge"
+		return response, err
+	}
+
+	prePledgeAmount := request.ThresholdAmount
+	if request.ThresholdAmount < float64((request.ThresholdPercent/100)*int(accountInfo.RBTAmount)) {
+		prePledgeAmount = float64((request.ThresholdPercent / 100) * int(accountInfo.RBTAmount))
+	}
+
+	dc, err := c.SetupDID(reqID, request.DID)
+	if err != nil {
+		response.Message = "Failed to setup DID, err : " + err.Error()
+		return response, err
+	}
+
+	req := &model.RBTTransferRequest{
+		Sender:     request.DID,
+		TokenCount: prePledgeAmount,
+	}
+	tokensToPrePledge, err := gatherTokensForTransaction(c, req, dc, false)
+	if err != nil {
+		c.log.Error("failed to get tokens to pre pledge, err ", err)
+		response.Message = err.Error()
+		return response, err
+	}
+
+	// consensus to verify all free tokens
+
+	response.Status = true
+	response.Message = "pre-pledging completed successfully"
+	return response, nil
+}
