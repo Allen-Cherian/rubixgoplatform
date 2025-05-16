@@ -311,6 +311,9 @@ func (c *Core) RemoveAllBootStrap() error {
 }
 
 func (c *Core) GetAllBootStrap() []string {
+	if c.testNet {
+		return c.cfg.CfgData.TestBootStrap
+	}
 	return c.cfg.CfgData.BootStrap
 }
 

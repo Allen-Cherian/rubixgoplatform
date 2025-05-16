@@ -41,7 +41,7 @@ func (s *Server) APIAddBootStrap(req *ensweb.Request) *ensweb.Result {
 		return s.BasicResponse(req, false, "Bootstrap Peers required to add", nil)
 	}
 	for _, peer := range m.Peers {
-		if !strings.HasSuffix(peer, "/") {
+		if !strings.HasPrefix(peer, "/") {
 			s.log.Error(fmt.Sprintf("Invalid bootstrap peer : %s", peer))
 			return s.BasicResponse(req, false, "Invalid bootstrap peer", nil)
 		}
@@ -65,7 +65,7 @@ func (s *Server) APIRemoveBootStrap(req *ensweb.Request) *ensweb.Result {
 		return s.BasicResponse(req, false, "Bootstrap peers required to remove", nil)
 	}
 	for _, peer := range m.Peers {
-		if !strings.HasSuffix(peer, "/") {
+		if !strings.HasPrefix(peer, "/") {
 			s.log.Error(fmt.Sprintf("Invalid bootstrap peer : %s", peer))
 			return s.BasicResponse(req, false, "Invalid bootstrap peer", nil)
 		}
