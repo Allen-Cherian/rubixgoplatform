@@ -251,9 +251,31 @@ func (c *Core) stopIPFS() {
 
 func (c *Core) AddBootStrap(peers []string) error {
 	if c.testNet {
-		c.cfg.CfgData.TestBootStrap = append(c.cfg.CfgData.TestBootStrap, peers...)
+		for _, p := range peers {
+			alreadyExists := false
+			for _, existing := range c.cfg.CfgData.TestBootStrap {
+				if existing == p {
+					alreadyExists = true
+					break
+				}
+			}
+			if !alreadyExists {
+				c.cfg.CfgData.TestBootStrap = append(c.cfg.CfgData.TestBootStrap, p)
+			}
+		}
 	} else {
-		c.cfg.CfgData.BootStrap = append(c.cfg.CfgData.BootStrap, peers...)
+		for _, p := range peers {
+			alreadyExists := false
+			for _, existing := range c.cfg.CfgData.BootStrap {
+				if existing == p {
+					alreadyExists = true
+					break
+				}
+			}
+			if !alreadyExists {
+				c.cfg.CfgData.BootStrap = append(c.cfg.CfgData.BootStrap, peers...)
+			}
+		}
 	}
 	err := c.updateConfig()
 	if err != nil {
