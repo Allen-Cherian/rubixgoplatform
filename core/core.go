@@ -644,20 +644,29 @@ func (c *Core) FetchDID(did string) error {
 }
 
 func (c *Core) GetNFTFromIpfs(nftTokenHash string, nftFolderHash string) error {
-	_, err := os.Stat(c.cfg.DirPath + "NFT/" + nftTokenHash)
-	if err != nil {
-		err = os.MkdirAll(c.cfg.DirPath+"NFT/"+nftTokenHash, os.ModeDir|os.ModePerm)
+	dirPath := c.cfg.DirPath + "NFT/" + nftTokenHash
+	// Check if the directory exists
+	_, err := os.Stat(dirPath)
+	if os.IsNotExist(err) {
+		// If the directory does not exist, create it
+		err = os.MkdirAll(dirPath, os.ModeDir|os.ModePerm)
 		if err != nil {
 			c.log.Error("failed to create directory", "err", err)
 			return err
 		}
-		err = c.ipfs.Get(nftFolderHash, c.cfg.DirPath+"NFT/"+nftTokenHash)
-		if err != nil {
-			c.log.Error("failed to get NFT from IPFS", "err", err)
-			return err
-		}
+	} else if err != nil {
+		// Handle other errors while checking directory existence
+		c.log.Error("failed to check directory existence", "err", err)
+		return err
 	}
-	return err
+	// Fetch NFT data from IPFS and store in the directory
+	err = c.ipfs.Get(nftFolderHash, dirPath)
+	if err != nil {
+		c.log.Error("failed to get NFT from IPFS", "err", err)
+		return err
+	}
+	c.log.Info("NFT data fetched successfully from ipfs")
+	return nil
 }
 
 func (c *Core) GetPeerID() string {

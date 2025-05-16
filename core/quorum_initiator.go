@@ -392,19 +392,17 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		return nil, nil, nil, fmt.Errorf("failed to get required quorums")
 	}
 
-	var finalQl []string
-	var errFQL error
+	var activeQuorumLists []string
+
 	if cr.Type == 2 {
-		finalQl, errFQL = c.GetFinalQuorumList(ql)
-		if errFQL != nil {
-			c.log.Error("unable to get consensus from quorum(s). err: ", errFQL)
-			return nil, nil, nil, errFQL
-		}
-		cr.QuorumList = finalQl
-		if len(finalQl) < MinQuorumRequired {
+		activeQuorumLists = c.GetActiveQuorums(ql)
+		c.log.Debug(fmt.Sprintf("Total Active Quorums: %d", len(activeQuorumLists)))
+		if len(activeQuorumLists) < MinQuorumRequired {
 			c.log.Error("quorum(s) are unavailable for this trnx")
 			return nil, nil, nil, fmt.Errorf("quorum(s) are unavailable for this trnx. retry trnx after some time")
 		}
+
+		cr.QuorumList = activeQuorumLists
 	} else {
 		cr.QuorumList = ql
 	}
@@ -1394,6 +1392,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			Did:                    sc.GetExecutorDID(),
 			Type:                   ExecuteType,
 			SmartContractBlockHash: newBlockId,
+			SmartContractData:      sc.GetSmartContractData(),
 		}
 
 		err = c.publishNewEvent(&newEvent)
