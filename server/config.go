@@ -46,6 +46,7 @@ func (s *Server) APIAddBootStrap(req *ensweb.Request) *ensweb.Result {
 			return s.BasicResponse(req, false, "Invalid bootstrap peer", nil)
 		}
 	}
+
 	err = s.c.AddBootStrap(m.Peers)
 	if err != nil {
 		return s.BasicResponse(req, false, "Failed to add bootstrap peers, "+err.Error(), nil)
