@@ -659,8 +659,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
 				// fetch previous quorum's peer Id
-				previousQuorumInfo, _ := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" {
+				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
+				if previousQuorumInfo.PeerID == "" || err != nil {
 					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
 				}
 
@@ -859,8 +859,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
 				// fetch previous quorum's peer Id
-				previousQuorumInfo, _ := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" {
+				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
+				if previousQuorumInfo.PeerID == "" || err != nil {
 					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
 				}
 
@@ -1057,8 +1057,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
 				// fetch previous quorum's peer Id
-				previousQuorumInfo, _ := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" {
+				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
+				if previousQuorumInfo.PeerID == "" || err != nil {
 					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
 				}
 
@@ -1197,8 +1197,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
 				// fetch previous quorum's peer Id
-				previousQuorumInfo, _ := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" {
+				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
+				if previousQuorumInfo.PeerID == "" || err != nil {
 					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
 				}
 
@@ -1415,8 +1415,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		for _, previousQuorumDID := range previousQuorumDIDs {
 			// fetch previous quorum's peer Id
-			previousQuorumInfo, _ := c.GetPeerDIDInfo(previousQuorumDID)
-			if previousQuorumInfo.PeerID == "" {
+			previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
+			if previousQuorumInfo.PeerID == "" || err != nil {
 				return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
 			}
 
@@ -1564,8 +1564,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		for _, previousQuorumDID := range previousQuorumDIDs {
 			// fetch previous quorum's peer Id
-			previousQuorumInfo, _ := c.GetPeerDIDInfo(previousQuorumDID)
-			if previousQuorumInfo.PeerID == "" {
+			previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
+			if previousQuorumInfo.PeerID == "" || err != nil {
 				return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
 			}
 
