@@ -420,27 +420,19 @@ func (s *Server) TxnReqFromWallet(txnReq *model.RBTTransferRequest, req *ensweb.
 
 // initiates pre pledging of all free tokens
 func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
-	did := s.GetQuerry(req, "did")
-	if did == "" {
+	didStr := s.GetQuerry(req, "did")
+	if didStr == "" {
 		s.log.Error("DID cannot be empty")
 		return s.BasicResponse(req, false, "DID cannot be empty", nil)
 	}
-	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(did)
-	if !strings.HasPrefix(did, "bafybmi") || len(did) != 59 || !is_alphanumeric {
+	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(didStr)
+	if !strings.HasPrefix(didStr, "bafybmi") || len(didStr) != 59 || !is_alphanumeric {
 		s.log.Error("Invalid DID")
 		return s.BasicResponse(req, false, "Invalid DID", nil)
 	}
 
-	// parse request
-	var prePledgeRequest model.PrePledgeRequest
-	err := s.ParseJSON(req, prePledgeRequest)
-	if err != nil {
-		s.log.Error("failed to parse prepledge request, err ", err)
-		return s.BasicResponse(req, false, "failed to parse prepledge request", nil)
-	}
-
 	// start pre pledging for all free tokens
-	br, err := s.c.PrePledgeFreeTokens(req.ID, &prePledgeRequest)
+	br, err := s.c.PrePledgeFreeTokens(req.ID, didStr)
 	if err != nil {
 		s.log.Error("prepledging failed, err ", err)
 		return s.BasicResponse(req, false, err.Error(), nil)

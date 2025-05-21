@@ -621,7 +621,7 @@ func (c *Core) syncGenesisAndLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRe
 		c.log.Error("Failed to sync genesis and latest token chain block", "msg", trep.Message)
 		return fmt.Errorf(trep.Message)
 	}
-	
+
 	// add genesis block
 	if trep.GenesisBlock != nil {
 		fmt.Println("adding genesis block")
@@ -1356,39 +1356,71 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 }
 
 // prepledging
-func (c *Core) PrePledgeFreeTokens(reqID string, request *model.PrePledgeRequest) (*model.BasicResponse, error) {
+func (c *Core) PrePledgeFreeTokens(reqID string, didStr string) (*model.BasicResponse, error) {
 	response := &model.BasicResponse{
 		Status: false,
 	}
 
-	// finalise pre pledge amount
-	accountInfo, err := c.GetAccountInfo(request.DID)
-	if err != nil {
-		c.log.Error("failed to get account info for prepledge, err", err)
-		response.Message = "failed to get account info for prepledge"
-		return response, err
-	}
+	// dc, err := c.SetupDID(reqID, request.DID)
+	// if err != nil {
+	// 	response.Message = "Failed to setup DID, err : " + err.Error()
+	// 	return response, err
+	// }
 
-	prePledgeAmount := request.ThresholdAmount
-	if request.ThresholdAmount < float64((request.ThresholdPercent/100)*int(accountInfo.RBTAmount)) {
-		prePledgeAmount = float64((request.ThresholdPercent / 100) * int(accountInfo.RBTAmount))
-	}
-
-	dc, err := c.SetupDID(reqID, request.DID)
-	if err != nil {
-		response.Message = "Failed to setup DID, err : " + err.Error()
-		return response, err
-	}
-
-	req := &model.RBTTransferRequest{
-		Sender:     request.DID,
-		TokenCount: prePledgeAmount,
-	}
-	tokensToPrePledge, err := gatherTokensForTransaction(c, req, dc, false)
+	freeTokensList, err := c.w.GetAllFreeToken(didStr)
 	if err != nil {
 		c.log.Error("failed to get tokens to pre pledge, err ", err)
 		response.Message = err.Error()
 		return response, err
+	}
+	var tokensToPrePledge []wallet.Token
+
+	// fetch last block of each token and verify if it is burnt
+	for _, token := range freeTokensList {
+		// get latest block
+		tokenType := RBTString
+		if token.TokenValue < 1.0 {
+			tokenType = PartString
+		}
+		latestBlock := c.w.GetLatestTokenBlock(token.TokenID, c.TokenType(tokenType))
+		blockHeight, err := latestBlock.GetBlockNumber(token.TokenID)
+		if err != nil {
+			c.log.Error("failed to get latest block number for token ", token.TokenID)
+			continue
+		}
+		txnType := latestBlock.GetTransType()
+		switch txnType {
+		case block.TokenBurntType:
+			token.TokenStatus = wallet.TokenIsBurnt
+			c.w.UpdateToken(&token)
+			c.log.Error("token is burnt, cannot be spent; toke ID ", token.TokenID)
+			continue
+		case block.TokenGeneratedType:
+			//initial token owner signature verification
+			response, err = c.ValidateTokenOwner(latestBlock, didStr)
+			if err != nil {
+				c.log.Error("invalid token owner in genesis block of token ", token.TokenID)
+				continue
+			}
+		case block.TokenTransferredType:
+			if blockHeight == 0 {
+				//initial token owner signature verification
+				response, err = c.ValidateTokenOwner(latestBlock, didStr)
+				if err != nil {
+					c.log.Error("invalid token owner in genesis block of token ", token.TokenID)
+					continue
+				}
+			}
+			// validate quorums
+			_, err := c.ValidateQuorums(latestBlock, didStr)
+			if err != nil {
+				c.log.Error("failed to validate quorums, err ", err, "token ", token.TokenID)
+				continue
+			}
+
+		}
+		tokensToPrePledge = append(tokensToPrePledge, token)
+
 	}
 
 	// consensus to verify all free tokens

@@ -102,8 +102,3 @@ type PinCheckReply struct {
 	PinDetails *TokenProviderMap `json:"pin_details"`
 }
 
-type PrePledgeRequest struct {
-	DID              string  `json:"did"`
-	ThresholdAmount  float64 `json:"threshold_amount"`
-	ThresholdPercent int     `json:"threshold_percent"`
-}
