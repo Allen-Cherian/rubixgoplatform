@@ -50,6 +50,12 @@ const (
 	SyncCompleted
 )
 
+type PrePledgeRequest struct {
+	DID             string  `json:"did"`
+	// PrePledgeTokens []Token `json:"prepledge_tokens"`
+	QuorumType      int     `json:"quorum_type"`
+}
+
 type Token struct {
 	TokenID        string  `gorm:"column:token_id;primaryKey"`
 	ParentTokenID  string  `gorm:"column:parent_token_id"`

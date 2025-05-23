@@ -797,8 +797,9 @@ func (b *Block) GetQuorumSignatureList() ([]CreditSignature, error) {
 			if err != nil {
 				fmt.Println(err)
 			}
+			// in older versions (<v0.0.17), there was no field as sign type and all signatures were NLSS signatures
 			if quorumSig.SignType == "" {
-				quorumSig.SignType = "0"
+				quorumSig.SignType = strconv.Itoa(didmodule.NlssVersion)
 			}
 		} else {
 			//fetch quorum did

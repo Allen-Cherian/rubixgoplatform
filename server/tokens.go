@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/rubixchain/rubixgoplatform/core/model"
+	"github.com/rubixchain/rubixgoplatform/core/wallet"
 	"github.com/rubixchain/rubixgoplatform/did"
 	"github.com/rubixchain/rubixgoplatform/util"
 	"github.com/rubixchain/rubixgoplatform/wrapper/ensweb"
@@ -420,23 +421,26 @@ func (s *Server) TxnReqFromWallet(txnReq *model.RBTTransferRequest, req *ensweb.
 
 // initiates pre pledging of all free tokens
 func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
-	didStr := s.GetQuerry(req, "did")
-	if didStr == "" {
-		s.log.Error("DID cannot be empty")
-		return s.BasicResponse(req, false, "DID cannot be empty", nil)
+	// didStr := s.GetQuerry(req, "did")
+	// if didStr == "" {
+	// 	s.log.Error("DID cannot be empty")
+	// 	return s.BasicResponse(req, false, "DID cannot be empty", nil)
+	// }
+
+	var prePledgeReq *wallet.PrePledgeRequest
+	err := s.ParseJSON(req, &prePledgeReq)
+	if err != nil {
+		return s.BasicResponse(req, false, "Invalid input to pre-pledge request", nil)
 	}
-	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(didStr)
-	if !strings.HasPrefix(didStr, "bafybmi") || len(didStr) != 59 || !is_alphanumeric {
+
+	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(prePledgeReq.DID)
+	if !strings.HasPrefix(prePledgeReq.DID, "bafybmi") || len(prePledgeReq.DID) != 59 || !is_alphanumeric {
 		s.log.Error("Invalid DID")
 		return s.BasicResponse(req, false, "Invalid DID", nil)
 	}
 
 	// start pre pledging for all free tokens
-	br, err := s.c.PrePledgeFreeTokens(req.ID, didStr)
-	if err != nil {
-		s.log.Error("prepledging failed, err ", err)
-		return s.BasicResponse(req, false, err.Error(), nil)
-	}
+	br := s.c.InitiateRBTPrePledge(req.ID, prePledgeReq)
 
 	return s.RenderJSON(req, br, http.StatusOK)
 }

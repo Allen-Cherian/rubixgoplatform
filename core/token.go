@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/rubixchain/rubixgoplatform/block"
+	"github.com/rubixchain/rubixgoplatform/contract"
 	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
+	"github.com/rubixchain/rubixgoplatform/did"
 	"github.com/rubixchain/rubixgoplatform/rac"
 	"github.com/rubixchain/rubixgoplatform/token"
 	"github.com/rubixchain/rubixgoplatform/util"
@@ -1355,77 +1357,164 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 
 }
 
-// prepledging
-func (c *Core) PrePledgeFreeTokens(reqID string, didStr string) (*model.BasicResponse, error) {
-	response := &model.BasicResponse{
+func (c *Core) InitiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) *model.BasicResponse {
+	st := time.Now()
+	txEpoch := int(st.Unix())
+
+	resp := &model.BasicResponse{
 		Status: false,
 	}
 
-	// dc, err := c.SetupDID(reqID, request.DID)
-	// if err != nil {
-	// 	response.Message = "Failed to setup DID, err : " + err.Error()
-	// 	return response, err
-	// }
-
-	freeTokensList, err := c.w.GetAllFreeToken(didStr)
+	freeTokensList, err := c.w.GetAllFreeToken(req.DID)
 	if err != nil {
 		c.log.Error("failed to get tokens to pre pledge, err ", err)
-		response.Message = err.Error()
-		return response, err
+		resp.Message = err.Error()
+		return resp
 	}
-	var tokensToPrePledge []wallet.Token
 
-	// fetch last block of each token and verify if it is burnt
-	for _, token := range freeTokensList {
-		// get latest block
-		tokenType := RBTString
-		if token.TokenValue < 1.0 {
-			tokenType = PartString
+	senderDID := req.DID
+	isSelfRBTTransfer := false
+
+	dc, err := c.SetupDID(reqID, senderDID)
+	if err != nil {
+		resp.Message = "Failed to setup DID, " + err.Error()
+		return resp
+	}
+
+	tokenInfoList := make([]contract.TokenInfo, 0)
+	tokensToPrePledge := make([]wallet.Token, 0)
+
+	for _, tokeninfo := range freeTokensList {
+		tokenTypeStr := "rbt"
+		if tokeninfo.TokenValue != 1 {
+			tokenTypeStr = "part"
 		}
-		latestBlock := c.w.GetLatestTokenBlock(token.TokenID, c.TokenType(tokenType))
-		blockHeight, err := latestBlock.GetBlockNumber(token.TokenID)
+		tokenType := c.TokenType(tokenTypeStr)
+
+		// get latest block of the token
+		latestBlock := c.w.GetLatestTokenBlock(tokeninfo.TokenID, tokenType)
+		if latestBlock == nil {
+			c.log.Error("failed to get latest block, invalid token chain")
+			resp.Message = "failed to get latest block, invalid token chain"
+			return resp
+		}
+
+		// fetch pledged-quorum details from latest block and store their details
+		blockHeight, err := latestBlock.GetBlockNumber(tokeninfo.TokenID)
 		if err != nil {
-			c.log.Error("failed to get latest block number for token ", token.TokenID)
+			c.log.Error("failed to fetch token chain height; token ", tokeninfo.TokenID)
 			continue
 		}
-		txnType := latestBlock.GetTransType()
-		switch txnType {
+		//check if the transaction in prev block involved any quorums
+		switch latestBlock.GetTransType() {
 		case block.TokenBurntType:
-			token.TokenStatus = wallet.TokenIsBurnt
-			c.w.UpdateToken(&token)
-			c.log.Error("token is burnt, cannot be spent; toke ID ", token.TokenID)
+			tokeninfo.TokenStatus = wallet.TokenIsBurnt
+			c.w.UpdateToken(&tokeninfo)
+			c.log.Error("token is burnt, can't transfer further; token ", tokeninfo.TokenID)
 			continue
-		case block.TokenGeneratedType:
-			//initial token owner signature verification
-			response, err = c.ValidateTokenOwner(latestBlock, didStr)
-			if err != nil {
-				c.log.Error("invalid token owner in genesis block of token ", token.TokenID)
-				continue
-			}
 		case block.TokenTransferredType:
-			if blockHeight == 0 {
-				//initial token owner signature verification
-				response, err = c.ValidateTokenOwner(latestBlock, didStr)
-				if err != nil {
-					c.log.Error("invalid token owner in genesis block of token ", token.TokenID)
-					continue
+			if blockHeight != 0 {
+				// validate quorums
+				quorumSignList, err := latestBlock.GetQuorumSignatureList()
+				if err != nil || quorumSignList == nil {
+					c.log.Error("failed to get quorum signature list")
+				}
+
+				for _, qrm := range quorumSignList {
+					prevQuorumInfo := &wallet.DIDPeerMap{
+						DID: qrm.DID,
+					}
+					liteDidType := did.LiteDIDMode
+					basicDidType := did.BasicDIDMode
+					// decide did type as per sign type
+					if qrm.SignType == strconv.Itoa(did.BIPVersion) { //qrm sign type = 0, means qrm signature is BIP sign and DID is created in Lite mode
+						prevQuorumInfo.DIDType = &liteDidType
+					} else {
+						prevQuorumInfo.DIDType = &basicDidType
+					}
+					prevQuorumPeerId := c.w.GetPeerID(qrm.DID)
+					if prevQuorumPeerId == "" {
+						// if peer id not found in table, try to fetch from explorer for mainnet RBTs
+						peerDIDInfo, err := c.GetPeerFromExplorer(qrm.DID)
+						if err != nil {
+							c.log.Error("failed to fetch peer Id from explorer for ", qrm.DID, "err", err)
+						} else if peerDIDInfo == nil {
+							c.log.Error("failed to fetch peer Id from explorer for ", qrm.DID)
+						} else {
+							prevQuorumInfo.PeerID = peerDIDInfo.PeerID
+							// check if did type and sign type mismatch
+							if peerDIDInfo.DIDType != prevQuorumInfo.DIDType {
+								prevQuorumInfo.DIDType = peerDIDInfo.DIDType
+							}
+						}
+					} else {
+						prevQuorumInfo.PeerID = prevQuorumPeerId
+					}
+					c.AddPeerDetails(*prevQuorumInfo)
 				}
 			}
-			// validate quorums
-			_, err := c.ValidateQuorums(latestBlock, didStr)
-			if err != nil {
-				c.log.Error("failed to validate quorums, err ", err, "token ", token.TokenID)
-				continue
-			}
-
+			tokensToPrePledge = append(tokensToPrePledge, tokeninfo)
 		}
-		tokensToPrePledge = append(tokensToPrePledge, token)
+
+		// pin token by token owner, in case it is not pinned
+		c.w.Pin(tokeninfo.TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.DID, "", tokeninfo.TokenValue)
+
+		// fetch latest block details and prepare tokens for consensus
+		blockId, err := latestBlock.GetBlockID(tokeninfo.TokenID)
+		if err != nil {
+			c.log.Error("failed to get block id", "err", err)
+			resp.Message = "failed to get block id, " + err.Error()
+			return resp
+		}
+		tokenInfo := contract.TokenInfo{
+			Token:      tokeninfo.TokenID,
+			TokenType:  tokenType,
+			TokenValue: floatPrecision(tokeninfo.TokenValue, MaxDecimalPlaces),
+			OwnerDID:   tokeninfo.DID,
+			BlockID:    blockId,
+		}
+		tokenInfoList = append(tokenInfoList, tokenInfo)
+		// tokenListForExplorer = append(tokenListForExplorer, Token{TokenHash: tokenInfo.Token, TokenValue: tokenInfo.TokenValue})
 
 	}
 
-	// consensus to verify all free tokens
+	convertReq := &model.RBTTransferRequest{
+		Sender:   req.DID,
+		Receiver: "", // no receiver while pre-pledging
+		Type:     req.QuorumType,
+	}
 
-	response.Status = true
-	response.Message = "pre-pledging completed successfully"
-	return response, nil
+	contractType := getContractType(reqID, convertReq, tokenInfoList, isSelfRBTTransfer)
+	sc := contract.CreateNewContract(contractType)
+
+	err = sc.UpdateSignature(dc)
+	if err != nil {
+		c.log.Error(err.Error())
+		resp.Message = err.Error()
+		return resp
+	}
+
+	cr := getConsensusRequest(req.QuorumType, c.peerID, "", sc.GetBlock(), txEpoch, isSelfRBTTransfer)
+
+	// initiate consensus for pre-pledging
+	_, _, _, err = c.initiateConsensus(cr, sc, dc)
+	if err != nil {
+		c.log.Error("Consensus failed ", "err", err)
+		resp.Message = "Consensus failed " + err.Error()
+		return resp
+	}
+
+	// update token status to spendable
+	for _, tokeninfo := range tokensToPrePledge {
+		tokeninfo.TokenStatus = wallet.TokenIsSpendable
+		err := c.w.UpdateToken(&tokeninfo)
+		if err != nil {
+			c.log.Error("failed to update token status as spendable, token ", tokeninfo.TokenID)
+			continue
+		}
+	}
+
+	// TODO : add transaction details to DB
+
+	return resp
 }
