@@ -421,11 +421,6 @@ func (s *Server) TxnReqFromWallet(txnReq *model.RBTTransferRequest, req *ensweb.
 
 // initiates pre pledging of all free tokens
 func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
-	// didStr := s.GetQuerry(req, "did")
-	// if didStr == "" {
-	// 	s.log.Error("DID cannot be empty")
-	// 	return s.BasicResponse(req, false, "DID cannot be empty", nil)
-	// }
 
 	var prePledgeReq *wallet.PrePledgeRequest
 	err := s.ParseJSON(req, &prePledgeReq)
@@ -439,8 +434,19 @@ func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
 		return s.BasicResponse(req, false, "Invalid DID", nil)
 	}
 
-	// start pre pledging for all free tokens
-	br := s.c.InitiateRBTPrePledge(req.ID, prePledgeReq)
-
-	return s.RenderJSON(req, br, http.StatusOK)
+	if !strings.HasPrefix(prePledgeReq.DID, "bafybmi") || len(prePledgeReq.DID) != 59 {
+		s.log.Error("Invalid sender or receiver DID")
+		return s.BasicResponse(req, false, "Invalid sender or receiver DID", nil)
+	}
+	
+	if prePledgeReq.QuorumType < 1 || prePledgeReq.QuorumType > 2 {
+		s.log.Error("Invalid trans type. TransType should be 1 or 2")
+		return s.BasicResponse(req, false, "Invalid trans type. TransType should be 1 or 2", nil)
+	}
+	if !s.validateDIDAccess(req, prePledgeReq.DID) {
+		return s.BasicResponse(req, false, "DID does not have an access", nil)
+	}
+	s.c.AddWebReq(req)
+	go s.c.InitiateRBTPrePledge(req.ID, prePledgeReq)
+	return s.didResponse(req, req.ID)
 }

@@ -1357,7 +1357,17 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 
 }
 
-func (c *Core) InitiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) *model.BasicResponse {
+func (c *Core) InitiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) {
+	br := c.initiateRBTPrePledge(reqID, req)
+	dc := c.GetWebReq(reqID)
+	if dc == nil {
+		c.log.Error("Failed to get did channels")
+		return
+	}
+	dc.OutChan <- br
+}
+
+func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) *model.BasicResponse {
 	st := time.Now()
 	txEpoch := int(st.Unix())
 
