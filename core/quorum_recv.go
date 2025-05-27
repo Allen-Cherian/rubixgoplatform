@@ -147,11 +147,23 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		ReqID:  cr.ReqID,
 		Status: false,
 	}
-	ok, sc := c.verifyContract(cr, did)
-	if !ok {
-		crep.Message = "Failed to verify sender signature"
+	
+	sc := contract.InitContract(cr.ContractBlock, nil)
+	//initiate trans token block
+	transTknBlock := block.InitBlock(cr.TransTokenBlock, nil, block.NoSignature())
+	if transTknBlock == nil {
+		c.log.Error("Failed to do signature, invalid token chain block")
+		crep.Message = "Failed to do signature, invalid token chanin block"
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
+	//Validate sender signature
+	response, err := c.ValidateTxnInitiator(transTknBlock)
+	if err != nil {
+		c.log.Error("signature request failed, msg", response.Message, "err", err)
+		crep.Message = response.Message
+		return c.l.RenderJSON(req, &crep, http.StatusOK)
+	}
+
 	//check if token has multiple pins
 	ti := sc.GetTransTokenInfo()
 	results := make([]MultiPinCheckRes, len(ti))
@@ -241,7 +253,12 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	}
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
-	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
+	var receiver string
+	if sc.GetReceiverDID() != "" {
+		receiver = cr.ReceiverPeerID + "." + sc.GetReceiverDID()
+	} else {
+		receiver = ""
+	}
 	err1 := c.pinTokenState(tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
 	if err1 != nil {
 		crep.Message = "Error Pinning token state" + err.Error()
@@ -250,8 +267,15 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 
 	c.log.Debug("Finished Tokenstate check")
 
-	qHash := util.CalculateHash(sc.GetBlock(), "SHA3-256")
-	qsb, ppb, err := qdc.Sign(util.HexToStr(qHash))
+	//get trans token block hash
+	txnBlockHash, err := transTknBlock.GetHash()
+	if err != nil {
+		c.log.Error("failed to get trans-block-hash for credit; err", err)
+		crep.Message = err.Error()
+		return c.l.RenderJSON(req, &crep, http.StatusOK)
+	}
+	//quorum's signature on block hash
+	qsb, ppb, err := qdc.Sign(txnBlockHash)
 	if err != nil {
 		c.log.Error("Failed to get quorum signature", "err", err)
 		crep.Message = "Failed to get quorum signature"
@@ -262,6 +286,7 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	crep.Message = "Conensus finished successfully"
 	crep.ShareSig = qsb
 	crep.PrivSig = ppb
+	crep.Hash = txnBlockHash
 	return c.l.RenderJSON(req, &crep, http.StatusOK)
 }
 
@@ -360,28 +385,43 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 	// setup the did to verify the signature
 	c.log.Debug("VEryfying the deployer signature")
 
-	var verifyDID string
+	// var verifyDID string
 
-	if consensusRequest.Mode == SmartContractDeployMode {
-		c.log.Debug("Fetching Deployer DID")
-		verifyDID = consensusContract.GetDeployerDID()
-		c.log.Debug("deployer did ", verifyDID)
-	} else {
-		c.log.Debug("Fetching Executor DID")
-		verifyDID = consensusContract.GetExecutorDID()
-		c.log.Debug("executor did ", verifyDID)
-	}
+	// if consensusRequest.Mode == SmartContractDeployMode {
+	// 	c.log.Debug("Fetching Deployer DID")
+	// 	verifyDID = consensusContract.GetDeployerDID()
+	// 	c.log.Debug("deployer did ", verifyDID)
+	// } else {
+	// 	c.log.Debug("Fetching Executor DID")
+	// 	verifyDID = consensusContract.GetExecutorDID()
+	// 	c.log.Debug("executor did ", verifyDID)
+	// }
 
-	dc, err := c.SetupForienDID(verifyDID, did)
-	if err != nil {
-		c.log.Error("Failed to get DID for verification", "err", err)
-		consensusReply.Message = "Failed to get DID for verification"
+	// dc, err := c.SetupForienDID(verifyDID, did)
+	// if err != nil {
+	// 	c.log.Error("Failed to get DID for verification", "err", err)
+	// 	consensusReply.Message = "Failed to get DID for verification"
+	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	// }
+	// err = consensusContract.VerifySignature(dc)
+	// if err != nil {
+	// 	c.log.Error("Failed to verify signature", "err", err)
+	// 	consensusReply.Message = "Failed to verify signature"
+	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	// }
+
+	//initiate trans token block
+	transSCBlock := block.InitBlock(consensusRequest.TransTokenBlock, nil, block.NoSignature())
+	if transSCBlock == nil {
+		c.log.Error("Failed to do signature, invalid NFT")
+		consensusReply.Message = "Failed to do signature, invalid NFT"
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	err = consensusContract.VerifySignature(dc)
+	//Validate sender signature
+	response, err := c.ValidateTxnInitiator(transSCBlock)
 	if err != nil {
-		c.log.Error("Failed to verify signature", "err", err)
-		consensusReply.Message = "Failed to verify signature"
+		c.log.Error("signature request failed, msg", response.Message, "err", err)
+		consensusReply.Message = response.Message
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 
@@ -487,8 +527,15 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 	}
 	c.log.Debug("Finished Tokenstate check")
 
-	qHash := util.CalculateHash(consensusContract.GetBlock(), "SHA3-256")
-	qsb, ppb, err := qdc.Sign(util.HexToStr(qHash))
+	//get trans token block hash
+	txnBlockHash, err := transSCBlock.GetHash()
+	if err != nil {
+		c.log.Error("failed to get trans-block-hash for credit; err", err)
+		consensusReply.Message = err.Error()
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
+	//quorum's signature on block hash
+	qsb, ppb, err := qdc.Sign(txnBlockHash)
 	if err != nil {
 		c.log.Error("Failed to get quorum signature", "err", err)
 		consensusReply.Message = "Failed to get quorum signature"
@@ -499,6 +546,7 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 	consensusReply.Message = "Consensus finished successfully"
 	consensusReply.ShareSig = qsb
 	consensusReply.PrivSig = ppb
+	consensusReply.Hash = txnBlockHash
 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 }
 
@@ -516,28 +564,43 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	// setup the did to verify the signature
 	c.log.Info("Verifying the deployer signature while deploying nft")
 
-	var verifyDID string
+	// var verifyDID string
 
-	if consensusRequest.Mode == NFTDeployMode {
-		c.log.Debug("Fetching NFT Deployer DID")
-		verifyDID = consensusContract.GetDeployerDID()
-		c.log.Debug("deployer did ", verifyDID)
-	} else {
-		c.log.Debug("Fetching NFT Executor DID")
-		verifyDID = consensusContract.GetExecutorDID()
-		c.log.Debug("Executor did ", verifyDID)
-	}
+	// if consensusRequest.Mode == NFTDeployMode {
+	// 	c.log.Debug("Fetching NFT Deployer DID")
+	// 	verifyDID = consensusContract.GetDeployerDID()
+	// 	c.log.Debug("deployer did ", verifyDID)
+	// } else {
+	// 	c.log.Debug("Fetching NFT Executor DID")
+	// 	verifyDID = consensusContract.GetExecutorDID()
+	// 	c.log.Debug("Executor did ", verifyDID)
+	// }
 
-	dc, err := c.SetupForienDID(verifyDID, did)
-	if err != nil {
-		c.log.Error("Failed to get DID for verification", "err", err)
-		consensusReply.Message = "Failed to get DID for verification"
+	// dc, err := c.SetupForienDID(verifyDID, did)
+	// if err != nil {
+	// 	c.log.Error("Failed to get DID for verification", "err", err)
+	// 	consensusReply.Message = "Failed to get DID for verification"
+	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	// }
+	// err = consensusContract.VerifySignature(dc)
+	// if err != nil {
+	// 	c.log.Error("Failed to verify signature", "err", err)
+	// 	consensusReply.Message = "Failed to verify signature"
+	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	// }
+
+	//initiate trans token block
+	transNFTBlock := block.InitBlock(consensusRequest.TransTokenBlock, nil, block.NoSignature())
+	if transNFTBlock == nil {
+		c.log.Error("Failed to do signature, invalid NFT")
+		consensusReply.Message = "Failed to do signature, invalid NFT"
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	err = consensusContract.VerifySignature(dc)
+	//Validate sender signature
+	response, err := c.ValidateTxnInitiator(transNFTBlock)
 	if err != nil {
-		c.log.Error("Failed to verify signature", "err", err)
-		consensusReply.Message = "Failed to verify signature"
+		c.log.Error("signature request failed, msg", response.Message, "err", err)
+		consensusReply.Message = response.Message
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 
@@ -643,8 +706,15 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	}
 	c.log.Debug("Finished Tokenstate check")
 
-	qHash := util.CalculateHash(consensusContract.GetBlock(), "SHA3-256")
-	qsb, ppb, err := qdc.Sign(util.HexToStr(qHash))
+	//get trans token block hash
+	txnBlockHash, err := transNFTBlock.GetHash()
+	if err != nil {
+		c.log.Error("failed to get trans-block-hash for credit; err", err)
+		consensusReply.Message = err.Error()
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
+	//quorum's signature on block hash
+	qsb, ppb, err := qdc.Sign(txnBlockHash)
 	if err != nil {
 		c.log.Error("Failed to get quorum signature", "err", err)
 		consensusReply.Message = "Failed to get quorum signature"
@@ -655,18 +725,33 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	consensusReply.Message = "Consensus finished successfully"
 	consensusReply.ShareSig = qsb
 	consensusReply.PrivSig = ppb
+	consensusReply.Hash = txnBlockHash
 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 }
 
-func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.DIDCrypto, cr *ConensusRequest) *ensweb.Result {
-	crep := ConensusReply{
-		ReqID:  cr.ReqID,
+func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.DIDCrypto, consensusRequest *ConensusRequest) *ensweb.Result {
+	consensusReply := ConensusReply{
+		ReqID:  consensusRequest.ReqID,
 		Status: false,
 	}
-	ok, sc := c.verifyContract(cr, did)
-	if !ok {
-		crep.Message = "Failed to verify sender signature"
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
+
+	sc := contract.InitContract(consensusRequest.ContractBlock, nil)
+	// setup the did to verify the signature
+	c.log.Debug("VEryfying the initiator signature")
+
+	//initiate trans token block
+	transNFTBlock := block.InitBlock(consensusRequest.TransTokenBlock, nil, block.NoSignature())
+	if transNFTBlock == nil {
+		c.log.Error("Failed to do signature, invalid NFT")
+		consensusReply.Message = "Failed to do signature, invalid NFT"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
+	//Validate sender signature
+	response, err := c.ValidateTxnInitiator(transNFTBlock)
+	if err != nil {
+		c.log.Error("signature request failed, msg", response.Message, "err", err)
+		consensusReply.Message = response.Message
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 	//check if token has multiple pins
 	ti := sc.GetTransTokenInfo()
@@ -674,43 +759,43 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	var wg sync.WaitGroup
 	for i := range ti {
 		wg.Add(1)
-		go c.pinCheck(ti[i].Token, i, cr.SenderPeerID, cr.ReceiverPeerID, results, &wg)
+		go c.pinCheck(ti[i].Token, i, consensusRequest.SenderPeerID, consensusRequest.ReceiverPeerID, results, &wg)
 	}
 	wg.Wait()
 	for i := range results {
 		if results[i].Error != nil {
 			c.log.Error("Error occured", "error", results[i].Error)
-			crep.Message = "Error while cheking FT Token multiple Pins"
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			consensusReply.Message = "Error while cheking FT Token multiple Pins"
+			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 		if results[i].Status {
 			c.log.Error("FT Token has multiple owners", "FT token", results[i].Token, "owners", results[i].Owners)
-			crep.Message = "FT Token has multiple owners"
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			consensusReply.Message = "FT Token has multiple owners"
+			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 	}
 
 	// check token ownership
 
-	validateTokenOwnershipVar, err := c.validateTokenOwnership(cr, sc, did)
+	validateTokenOwnershipVar, err := c.validateTokenOwnership(consensusRequest, sc, did)
 	if err != nil {
 		validateTokenOwnershipErrorString := fmt.Sprint(err)
 		if strings.Contains(validateTokenOwnershipErrorString, "parent token is not in burnt stage") {
-			crep.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			consensusReply.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
+			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 		if strings.Contains(validateTokenOwnershipErrorString, "failed to sync tokenchain Token") {
-			crep.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			consensusReply.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
+			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 		c.log.Error("Tokens ownership check failed")
-		crep.Message = "Token ownership check failed, err : " + err.Error()
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
+		consensusReply.Message = "Token ownership check failed, err : " + err.Error()
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 	if !validateTokenOwnershipVar {
 		c.log.Error("Tokens ownership check failed")
-		crep.Message = "Token ownership check failed"
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
+		consensusReply.Message = "Token ownership check failed"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 	/* 	if !c.validateTokenOwnership(cr, sc) {
 		c.log.Error("Token ownership check failed")
@@ -732,47 +817,55 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
 	for i := range ti {
 		wg.Add(1)
-		go c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, &wg, cr.QuorumList, ti[i].TokenType)
+		go c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, &wg, consensusRequest.QuorumList, ti[i].TokenType)
 	}
 	wg.Wait()
 
 	for i := range tokenStateCheckResult {
 		if tokenStateCheckResult[i].Error != nil {
 			c.log.Error("Error occured", "error", tokenStateCheckResult[i].Error)
-			crep.Message = "Error while cheking Token State Message : " + tokenStateCheckResult[i].Message
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			consensusReply.Message = "Error while cheking Token State Message : " + tokenStateCheckResult[i].Message
+			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 		if tokenStateCheckResult[i].Exhausted {
 			c.log.Debug("Token state has been exhausted, Token being Double spent:", tokenStateCheckResult[i].Token)
-			crep.Message = tokenStateCheckResult[i].Message
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			consensusReply.Message = tokenStateCheckResult[i].Message
+			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 		c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
 	}
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
-	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
-	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
-	err1 := c.pinTokenState(tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
+	sender := consensusRequest.SenderPeerID + "." + sc.GetSenderDID()
+	receiver := consensusRequest.ReceiverPeerID + "." + sc.GetReceiverDID()
+	err1 := c.pinTokenState(tokenStateCheckResult, did, consensusRequest.TransactionID, sender, receiver, float64(0))
 	if err1 != nil {
-		crep.Message = "Error Pinning token state" + err.Error()
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
+		consensusReply.Message = "Error Pinning token state" + err.Error()
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 
 	c.log.Debug("Finished FT Tokenstate check")
 
-	qHash := util.CalculateHash(sc.GetBlock(), "SHA3-256")
-	qsb, ppb, err := qdc.Sign(util.HexToStr(qHash))
+	//get trans token block hash
+	txnBlockHash, err := transNFTBlock.GetHash()
+	if err != nil {
+		c.log.Error("failed to get trans-block-hash for credit; err", err)
+		consensusReply.Message = err.Error()
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
+	//quorum's signature on block hash
+	qsb, ppb, err := qdc.Sign(txnBlockHash)
 	if err != nil {
 		c.log.Error("Failed to get quorum signature", "err", err)
-		crep.Message = "Failed to get quorum signature"
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
+		consensusReply.Message = "Failed to get quorum signature"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 
-	crep.Status = true
-	crep.Message = "FT Conensus finished successfully"
-	crep.ShareSig = qsb
-	crep.PrivSig = ppb
-	return c.l.RenderJSON(req, &crep, http.StatusOK)
+	consensusReply.Status = true
+	consensusReply.Message = "FT Consensus finished successfully"
+	consensusReply.ShareSig = qsb
+	consensusReply.PrivSig = ppb
+	consensusReply.Hash = txnBlockHash
+	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 }
 
 func (c *Core) quorumConensus(req *ensweb.Request) *ensweb.Result {

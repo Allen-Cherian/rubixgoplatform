@@ -229,6 +229,14 @@ func (b *Block) blkDecode() error {
 	if !sok && !b.op {
 		return fmt.Errorf("invalid block, missing signature")
 	}
+	initiatorSig, iok := m[TCInitiatorSignatureKey]
+	if iok {
+		delete(b.bm, TCInitiatorSignatureKey)
+	}
+	quorumSig, qok := m[TCQuorumSignatureKey]
+	if qok {
+		delete(b.bm, TCQuorumSignatureKey)
+	}
 	bc, ok := m[TCBlockContentKey]
 	if !ok {
 		return fmt.Errorf("invalid block, missing block content")
@@ -248,6 +256,12 @@ func (b *Block) blkDecode() error {
 		}
 		tcb[TCSignatureKey] = ksb
 	}
+	if iok {
+		tcb[TCInitiatorSignatureKey] = initiatorSig
+	}
+	if qok {
+		tcb[TCQuorumSignatureKey] = quorumSig
+	}
 
 	tcb[TCBlockHashKey] = util.HexToStr(hb)
 
@@ -264,6 +278,14 @@ func (b *Block) blkEncode() error {
 	s, sok := b.bm[TCSignatureKey]
 	if sok {
 		delete(b.bm, TCSignatureKey)
+	}
+	initiatorSig, iok := b.bm[TCInitiatorSignatureKey]
+	if iok {
+		delete(b.bm, TCInitiatorSignatureKey)
+	}
+	quorumSig, qok := b.bm[TCQuorumSignatureKey]
+	if qok {
+		delete(b.bm, TCQuorumSignatureKey)
 	}
 	bc, err := cbor.Marshal(b.bm, cbor.CanonicalEncOptions())
 	if err != nil {
@@ -282,6 +304,14 @@ func (b *Block) blkEncode() error {
 			return err
 		}
 		m[TCBlockContentSigKey] = ksm
+	}
+	if iok {
+		b.bm[TCInitiatorSignatureKey] = initiatorSig
+		m[TCInitiatorSignatureKey] = initiatorSig
+	}
+	if qok {
+		b.bm[TCQuorumSignatureKey] = quorumSig
+		m[TCQuorumSignatureKey] = quorumSig
 	}
 	blk, err := cbor.Marshal(m, cbor.CanonicalEncOptions())
 	if err != nil {
@@ -829,6 +859,14 @@ func (b *Block) CalculateBlockHash() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	_, iok := m[TCInitiatorSignatureKey]
+	if iok {
+		delete(m, TCInitiatorSignatureKey)
+	}
+	_, qok := m[TCQuorumSignatureKey]
+	if qok {
+		delete(m, TCQuorumSignatureKey)
+	}
 	bc, ok := m[TCBlockContentKey]
 	if !ok {
 		return "", fmt.Errorf("invalid block, block content missing")
@@ -850,4 +888,26 @@ func (b *Block) GetPledgedTokens() {
 	pledgedInfo := util.GetFromMap(b.bm, TCPledgeDetailsKey)
 	fmt.Println(pledgedInfo)
 	// return
+}
+
+func (b *Block) SignByInitiator(dc didmodule.DIDCrypto) error {
+	did := dc.GetDID()
+	blockHash, err := b.GetHash()
+	if err != nil {
+		return fmt.Errorf("failed to get hash")
+	}
+	nlssSig, pvtSig, err := dc.Sign(blockHash)
+	if err != nil {
+		return fmt.Errorf("failed to get initiator signature:%v; err: %v ", did, err.Error())
+	}
+
+	initiatorSigMap := make(map[string]interface{})
+	initiatorSigMap[InitiatorDID] = did
+	initiatorSigMap[InitiatorSignType] = uint64(dc.GetSignType())
+	initiatorSigMap[InitiatorNLSSShare] = util.HexToStr(nlssSig)
+	initiatorSigMap[InitiatorPrivateSign] = util.HexToStr(pvtSig)
+	initiatorSigMap[InitiatorHash] = blockHash
+	b.bm[TCInitiatorSignatureKey] = initiatorSigMap
+
+	return b.blkEncode()
 }
