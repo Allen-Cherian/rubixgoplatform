@@ -147,7 +147,7 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		ReqID:  cr.ReqID,
 		Status: false,
 	}
-	
+
 	sc := contract.InitContract(cr.ContractBlock, nil)
 	//initiate trans token block
 	transTknBlock := block.InitBlock(cr.TransTokenBlock, nil, block.NoSignature())
@@ -972,8 +972,8 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 		crep.Message = "Failed to get tokens"
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
-	tl := len(wt)
-	if tl == 0 {
+	totalLockedTokens := len(wt)
+	if totalLockedTokens == 0 {
 		c.log.Error("No tokens left to pledge", "err", err)
 		crep.Message = "No tokens left to pledge"
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
@@ -988,7 +988,7 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 		TokenChainBlock: make([][]byte, 0),
 	}
 
-	for i := 0; i < tl; i++ {
+	for i := 0; i < totalLockedTokens; i++ {
 		presp.Tokens = append(presp.Tokens, wt[i].TokenID)
 		presp.TokenValue = append(presp.TokenValue, wt[i].TokenValue)
 		ts := RBTString
@@ -1003,6 +1003,15 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 		}
 		presp.TokenChainBlock = append(presp.TokenChainBlock, tc.GetBlock())
 	}
+
+	// maintain pledge tokens map with conensus request ID in core struct for future reference
+	consensusPledgeTknMap := make(map[string][]string)
+	consensusPledgeTknMap[did] = presp.Tokens
+	c.pd[pr.ConensusRequestID] = &PledgeDetails{
+		PledgedTokens:    consensusPledgeTknMap,
+		NumPledgedTokens: totalLockedTokens,
+	}
+
 	return c.l.RenderJSON(req, &presp, http.StatusOK)
 }
 
@@ -1217,7 +1226,7 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 			if err != nil {
 				c.log.Error("failed to fetch parent token value, err ", err)
 				// update token sync status
-				c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID,wallet.SyncIncomplete)
+				c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID, wallet.SyncIncomplete)
 				continue
 			}
 			if parentTokenInfo.TokenValue != 1.0 {
@@ -1927,4 +1936,30 @@ func (c *Core) updateTokenHashDetails(req *ensweb.Request) *ensweb.Result {
 	}
 	return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
 
+}
+
+func (c *Core) notifyUnusedQuorumsResponse(req *ensweb.Request) *ensweb.Result {
+	// unused quorums are notified to unlock pledge tokens by API : /api/notify-unused-quorums
+	var consensusRequestID string
+	err := c.l.ParseJSON(req, &consensusRequestID)
+	c.log.Debug("notification to unlock locked tokens to pledge")
+	if err != nil {
+		c.log.Error("Failed to parse json request", "err", err)
+		return c.l.RenderJSON(req, nil, http.StatusOK)
+	}
+
+	// fetch locked tokens details and unlock
+	pd, ok := c.pd[consensusRequestID]
+	if !ok {
+		c.log.Error("invalid pledge tokens details")
+		return c.l.RenderJSON(req, nil, http.StatusOK)
+	}
+	for did, lockedTokens := range pd.PledgedTokens {
+		err = c.w.UnlockLockedTokens(did, lockedTokens)
+		if err != nil {
+			c.log.Error("Failed to update token status", "err", err)
+			return c.l.RenderJSON(req, nil, http.StatusOK)
+		}
+	}
+	return c.l.RenderJSON(req, nil, http.StatusOK)
 }

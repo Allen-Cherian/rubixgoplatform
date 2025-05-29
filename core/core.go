@@ -61,6 +61,7 @@ const (
 	APIGetPrevQrmFromPrevSenderPath string = "/api/get-prev-qrms-info-from-sender"
 	APICheckPinRole                 string = "/api/check-pin-role"
 	APISyncGenesisAndLatestBlock    string = "/api/sync-gennesis-n-lastest-block"
+	APINotifyUnusedQuorums          string = "/api/notify-unused-quorums"
 )
 
 const (

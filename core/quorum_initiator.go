@@ -95,7 +95,8 @@ type PledgeDetails struct {
 }
 
 type PledgeRequest struct {
-	TokensRequired float64 `json:"tokens_required"`
+	TokensRequired    float64 `json:"tokens_required"`
+	ConensusRequestID string  `json:"conensus_id"`
 }
 
 type SignatureRequest struct {
@@ -157,6 +158,12 @@ type PledgeToken struct {
 	DID   string
 }
 
+type QuorumSelection struct {
+	model.BasicResponse
+	DID            string  `json:"qrm_did"`
+	PledgingAmount float64 `json:"pledging_amount"`
+}
+
 type CreditScore struct {
 	Credit []CreditSignature
 }
@@ -201,6 +208,7 @@ func (c *Core) QuroumSetup() {
 	c.l.AddRoute(APIRequestSigningHash, "GET", c.requestSigningHash)
 	c.l.AddRoute(APISendFTToken, "POST", c.updateReceiverFTHandle)
 	c.l.AddRoute(APICheckPinRole, "GET", c.checkPinRole)
+	c.l.AddRoute(APINotifyUnusedQuorums, "POST", c.notifyUnusedQuorumsResponse)
 	if c.arbitaryMode {
 		c.l.AddRoute(APIMapDIDArbitration, "POST", c.mapDIDArbitration)
 		c.l.AddRoute(APICheckDIDArbitration, "GET", c.chekDIDArbitration)
@@ -422,7 +430,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	c.noBalanceQuorumCount = QuorumRequired - len(cr.QuorumList)
 
 	//create ipfsport.peerID for each quorum
-	var ipfsPortQrm []*ipfsport.Peer
+	ipfsPortQrm := make(map[string]*ipfsport.Peer)
 	var err error
 	for _, qrmAddr := range cr.QuorumList {
 		var p *ipfsport.Peer
@@ -433,63 +441,129 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		// Close the p2p before exit
 		defer p.Close()
-		ipfsPortQrm = append(ipfsPortQrm, p)
+		ipfsPortQrm[qrmAddr] = p
 	}
-	//wait group for first round of go routine that fetches pledge-tokens details from quorums
-	var wg sync.WaitGroup
-	for _, p := range ipfsPortQrm {
-		wg.Add(1)
-		//This part of code is trying to connect to the quorums in quorum list, where a function is called to pledge the tokens
-		//by the quorums. Once the quorum is connected, it provides the details of the pledge tokens.
-		//For type 1 quorums, along with connecting to the quorums, we are checking the balance of the quorum DID
-		//as well. Each quorums should pledge equal amount of tokens and hence, it should have a total of (Transacting RBTs/5) tokens
-		//available for pledging.
-		go c.requestPledgeTokenInfo(cr, p, AlphaQuorumType, &wg)
-	}
-	wg.Wait()
+	// //wait group for first round of go routine that fetches pledge-tokens details from quorums
+	// var wg sync.WaitGroup
+	// for _, p := range ipfsPortQrm {
+	// 	wg.Add(1)
+	// 	//This part of code is trying to connect to the quorums in quorum list, where a function is called to pledge the tokens
+	// 	//by the quorums. Once the quorum is connected, it provides the details of the pledge tokens.
+	// 	//For type 1 quorums, along with connecting to the quorums, we are checking the balance of the quorum DID
+	// 	//as well. Each quorums should pledge equal amount of tokens and hence, it should have a total of (Transacting RBTs/5) tokens
+	// 	//available for pledging.
+	// 	go c.requestPledgeTokenInfo(cr, p, AlphaQuorumType, &wg)
+	// }
+	// wg.Wait()
 
-	// TODO : verify pledge tokens 
-	
+	// Channel to collect server responses
+	responseCh := make(chan QuorumSelection, QuorumRequired)
+	// // Channel to signal stopping connections
+	// stopCh := make(chan struct{})
+
+	// WaitGroup for tracking initial connections
+	var wgSelection sync.WaitGroup
+
+	// Start concurrent connections to all 7 servers
+	for _, peerObj := range ipfsPortQrm {
+		wgSelection.Add(1)
+		go func(peerObject *ipfsport.Peer) {
+			defer wgSelection.Done()
+			pledgeInfo := c.requestPledgeTokenInfo(cr, peerObject, AlphaQuorumType)
+			responseCh <- pledgeInfo
+		}(peerObj)
+	}
+
+	// Collect first 5 servers with sufficient balance
+	selectedQuorums := make(map[string]*ipfsport.Peer)
+	unusedQuorums := make(map[string]struct{})
+	for _, qrmAddr := range cr.QuorumList {
+		unusedQuorums[qrmAddr] = struct{}{}
+	}
+
+	for i := 0; i < QuorumRequired && len(selectedQuorums) < MinQuorumRequired; i++ {
+		resp := <-responseCh
+		if resp.Message == "" && resp.PledgingAmount >= (floatPrecision(reqPledgeTokens, MaxDecimalPlaces))/5 {
+			qrmIPFSObj, exists := ipfsPortQrm[resp.DID]
+			if exists {
+				selectedQuorums[resp.DID] = qrmIPFSObj
+			}
+
+			delete(unusedQuorums, resp.DID)
+		} else if resp.Message == "Quorum is not setup" {
+			c.log.Error("Quorums are not setup, please setup quorums and retry")
+			return nil, nil, nil, fmt.Errorf(resp.Message)
+		}
+		// if len(selectedQuorums) == MinQuorumRequired {
+		// 	// Signal to stop pending connections
+		// 	close(stopCh)
+		// }
+	}
+
+	if len(selectedQuorums) < MinQuorumRequired {
+		c.log.Error("could not proceed for consensus, not enough quorums available")
+		return nil, nil, nil, fmt.Errorf("quorums unavailable to pledge")
+	}
+
+	// Notify remaining servers in the background without error handling
+	for quorumAddr := range unusedQuorums {
+		qrmIPFSObj, exists := ipfsPortQrm[quorumAddr]
+		if exists {
+			go c.notifyUnusedQuorums(qrmIPFSObj, cr.ReqID)
+		}
+	}
+
+	// Wait for initial connections to complete
+	wgSelection.Wait()
+
+	// create new block for trans-tokens
 	transTknBlock, err := c.createTransTokenBlock(cr, sc, tid, dc)
 	if err != nil {
 		c.log.Error("Failed to pledge token", "err", err)
 		return nil, nil, nil, err
 	}
-	for _, p := range ipfsPortQrm {
+
+	// wait group for 2nd round of concurrent quorum-connection for consensus
+	var wgConsensus sync.WaitGroup
+	for _, p := range selectedQuorums {
+		wgConsensus.Add(1)
 		//connecting with quorums requesting consensus
 		go c.connectQuorum(cr, p, AlphaQuorumType, sc)
 	}
-	loop := true
-	// var err error
-	err = nil
-	for {
-		time.Sleep(time.Second)
-		c.qlock.Lock()
-		cs, ok := c.quorumRequest[cr.ReqID]
-		if !ok {
-			loop = false
-			err = fmt.Errorf("invalid request")
-		} else {
-			if cs.Result.SuccessCount >= MinConsensusRequired {
-				loop = false
-			} else if cs.Result.RunningCount == 0 {
-				loop = false
-				err = fmt.Errorf("consensus failed, retry transaction after sometimes")
-				c.log.Error("Consensus failed, retry transaction after sometimes")
-			}
-		}
-		c.qlock.Unlock()
-		if !loop {
-			break
-		}
-	}
-	if err != nil {
-		unlockErr := c.checkLockedTokens(cr, ql)
-		if unlockErr != nil {
-			c.log.Error(unlockErr.Error() + "Locked tokens could not be unlocked")
-		}
-		return nil, nil, nil, err
-	}
+	// loop := true
+	// // var err error
+	// err = nil
+	// for {
+	// 	time.Sleep(time.Second)
+	// 	c.qlock.Lock()
+	// 	cs, ok := c.quorumRequest[cr.ReqID]
+	// 	if !ok {
+	// 		loop = false
+	// 		err = fmt.Errorf("invalid request")
+	// 	} else {
+	// 		if cs.Result.SuccessCount >= MinConsensusRequired {
+	// 			loop = false
+	// 		} else if cs.Result.RunningCount == 0 {
+	// 			loop = false
+	// 			err = fmt.Errorf("consensus failed, retry transaction after sometimes")
+	// 			c.log.Error("Consensus failed, retry transaction after sometimes")
+	// 		}
+	// 	}
+	// 	c.qlock.Unlock()
+	// 	if !loop {
+	// 		break
+	// 	}
+	// }
+	// if err != nil {
+	// 	unlockErr := c.checkLockedTokens(cr, ql)
+	// 	if unlockErr != nil {
+	// 		c.log.Error(unlockErr.Error() + "Locked tokens could not be unlocked")
+	// 	}
+	// 	return nil, nil, nil, err
+	// }
+
+	// wait for quorums' consensus 
+	wgConsensus.Wait()
 
 	if c.noBalanceQuorumCount > (QuorumRequired - MinConsensusRequired) {
 		c.log.Error("Consensus failed due to insufficient balance in Quorum(s), Retry transaction after sometime")
@@ -2348,27 +2422,34 @@ func (c *Core) requestPledgeQuorumSignature(nb *block.Block, cr *ConensusRequest
 	return nb, nil
 }
 
-func (c *Core) requestPledgeTokenInfo(cr *ConensusRequest, p *ipfsport.Peer, qt int, wg *sync.WaitGroup) {
-	defer wg.Done()
-	err := c.initPledgeQuorumToken(cr, p, qt)
+func (c *Core) requestPledgeTokenInfo(cr *ConensusRequest, p *ipfsport.Peer, qt int) QuorumSelection {
+	pledgeInfo, err := c.initPledgeQuorumToken(cr, p, qt)
 	if err != nil {
+		pledgeInfo.Message = err.Error()
 		if strings.Contains(err.Error(), "don't have enough balance to pledge") {
 			c.log.Error("Quorum failed to pledge token")
-			return
+			return pledgeInfo
 		}
 		c.log.Error("Failed to pledge token", "err", err)
-		return
+		return pledgeInfo
 	}
+	return pledgeInfo
 }
 
-func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer, qt int) error {
+func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer, qt int) (QuorumSelection, error) {
+	quorumSelection := QuorumSelection{
+		DID: p.GetPeerDID(),
+		BasicResponse: model.BasicResponse{
+			Status: false,
+		},
+	}
 	c.qlock.Lock()
 	cs, ok := c.quorumRequest[cr.ReqID]
 	c.qlock.Unlock()
 	if !ok {
 		c.qlock.Unlock()
 		err := fmt.Errorf("invalid request")
-		return err
+		return quorumSelection, err
 	}
 	cs.PledgeLock.Lock()
 	c.qlock.Lock()
@@ -2377,14 +2458,15 @@ func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer, qt i
 	if !ok {
 		cs.PledgeLock.Unlock()
 		err := fmt.Errorf("invalid pledge request")
-		return err
+		return quorumSelection, err
 	}
 	pledgeTokensPerQuorum := pd.TransferAmount / float64(MinQuorumRequired)
 
 	// Request pledge token
 	if (c.quorumCount - c.noBalanceQuorumCount) < MinConsensusRequired {
 		pr := PledgeRequest{
-			TokensRequired: CeilfloatPrecision(pledgeTokensPerQuorum, MaxDecimalPlaces), // Request the determined number of tokens per quorum,
+			TokensRequired:    CeilfloatPrecision(pledgeTokensPerQuorum, MaxDecimalPlaces), // Request the determined number of tokens per quorum,
+			ConensusRequestID: cr.ReqID,
 		}
 		var prs PledgeReply
 		err := p.SendJSONRequest("POST", APIReqPledgeToken, nil, &pr, &prs, true)
@@ -2392,7 +2474,7 @@ func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer, qt i
 			c.log.Error("Invalid response for pledge request", "err", err)
 			err := fmt.Errorf("invalid pledge request")
 			cs.PledgeLock.Unlock()
-			return err
+			return quorumSelection, err
 		}
 		if strings.Contains(prs.Message, "Quorum don't have enough balance to pledge") {
 			c.quorumCount++
@@ -2400,12 +2482,14 @@ func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer, qt i
 			cs.PledgeLock.Unlock()
 			did := p.GetPeerDID()
 			c.log.Error("Quorum (DID:" + did + ") don't have enough balance to pledge")
-			return fmt.Errorf("Quorum (DID:" + did + ") don't have enough balance to pledge")
+			return quorumSelection, fmt.Errorf("Quorum (DID:" + did + ") don't have enough balance to pledge")
 		}
 		if prs.Status {
+			quorumSelection.Status = true
 			c.quorumCount++
 			did := p.GetPeerDID()
 			pd.PledgedTokens[did] = make([]string, 0)
+			pledgingAmount := 0.0
 			for i, t := range prs.Tokens {
 				ptcb := block.InitBlock(prs.TokenChainBlock[i], nil)
 				if !c.checkIsPledged(ptcb) {
@@ -2415,41 +2499,43 @@ func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer, qt i
 					pd.PledgedTokenChainBlock[t] = prs.TokenChainBlock[i]
 					pd.PledgedTokens[did] = append(pd.PledgedTokens[did], t)
 					pd.TokenList = append(pd.TokenList, Token{TokenHash: prs.Tokens[i], TokenValue: prs.TokenValue[i]})
-
+					pledgingAmount += prs.TokenValue[i]
 				}
 			}
+			quorumSelection.PledgingAmount = pledgingAmount
 			c.qlock.Lock()
 			c.pd[cr.ReqID] = pd
 			c.qlock.Unlock()
 		}
 	}
 	cs.PledgeLock.Unlock()
-	count := 0
-	for {
-		time.Sleep(time.Second)
-		count++
-		c.qlock.Lock()
-		c.qlock.Unlock()
-		if !ok {
-			err := fmt.Errorf("invalid pledge request")
-			return err
-		}
+	// count := 0
+	// for {
+	// 	time.Sleep(time.Second)
+	// 	count++
+	// 	c.qlock.Lock()
+	// 	c.qlock.Unlock()
+	// 	if !ok {
+	// 		err := fmt.Errorf("invalid pledge request")
+	// 		return quorumSelection, err
+	// 	}
 
-		// check if total connected quorums, with balance, has reached the minimum consensus threshold
-		if (c.quorumCount - c.noBalanceQuorumCount) < MinConsensusRequired {
-			if c.quorumCount < QuorumRequired {
-				if count == 300 {
-					err := fmt.Errorf("Unable to pledge after wait")
-					return err
-				}
-			} else if c.quorumCount == QuorumRequired {
-				err := fmt.Errorf("Unable to pledge")
-				return err
-			}
-		} else {
-			return nil
-		}
-	}
+	// 	// check if total connected quorums, with balance, has reached the minimum consensus threshold
+	// 	if (c.quorumCount - c.noBalanceQuorumCount) < MinConsensusRequired {
+	// 		if c.quorumCount < QuorumRequired {
+	// 			if count == 300 {
+	// 				err := fmt.Errorf("Unable to pledge after wait")
+	// 				return quorumSelection, err
+	// 			}
+	// 		} else if c.quorumCount == QuorumRequired {
+	// 			err := fmt.Errorf("Unable to pledge")
+	// 			return quorumSelection, err
+	// 		}
+	// 	} else {
+	// 		return quorumSelection, nil
+	// 	}
+	// }
+	return quorumSelection, nil
 }
 
 func (c *Core) checkDIDMigrated(p *ipfsport.Peer, did string) bool {
@@ -2613,175 +2699,11 @@ func (c *Core) checkLockedTokens(cr *ConensusRequest, quorumList []string) error
 	return nil
 }
 
-// func (c *Core) PrePledgeConsensus() error {
-// 	cs := ConsensusStatus{
-// 		Credit: CreditScore{
-// 			Credit: make([]CreditSignature, 0),
-// 		},
-// 		P: make(map[string]*ipfsport.Peer),
-// 		Result: ConsensusResult{
-// 			RunningCount:          0,
-// 			SuccessCount:          0,
-// 			FailedCount:           0,
-// 			PledgingDIDSignStatus: false,
-// 		},
-// 	}
-// 	reqPledgeTokens := float64(0)
-
-// 	// TODO:: Need to correct for part tokens
-// 	switch cr.Mode {
-// 	case RBTTransferMode, NFTSaleContractMode, SelfTransferMode, PinningServiceMode:
-// 		ti := sc.GetTransTokenInfo()
-// 		for i := range ti {
-// 			reqPledgeTokens = reqPledgeTokens + ti[i].TokenValue
-// 		}
-
-// 	case DTCommitMode:
-// 		reqPledgeTokens = 1
-
-// 	case SmartContractDeployMode:
-// 		tokenInfo := sc.GetTransTokenInfo()
-// 		for i := range tokenInfo {
-// 			reqPledgeTokens = reqPledgeTokens + tokenInfo[i].TokenValue
-// 		}
-// 	case NFTDeployMode:
-// 		reqPledgeTokens := sc.GetTotalRBTs()
-// 		if reqPledgeTokens == 0 {
-// 			reqPledgeTokens = 1
-// 		}
-// 	case SmartContractExecuteMode, NFTExecuteMode:
-// 		reqPledgeTokens = sc.GetTotalRBTs()
-// 	case FTTransferMode:
-// 		ti := sc.GetTransTokenInfo()
-// 		for i := range ti {
-// 			reqPledgeTokens = reqPledgeTokens + ti[i].TokenValue
-// 		}
-// 	}
-// 	minValue := MinDecimalValue(MaxDecimalPlaces)
-// 	minTotalPledgeAmount := minValue * float64(MinQuorumRequired)
-// 	if reqPledgeTokens < minTotalPledgeAmount {
-// 		reqPledgeTokens = minTotalPledgeAmount
-// 	}
-// 	reqPledgeTokens = floatPrecision(reqPledgeTokens, MaxDecimalPlaces)
-// 	pd := PledgeDetails{
-// 		TransferAmount:         reqPledgeTokens,
-// 		RemPledgeTokens:        floatPrecision(reqPledgeTokens, MaxDecimalPlaces),
-// 		NumPledgedTokens:       0,
-// 		PledgedTokens:          make(map[string][]string),
-// 		PledgedTokenChainBlock: make(map[string]interface{}),
-// 		TokenList:              make([]Token, 0),
-// 	}
-// 	//getting last character from TID
-// 	tid := util.HexToStr(util.CalculateHash(sc.GetBlock(), "SHA3-256"))
-// 	lastCharTID := string(tid[len(tid)-1])
-// 	cr.TransactionID = tid
-
-// 	ql := c.qm.GetQuorum(cr.Type, lastCharTID, c.peerID) //passing lastCharTID as a parameter. Made changes in GetQuorum function to take 2 arguments
-// 	if ql == nil || len(ql) < MinQuorumRequired {
-// 		c.log.Error("Failed to get required quorums")
-// 		return nil, nil, nil, fmt.Errorf("failed to get required quorums")
-// 	}
-
-// 	var finalQl []string
-// 	var errFQL error
-// 	if cr.Type == 2 {
-// 		finalQl, errFQL = c.GetFinalQuorumList(ql)
-// 		if errFQL != nil {
-// 			c.log.Error("unable to get consensus from quorum(s). err: ", errFQL)
-// 			return nil, nil, nil, errFQL
-// 		}
-// 		cr.QuorumList = finalQl
-// 		if len(finalQl) < MinQuorumRequired {
-// 			c.log.Error("quorum(s) are unavailable for this trnx")
-// 			return nil, nil, nil, fmt.Errorf("quorum(s) are unavailable for this trnx. retry trnx after some time")
-// 		}
-// 	} else {
-// 		cr.QuorumList = ql
-// 	}
-
-// 	c.qlock.Lock()
-// 	c.quorumRequest[cr.ReqID] = &cs
-// 	c.pd[cr.ReqID] = &pd
-// 	c.qlock.Unlock()
-// 	defer func() {
-// 		c.qlock.Lock()
-// 		delete(c.quorumRequest, cr.ReqID)
-// 		delete(c.pd, cr.ReqID)
-// 		c.qlock.Unlock()
-// 	}()
-// 	c.quorumCount = QuorumRequired - len(cr.QuorumList)
-// 	c.noBalanceQuorumCount = QuorumRequired - len(cr.QuorumList)
-// 	//create ipfsport.peerID for each quorum
-// 	var ipfsPortQrm []*ipfsport.Peer
-// 	var err error
-// 	for _, qrmAddr := range cr.QuorumList {
-// 		var p *ipfsport.Peer
-// 		p, err = c.getPeer(qrmAddr, sc.GetSenderDID())
-// 		if err != nil {
-// 			c.log.Error("Failed to get peer connection", "quorum", qrmAddr, "err", err)
-// 			return nil, nil, nil, err
-// 		}
-// 		// Close the p2p before exit
-// 		defer p.Close()
-// 		ipfsPortQrm = append(ipfsPortQrm, p)
-// 	}
-// 	//wait group for first round of go routine that fetches pledge-tokens details from quorums
-// 	var wg sync.WaitGroup
-// 	for _, p := range ipfsPortQrm {
-// 		wg.Add(1)
-// 		//This part of code is trying to connect to the quorums in quorum list, where a function is called to pledge the tokens
-// 		//by the quorums. Once the quorum is connected, it provides the details of the pledge tokens.
-// 		//For type 1 quorums, along with connecting to the quorums, we are checking the balance of the quorum DID
-// 		//as well. Each quorums should pledge equal amount of tokens and hence, it should have a total of (Transacting RBTs/5) tokens
-// 		//available for pledging.
-// 		go c.requestPledgeTokenInfo(cr, p, AlphaQuorumType, &wg)
-// 	}
-// 	wg.Wait()
-
-// 	transTknBlock, err := c.createTransTokenBlock(cr, sc, tid, dc)
-// 	if err != nil {
-// 		c.log.Error("Failed to pledge token", "err", err)
-// 		return nil, nil, nil, err
-// 	}
-// 	for _, p := range ipfsPortQrm {
-// 		//connecting with quorums requesting consensus
-// 		go c.connectQuorum(cr, p, AlphaQuorumType, sc)
-// 	}
-// 	loop := true
-// 	var err error
-// 	err = nil
-// 	for {
-// 		time.Sleep(time.Second)
-// 		c.qlock.Lock()
-// 		cs, ok := c.quorumRequest[cr.ReqID]
-// 		if !ok {
-// 			loop = false
-// 			err = fmt.Errorf("invalid request")
-// 		} else {
-// 			if cs.Result.SuccessCount >= MinConsensusRequired {
-// 				loop = false
-// 			} else if cs.Result.RunningCount == 0 {
-// 				loop = false
-// 				err = fmt.Errorf("consensus failed, retry transaction after sometimes")
-// 				c.log.Error("Consensus failed, retry transaction after sometimes")
-// 			}
-// 		}
-// 		c.qlock.Unlock()
-// 		if !loop {
-// 			break
-// 		}
-// 	}
-// 	if err != nil {
-// 		unlockErr := c.checkLockedTokens(cr, ql)
-// 		if unlockErr != nil {
-// 			c.log.Error(unlockErr.Error() + "Locked tokens could not be unlocked")
-// 		}
-// 		return nil, nil, nil, err
-// 	}
-
-// 	if c.noBalanceQuorumCount > (QuorumRequired - MinConsensusRequired) {
-// 		c.log.Error("Consensus failed due to insufficient balance in Quorum(s), Retry transaction after sometime")
-// 		return nil, nil, nil, fmt.Errorf("Consensus failed due to insufficient balance in Quorum(s)")
-// 	}
-// 	return nil
-// }
+func (c *Core) notifyUnusedQuorums(qrmIPFSObj *ipfsport.Peer, consensusRequestID string) {
+	// call API to inform quorums that they can unlock their pledge tokens : /api/notify-unused-quorums
+	err := qrmIPFSObj.SendJSONRequest("POST", APINotifyUnusedQuorums, nil, &consensusRequestID, nil, true)
+	if err != nil {
+		c.log.Error("Invalid response from unused quorums, ", "err ", err)
+		return
+	}
+}
