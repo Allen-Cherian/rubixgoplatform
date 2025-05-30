@@ -517,7 +517,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	wgSelection.Wait()
 
 	// create new block for trans-tokens
-	transTknBlock, err := c.createTransTokenBlock(cr, sc, tid, dc)
+	nb, err := c.createTransTokenBlock(cr, sc, tid, dc)
 	if err != nil {
 		c.log.Error("Failed to pledge token", "err", err)
 		return nil, nil, nil, err
@@ -567,14 +567,14 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	if c.noBalanceQuorumCount > (QuorumRequired - MinConsensusRequired) {
 		c.log.Error("Consensus failed due to insufficient balance in Quorum(s), Retry transaction after sometime")
-		return nil, nil, nil, fmt.Errorf("Consensus failed due to insufficient balance in Quorum(s)")
+		return nil, nil, nil, fmt.Errorf("consensus failed due to insufficient balance in Quorum(s)")
 	}
 
-	nb, err := c.requestPledgeQuorumSignature(transTknBlock, cr)
-	if err != nil {
-		c.log.Error("Failed to pledge token", "err", err)
-		return nil, nil, nil, err
-	}
+	// nb, err := c.requestPledgeQuorumSignature(transTknBlock, cr)
+	// if err != nil {
+	// 	c.log.Error("Failed to pledge token", "err", err)
+	// 	return nil, nil, nil, err
+	// }
 
 	ti := sc.GetTransTokenInfo()
 	c.qlock.Lock()
