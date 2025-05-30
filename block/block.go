@@ -60,6 +60,7 @@ const (
 	TokenContractCommited string = "11"
 	TokenPinnedAsService  string = "12"
 	TokenIsBurntForFT     string = "13"
+	TokenPrePledgedType     string = "14"
 )
 
 const (

@@ -37,11 +37,6 @@ const (
 	FTTransferMode
 	PrePledgingMode
 )
-const (
-	AlphaQuorumType int = iota
-	BetaQuorumType
-	GammaQuorumType
-)
 
 type ConensusRequest struct {
 	ReqID              string       `json:"req_id"`
@@ -395,26 +390,26 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	lastCharTID := string(tid[len(tid)-1])
 	cr.TransactionID = tid
 
-	ql := c.qm.GetQuorum(cr.Type, lastCharTID, c.peerID) //passing lastCharTID as a parameter. Made changes in GetQuorum function to take 2 arguments
-	if ql == nil || len(ql) < MinQuorumRequired {
+	cr.QuorumList = c.qm.GetQuorum(cr.Type, lastCharTID, c.peerID) //passing lastCharTID as a parameter. Made changes in GetQuorum function to take 2 arguments
+	if len(cr.QuorumList) < MinQuorumRequired {
 		c.log.Error("Failed to get required quorums")
 		return nil, nil, nil, fmt.Errorf("failed to get required quorums")
 	}
 
-	var activeQuorumLists []string
+	// var activeQuorumLists []string
 
-	if cr.Type == 2 {
-		activeQuorumLists = c.GetActiveQuorums(ql)
-		c.log.Debug(fmt.Sprintf("Total Active Quorums: %d", len(activeQuorumLists)))
-		if len(activeQuorumLists) < MinQuorumRequired {
-			c.log.Error("quorum(s) are unavailable for this trnx")
-			return nil, nil, nil, fmt.Errorf("quorum(s) are unavailable for this trnx. retry trnx after some time")
-		}
+	// if cr.Type == 2 {
+	// 	activeQuorumLists = c.GetActiveQuorums(ql)
+	// 	c.log.Debug(fmt.Sprintf("Total Active Quorums: %d", len(activeQuorumLists)))
+	// 	if len(activeQuorumLists) < MinQuorumRequired {
+	// 		c.log.Error("quorum(s) are unavailable for this trnx")
+	// 		return nil, nil, nil, fmt.Errorf("quorum(s) are unavailable for this trnx. retry trnx after some time")
+	// 	}
 
-		cr.QuorumList = activeQuorumLists
-	} else {
-		cr.QuorumList = ql
-	}
+	// 	cr.QuorumList = activeQuorumLists
+	// } else {
+
+	// }
 
 	c.qlock.Lock()
 	c.quorumRequest[cr.ReqID] = &cs
@@ -461,24 +456,24 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	// // Channel to signal stopping connections
 	// stopCh := make(chan struct{})
 
-	// WaitGroup for tracking initial connections
-	var wgSelection sync.WaitGroup
+	// // WaitGroup for tracking initial connections
+	// var wgSelection sync.WaitGroup
 
 	// Start concurrent connections to all 7 servers
 	for _, peerObj := range ipfsPortQrm {
-		wgSelection.Add(1)
+		// wgSelection.Add(1)
 		go func(peerObject *ipfsport.Peer) {
-			defer wgSelection.Done()
-			pledgeInfo := c.requestPledgeTokenInfo(cr, peerObject, AlphaQuorumType)
+			// defer wgSelection.Done()
+			pledgeInfo := c.requestPledgeTokenInfo(cr, peerObject)
 			responseCh <- pledgeInfo
 		}(peerObj)
 	}
 
 	// Collect first 5 servers with sufficient balance
 	selectedQuorums := make(map[string]*ipfsport.Peer)
-	unusedQuorums := make(map[string]struct{})
+	rejectedQuorums := make(map[string]struct{})
 	for _, qrmAddr := range cr.QuorumList {
-		unusedQuorums[qrmAddr] = struct{}{}
+		rejectedQuorums[qrmAddr] = struct{}{}
 	}
 
 	for i := 0; i < QuorumRequired && len(selectedQuorums) < MinQuorumRequired; i++ {
@@ -489,7 +484,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				selectedQuorums[resp.DID] = qrmIPFSObj
 			}
 
-			delete(unusedQuorums, resp.DID)
+			delete(rejectedQuorums, resp.DID)
 		} else if resp.Message == "Quorum is not setup" {
 			c.log.Error("Quorums are not setup, please setup quorums and retry")
 			return nil, nil, nil, fmt.Errorf(resp.Message)
@@ -506,15 +501,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}
 
 	// Notify remaining servers in the background without error handling
-	for quorumAddr := range unusedQuorums {
+	for quorumAddr := range rejectedQuorums {
 		qrmIPFSObj, exists := ipfsPortQrm[quorumAddr]
 		if exists {
 			go c.notifyUnusedQuorums(qrmIPFSObj, cr.ReqID)
 		}
 	}
 
-	// Wait for initial connections to complete
-	wgSelection.Wait()
+	// // Wait for initial connections to complete
+	// wgSelection.Wait()
 
 	// create new block for trans-tokens
 	nb, err := c.createTransTokenBlock(cr, sc, tid, dc)
@@ -528,7 +523,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	for _, p := range selectedQuorums {
 		wgConsensus.Add(1)
 		//connecting with quorums requesting consensus
-		go c.connectQuorum(cr, p, AlphaQuorumType, sc)
+		go c.connectQuorum(cr, p, sc)
 	}
 	// loop := true
 	// // var err error
@@ -562,7 +557,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	// 	return nil, nil, nil, err
 	// }
 
-	// wait for quorums' consensus 
+	// wait for quorums' consensus
 	wgConsensus.Wait()
 
 	if c.noBalanceQuorumCount > (QuorumRequired - MinConsensusRequired) {
@@ -597,25 +592,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	switch cr.Mode {
 	case PrePledgingMode:
-		// calculate new state hashes of each token
-		var updatedtokenhashes []string = make([]string, 0)
-		for _, info := range ti {
-			t := info.Token
-			b := c.w.GetLatestTokenBlock(info.Token, info.TokenType)
-			blockId, _ := b.GetBlockID(t)
-			tokenIDTokenStateData := t + blockId
-			tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
-			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
-			updatedtokenhashes = append(updatedtokenhashes, tokenIDTokenStateHash)
-		}
-
-		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, updatedtokenhashes, tid)
-		if pledgeFinalityError != nil {
-			c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
-			return nil, nil, nil, pledgeFinalityError
-		}
-
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
@@ -1947,20 +1923,19 @@ func (c *Core) quorumPledgeFinality(cr *ConensusRequest, newBlock *block.Block, 
 	return nil
 }
 
-func (c *Core) startConsensus(id string, qt int) {
+func (c *Core) startConsensus(id string) {
 	c.qlock.Lock()
 	defer c.qlock.Unlock()
 	cs, ok := c.quorumRequest[id]
 	if !ok {
 		return
 	}
-	switch qt {
-	case 0:
-		cs.Result.RunningCount++
-	}
+
+	cs.Result.RunningCount++
+
 }
 
-func (c *Core) finishConsensus(id string, qt int, p *ipfsport.Peer, status bool, hash string, ss []byte, ps []byte) {
+func (c *Core) finishConsensus(id string, p *ipfsport.Peer, status bool, hash string, ss []byte, ps []byte) {
 	c.qlock.Lock()
 	defer c.qlock.Unlock()
 	cs, ok := c.quorumRequest[id]
@@ -1986,45 +1961,39 @@ func (c *Core) finishConsensus(id string, qt int, p *ipfsport.Peer, status bool,
 		signType = "1"
 	}
 
-	switch qt {
-	case 0:
-		cs.Result.RunningCount--
-		if status {
-			did := p.GetPeerDID()
-			csig := CreditSignature{
-				Signature:     util.HexToStr(ss),
-				PrivSignature: util.HexToStr(ps),
-				DID:           did,
-				Hash:          hash,
-				SignType:      signType,
-			}
-			if cs.Result.SuccessCount < MinConsensusRequired {
-				if _, ok := pd.PledgedTokens[did]; ok {
-					cs.P[did] = p
-					cs.Credit.Credit = append(cs.Credit.Credit, csig)
-					cs.Result.SuccessCount++
-				}
-			}
-		} else {
-			cs.Result.FailedCount++
-			if p != nil {
-				p.Close()
+	cs.Result.RunningCount--
+	if status {
+		did := p.GetPeerDID()
+		csig := CreditSignature{
+			Signature:     util.HexToStr(ss),
+			PrivSignature: util.HexToStr(ps),
+			DID:           did,
+			Hash:          hash,
+			SignType:      signType,
+		}
+		if cs.Result.SuccessCount < MinConsensusRequired {
+			if _, ok := pd.PledgedTokens[did]; ok {
+				cs.P[did] = p
+				cs.Credit.Credit = append(cs.Credit.Credit, csig)
+				cs.Result.SuccessCount++
 			}
 		}
-	default:
+	} else {
+		cs.Result.FailedCount++
 		if p != nil {
 			p.Close()
 		}
 	}
+
 }
 
-func (c *Core) connectQuorum(cr *ConensusRequest, p *ipfsport.Peer, qt int, sc *contract.Contract) {
-	c.startConsensus(cr.ReqID, qt)
+func (c *Core) connectQuorum(consensusRequest *ConensusRequest, p *ipfsport.Peer, contractBlock *contract.Contract) {
+	c.startConsensus(consensusRequest.ReqID)
 	var cresp ConensusReply
-	err := p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, 10*time.Minute)
+	err := p.SendJSONRequest("POST", APIQuorumConsensus, nil, consensusRequest, &cresp, true, 10*time.Minute)
 	if err != nil {
 		c.log.Error("Failed to get consensus", "err", err)
-		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+		c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 		return
 	}
 	if strings.Contains(cresp.Message, "parent token is not in burnt stage") {
@@ -2039,18 +2008,18 @@ func (c *Core) connectQuorum(cr *ConensusRequest, p *ipfsport.Peer, qt int, sc *
 		issueType := cresp.Message[issueTypeStart:]
 		c.log.Debug("String: pt is ", pt, " issuetype is ", issueType)
 
-		c.log.Debug("sc.GetSenderDID()", sc.GetSenderDID(), "pt", pt)
-		orphanChildTokenList, err1 := c.w.GetChildToken(sc.GetSenderDID(), pt)
+		c.log.Debug("sc.GetSenderDID()", contractBlock.GetSenderDID(), "pt", pt)
+		orphanChildTokenList, err1 := c.w.GetChildToken(contractBlock.GetSenderDID(), pt)
 		if err1 != nil {
 			c.log.Error("Consensus failed due to orphan child token ", "err", err1)
-			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 			return
 		}
 		issueTypeInt, err2 := strconv.Atoi(issueType)
 		c.log.Debug("issue type in int is ", issueTypeInt)
 		if err2 != nil {
 			c.log.Error("Consensus failed due to orphan child token, issueType string conversion", "err", err2)
-			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 			return
 		}
 		c.log.Debug("Orphan token list ", orphanChildTokenList)
@@ -2060,7 +2029,7 @@ func (c *Core) connectQuorum(cr *ConensusRequest, p *ipfsport.Peer, qt int, sc *
 				c.log.Debug("Orphan token list status updated", orphanChild)
 				c.w.UpdateToken(&orphanChild)
 			}
-			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 			return
 		}
 	}
@@ -2081,14 +2050,14 @@ func (c *Core) connectQuorum(cr *ConensusRequest, p *ipfsport.Peer, qt int, sc *
 		issueTypeInt, err1 := strconv.Atoi(issueType)
 		if err1 != nil {
 			c.log.Error("Consensus failed due to token chain sync issue, issueType string conversion", "err", err1)
-			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 			return
 		}
 		c.log.Debug("issue type in int is ", issueTypeInt)
 		syncIssueTokenDetails, err2 := c.w.ReadToken(token)
 		if err2 != nil {
 			c.log.Error("Consensus failed due to tokenchain sync issue ", "err", err2)
-			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 			return
 		}
 		c.log.Debug("In connectQuorum, sync issue token details ", syncIssueTokenDetails)
@@ -2096,7 +2065,7 @@ func (c *Core) connectQuorum(cr *ConensusRequest, p *ipfsport.Peer, qt int, sc *
 			syncIssueTokenDetails.TokenStatus = wallet.TokenChainSyncIssue
 			c.log.Debug("In connectQuorum, sync issue token details status updated", syncIssueTokenDetails)
 			c.w.UpdateToken(syncIssueTokenDetails)
-			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 			return
 		}
 	}
@@ -2112,23 +2081,23 @@ func (c *Core) connectQuorum(cr *ConensusRequest, p *ipfsport.Peer, qt int, sc *
 		doubleSpendTokenDetails, err2 := c.w.ReadToken(token)
 		if err2 != nil {
 			c.log.Error("Consensus failed due to token being double spent ", "err", err2)
-			c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 			return
 		}
 		c.log.Debug("Double spend token details ", doubleSpendTokenDetails)
 		doubleSpendTokenDetails.TokenStatus = wallet.TokenIsBeingDoubleSpent
 		c.log.Debug("Double spend token details status updated", doubleSpendTokenDetails)
 		c.w.UpdateToken(doubleSpendTokenDetails)
-		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+		c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 		return
 	}
 
 	if !cresp.Status {
 		c.log.Error("Failed to get consensus", "msg", cresp.Message)
-		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
+		c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 		return
 	}
-	c.finishConsensus(cr.ReqID, qt, p, true, cresp.Hash, cresp.ShareSig, cresp.PrivSig)
+	c.finishConsensus(consensusRequest.ReqID, p, true, cresp.Hash, cresp.ShareSig, cresp.PrivSig)
 }
 
 func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract, tid string, dc did.DIDCrypto) (*block.Block, error) {
@@ -2303,6 +2272,17 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 			SmartContract:   sc.GetBlock(),
 			PledgeDetails:   ptds,
 		}
+	} else if cr.Mode == PrePledgingMode {
+		bti.SenderDID = sc.GetSenderDID()
+		bti.ReceiverDID = sc.GetReceiverDID()
+		tcb = block.TokenChainBlock{
+			TransactionType: block.TokenPrePledgedType,
+			TokenOwner:      sc.GetSenderDID(),
+			TransInfo:       bti,
+			SmartContract:   sc.GetBlock(),
+			PledgeDetails:   ptds,
+			Epoch:           cr.TransactionEpoch,
+		}
 	} else {
 		bti.SenderDID = sc.GetSenderDID()
 		bti.ReceiverDID = sc.GetReceiverDID()
@@ -2422,8 +2402,8 @@ func (c *Core) requestPledgeQuorumSignature(nb *block.Block, cr *ConensusRequest
 	return nb, nil
 }
 
-func (c *Core) requestPledgeTokenInfo(cr *ConensusRequest, p *ipfsport.Peer, qt int) QuorumSelection {
-	pledgeInfo, err := c.initPledgeQuorumToken(cr, p, qt)
+func (c *Core) requestPledgeTokenInfo(cr *ConensusRequest, p *ipfsport.Peer) QuorumSelection {
+	pledgeInfo, err := c.initPledgeQuorumToken(cr, p)
 	if err != nil {
 		pledgeInfo.Message = err.Error()
 		if strings.Contains(err.Error(), "don't have enough balance to pledge") {
@@ -2436,7 +2416,7 @@ func (c *Core) requestPledgeTokenInfo(cr *ConensusRequest, p *ipfsport.Peer, qt 
 	return pledgeInfo
 }
 
-func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer, qt int) (QuorumSelection, error) {
+func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer) (QuorumSelection, error) {
 	quorumSelection := QuorumSelection{
 		DID: p.GetPeerDID(),
 		BasicResponse: model.BasicResponse{
