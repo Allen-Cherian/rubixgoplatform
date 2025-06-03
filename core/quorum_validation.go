@@ -366,7 +366,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			}
 
 			err = c.w.CreateToken(tokenInfo)
-
 			if err != nil {
 				c.log.Error("failed to write to db, token ", ti[i].Token, "err", err)
 				return false, err
