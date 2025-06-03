@@ -11,10 +11,11 @@ import (
 )
 
 type CreateFTReqSwaggoInput struct {
-	DID        string `json:"did"`
-	FTName     string `json:"ft_name"`
-	FTCount    int    `json:"ft_count"`
-	TokenCount int    `json:"token_count"`
+	DID             string `json:"did"`
+	FTName          string `json:"ft_name"`
+	FTCount         int    `json:"ft_count"`
+	TokenCount      int    `json:"token_count"`
+	FTNumStartIndex int    `json:"ft_num_start_index"`
 }
 
 type TransferFTReqSwaggoInput struct {
@@ -48,7 +49,7 @@ func (s *Server) APICreateFT(req *ensweb.Request) *ensweb.Result {
 	}
 	s.c.AddWebReq(req)
 	rbtAmount := int(createFTReq.TokenCount)
-	go s.c.CreateFTs(req.ID, createFTReq.DID, createFTReq.FTCount, createFTReq.FTName, rbtAmount)
+	go s.c.CreateFTs(req.ID, createFTReq.DID, createFTReq.FTCount, createFTReq.FTName, rbtAmount, createFTReq.FTNumStartIndex)
 	return s.didResponse(req, req.ID)
 }
 
@@ -98,7 +99,7 @@ func (s *Server) APIGetFTInfo(req *ensweb.Request) *ensweb.Result {
 		s.log.Error("Invalid DID")
 		return s.BasicResponse(req, false, "Invalid DID", nil)
 	}
-	info, err := s.c.GetFTInfo(did)
+	info, err := s.c.GetFTInfoByDID(did)
 	if err != nil {
 		return s.BasicResponse(req, false, err.Error(), nil)
 	}

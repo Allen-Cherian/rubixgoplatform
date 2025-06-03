@@ -1520,6 +1520,9 @@
                 "ft_name": {
                     "type": "string"
                 },
+                "ft_num_start_index": {
+                    "type": "integer"
+                },
                 "token_count": {
                     "type": "integer"
                 }
