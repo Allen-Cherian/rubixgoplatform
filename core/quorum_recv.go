@@ -315,6 +315,10 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 			c.log.Error("failed to update pledge tokens, err ", response.Message)
 			// TODO : throw error
 		}
+
+		// delete pledge tokens and consensus request map
+		delete(c.pd, cr.ReqID)
+
 	}
 
 	return c.l.RenderJSON(req, &crep, http.StatusOK)

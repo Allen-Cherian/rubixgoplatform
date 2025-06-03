@@ -51,9 +51,8 @@ const (
 )
 
 type PrePledgeRequest struct {
-	DID             string  `json:"did"`
-	// PrePledgeTokens []Token `json:"prepledge_tokens"`
-	QuorumType      int     `json:"quorum_type"`
+	DID string `json:"did"`
+	QuorumType int `json:"quorum_type"`
 }
 
 type Token struct {
@@ -495,6 +494,8 @@ func (w *Wallet) TokensTransferred(did string, ti []contract.TokenInfo, b *block
 		var tokenStatus int
 		if pinningServiceMode {
 			tokenStatus = TokenIsPinnedAsService
+		} else if b.GetTransType() == block.TokenPrePledgedType {
+			tokenStatus = TokenIsSpendable
 		} else {
 			tokenStatus = TokenIsTransferred
 		}

@@ -1505,6 +1505,7 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 	}
 
 	cr := getConsensusRequest(req.QuorumType, c.peerID, "", sc.GetBlock(), txEpoch, isSelfRBTTransfer)
+	cr.Mode = PrePledgingMode
 
 	// initiate consensus for pre-pledging
 	_, _, _, err = c.initiateConsensus(cr, sc, dc)
@@ -1514,17 +1515,8 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 		return resp
 	}
 
-	// update token status to spendable
-	for _, tokeninfo := range tokensToPrePledge {
-		tokeninfo.TokenStatus = wallet.TokenIsSpendable
-		err := c.w.UpdateToken(&tokeninfo)
-		if err != nil {
-			c.log.Error("failed to update token status as spendable, token ", tokeninfo.TokenID)
-			continue
-		}
-	}
-
 	// TODO : add transaction details to DB
+	
 
 	return resp
 }
