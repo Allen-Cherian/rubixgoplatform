@@ -62,3 +62,27 @@ func (cmd *Command) getTxnDetails() {
 		}
 	}
 }
+func (cmd *Command) getFTTxnDetails() {
+	if cmd.did == "" {
+		cmd.log.Error("Please provide did to get transaction details")
+		return
+	} else {
+		isAlphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(cmd.did)
+		if !strings.HasPrefix(cmd.did, "bafybmi") || len(cmd.did) != 59 || !isAlphanumeric {
+			cmd.log.Error("Invalid DID")
+			return
+		}
+		res, err := cmd.c.GetFTTxnsByDID(cmd.did, cmd.role)
+		if err != nil {
+			cmd.log.Error("Invalid response from the node", "err", err)
+			return
+		}
+		if !res.BasicResponse.Status {
+			cmd.log.Error("Failed to get FT Txn details for Did", cmd.did, " err", err)
+		}
+		for i := range res.TxnDetails {
+			td := res.TxnDetails[i]
+			fmt.Printf("%+v", td)
+		}
+	}
+}

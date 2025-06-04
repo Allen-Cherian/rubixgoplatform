@@ -777,6 +777,57 @@
                 }
             }
         },
+        "/api/get-ft-txn-by-did": {
+            "get": {
+                "description": "Retrieves the details of a FT transaction based on DID, role (sender or receiver) and date range (on and after start date and before end date).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "FT"
+                ],
+                "summary": "Get FT transaction details by DID",
+                "operationId": "get-ft-txn-by-did",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "DID of sender/receiver",
+                        "name": "DID",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by role as sender or receiver",
+                        "name": "Role",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date of the date range (format: YYYY-MM-DD)",
+                        "name": "StartDate",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date of the date range (format: YYYY-MM-DD)",
+                        "name": "EndDate",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.BasicResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/get-nft-token-chain-data": {
             "get": {
                 "description": "This API will return nft token chain data",
@@ -1519,6 +1570,9 @@
                 },
                 "ft_name": {
                     "type": "string"
+                },
+                "ft_num_start_index": {
+                    "type": "integer"
                 },
                 "token_count": {
                     "type": "integer"

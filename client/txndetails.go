@@ -38,3 +38,15 @@ func (c *Client) GetTxnByComment(comment string) (*model.TxnDetails, error) {
 	}
 	return &td, nil
 }
+
+func (c *Client) GetFTTxnsByDID(DID string, role string) (*model.TxnDetails, error) {
+	q := make(map[string]string)
+	q["DID"] = DID
+	q["Role"] = role
+	var ftTransactionDetails model.TxnDetails
+	err := c.sendJSONRequest("GET", setup.APIGetFTTxnByDID, q, nil, &ftTransactionDetails)
+	if err != nil {
+		return nil, err
+	}
+	return &ftTransactionDetails, nil
+}

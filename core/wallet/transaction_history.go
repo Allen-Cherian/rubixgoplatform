@@ -12,9 +12,8 @@ const (
 	DeployMode
 	ExecuteMode
 	PinningServiceMode
+	FTTransferMode
 )
-
-
 
 func (w *Wallet) AddTransactionHistory(td *model.TransactionDetails) error {
 	err := w.s.Write(TransactionStorage, td)
@@ -72,7 +71,6 @@ func (w *Wallet) GetTransactionBySender(sender string) ([]model.TransactionDetai
 
 func (w *Wallet) GetTransactionByDID(did string) ([]model.TransactionDetails, error) {
 	var td []model.TransactionDetails
-
 	err := w.s.Read(TransactionStorage, &td, "sender_did=? OR receiver_did=?", did, did)
 	if err != nil {
 		w.log.Error("Failed to get transaction details with did", did, "err", err)
@@ -120,3 +118,34 @@ func (w *Wallet) GetTransactionByDIDAndDateRange(did string, startDate time.Time
 // 	return td, err
 
 // }
+
+func (w *Wallet) GetAllFTTransactionDetailsByDID(did string) ([]model.TransactionDetails, error) {
+	var ftTransactions []model.TransactionDetails
+	err := w.s.Read(TransactionStorage, &ftTransactions, "mode=? AND (sender_did=? OR receiver_did=?)", FTTransferMode, did, did)
+	if err != nil {
+		w.log.Error("Failed to get FT transaction details with did", did, "err", err)
+		return nil, err
+	}
+	return ftTransactions, nil
+}
+
+func (w *Wallet) GetFTTransactionByReceiver(receiver string) ([]model.TransactionDetails, error) {
+	var ftTransactions []model.TransactionDetails
+	err := w.s.Read(TransactionStorage, &ftTransactions, "receiver_did=? AND mode=?", receiver, FTTransferMode)
+	if err != nil {
+		w.log.Error("Failed to get transaction details with did as Receiver ", "err", err)
+		return nil, err
+	}
+	return ftTransactions, nil
+}
+
+func (w *Wallet) GetFTTransactionBySender(sender string) ([]model.TransactionDetails, error) {
+	var ftTransactions []model.TransactionDetails
+
+	err := w.s.Read(TransactionStorage, &ftTransactions, "sender_did=? AND mode=?", sender, FTTransferMode)
+	if err != nil {
+		w.log.Error("Failed to get transaction details with did as sender", "err", err)
+		return nil, err
+	}
+	return ftTransactions, nil
+}
