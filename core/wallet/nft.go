@@ -7,6 +7,8 @@ type NFT struct {
 	DID         string  `gorm:"column:did" json:"did"`
 	TokenStatus int     `gorm:"column:token_status;" json:"token_status"`
 	TokenValue  float64 `gorm:"column:token_value;" json:"token_value"`
+	Metadata    string  `gorm:"column:metadata;" json:"metadata"`
+	Filename    string  `gorm:"column:filename;" json:"filename"`
 }
 
 // CreateNFT write NFT into db

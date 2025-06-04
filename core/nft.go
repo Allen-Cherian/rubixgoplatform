@@ -199,6 +199,8 @@ func (c *Core) deployNFT(reqID string, deployReq model.DeployNFTRequest) *model.
 		DID:         deployReq.DID,
 		TokenStatus: wallet.TokenIsFree,
 		TokenValue:  floatPrecision(deployReq.NFTValue, MaxDecimalPlaces),
+		Metadata:     deployReq.NFTMetadata,
+		Filename:     deployReq.NFTFileName,
 	}
 
 	if err := c.w.CreateNFT(&nftTokenDetails, false); err != nil {
@@ -598,7 +600,15 @@ func (c *Core) GetAllNFT() model.NFTList {
 	}
 	nftDetails := make([]model.NFTInfo, 0)
 	for _, nft := range nftList {
-		nftDetails = append(nftDetails, model.NFTInfo{NFTId: nft.TokenID, Owner: nft.DID, Value: nft.TokenValue})
+		nftDetails = append(
+			nftDetails, 
+			model.NFTInfo{
+				NFTId: nft.TokenID, 
+				Owner: nft.DID, 
+				Value: nft.TokenValue,
+				Metadata: nft.Metadata,
+				FileName: nft.Filename,
+			})
 	}
 	response.NFTs = nftDetails
 	response.Status = true

@@ -1426,6 +1426,12 @@ const docTemplate = `{
                 "nft": {
                     "type": "string"
                 },
+                "nft_file_name": {
+                    "type": "string"
+                },
+                "nft_metadata": {
+                    "type": "string"
+                },
                 "nft_value": {
                     "type": "number"
                 },
@@ -1565,6 +1571,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "nft_data": {
+                    "type": "string"
+                },
+                "nft_file_name": {
+                    "type": "string"
+                },
+                "nft_metadata": {
                     "type": "string"
                 },
                 "nft_value": {
