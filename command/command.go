@@ -109,6 +109,7 @@ const (
 	CreateDIDFromPubKeyCmd         string = "createdidfrompubkey"
 	AddUserAPIKeyCmd               string = "adduserapikey"
 	AddPeerDetailsFromExplorer     string = "exppeerdetails"
+	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
 )
 
 var commands = []string{VersionCmd,
@@ -175,6 +176,9 @@ var commands = []string{VersionCmd,
 	FetchNftCmd,
 	GetNftsByDidCmd,
 	CreateDIDFromPubKeyCmd,
+	AddUserAPIKeyCmd,
+	AddPeerDetailsFromExplorer,
+	GetFTTxnDetailsCmd,
 }
 
 var commandsHelp = []string{"To get tool version",
@@ -239,6 +243,10 @@ var commandsHelp = []string{"To get tool version",
 	"This command will subscribe NFT",
 	"This command will fetch NFT",
 	"This command will get all NFTs owned by the did",
+	"",
+	"",
+	"",
+	"This command will get FT transaction details by DID",
 }
 
 type Command struct {
@@ -763,6 +771,8 @@ func Run(args []string) {
 		cmd.addUserAPIKey()
 	case AddPeerDetailsFromExplorer:
 		cmd.addPeerDetailsFromExplorer()
+	case GetFTTxnDetailsCmd:
+		cmd.getFTTxnDetails()
 	default:
 		cmd.log.Error("Invalid command")
 	}

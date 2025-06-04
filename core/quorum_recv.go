@@ -1267,7 +1267,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 			TransactionID:   b.GetTid(),
 			TransactionType: b.GetTransType(),
 			BlockID:         bid,
-			Mode:            wallet.RecvMode,
+			Mode:            wallet.FTTransferMode,
 			Amount:          sc.GetTotalRBTs(),
 			SenderDID:       sc.GetSenderDID(),
 			ReceiverDID:     sc.GetReceiverDID(),
