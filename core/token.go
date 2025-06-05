@@ -295,11 +295,11 @@ func (c *Core) syncTokenChain(req *ensweb.Request) *ensweb.Result {
 		c.log.Error("Error fetching token blocks", "error", err)
 	}
 
-	// Handle case where both error occurred and blocks are nil
+	/* // Handle case where both error occurred and blocks are nil
 	if err != nil && blks == nil {
 		c.log.Warn("Token blocks missing and error occurred, falling back to role-based logic", "token", tr.Token)
 		return c.handleRoleBasedLogic(tr.Token, req)
-	}
+	} */
 
 	// Handle other errors
 	if err != nil {
@@ -318,7 +318,7 @@ func (c *Core) syncTokenChain(req *ensweb.Request) *ensweb.Result {
 	}, http.StatusOK)
 }
 
-func (c *Core) handleRoleBasedLogic(token string, req *ensweb.Request) *ensweb.Result {
+/* func (c *Core) handleRoleBasedLogic(token string, req *ensweb.Request) *ensweb.Result {
 	fmt.Println("Handling role-based logic for token:", token)
 	list, err := c.GetDHTddrs(token)
 	if err != nil {
@@ -363,7 +363,7 @@ func (c *Core) handleRoleBasedLogic(token string, req *ensweb.Request) *ensweb.R
 	}
 
 	return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "Unhandled error during role-based processing"}, http.StatusInternalServerError)
-}
+} */
 
 // processRole handles specific roles (as integers) and returns a message
 func (c *Core) processRole(role int) string {
@@ -621,7 +621,7 @@ func (c *Core) syncGenesisAndLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRe
 		c.log.Error("Failed to sync genesis and latest token chain block", "msg", trep.Message)
 		return fmt.Errorf(trep.Message)
 	}
-	
+
 	// add genesis block
 	if trep.GenesisBlock != nil {
 		fmt.Println("adding genesis block")
