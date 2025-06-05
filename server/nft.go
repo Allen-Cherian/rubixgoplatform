@@ -108,6 +108,8 @@ type DeployNFTSwaggoInput struct {
 	QuorumType int     `json:"quorum_type"`
 	NFTValue   float64 `json:"nft_value"`
 	NFTData    string  `json:"nft_data"`
+	NFTMetadata string `json:"nft_metadata"`
+	NFTFileName string `json:"nft_file_name"`
 }
 
 // NFT godoc

@@ -1383,7 +1383,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 		return nil, fmt.Errorf("Failed to update token status, error: %v", err)
 	}
 
-	updateFTTableErr := c.updateFTTable(receiverDID)
+	updateFTTableErr := c.updateFTTable()
 	if updateFTTableErr != nil {
 		return nil, fmt.Errorf("Failed to update FT table, error: %v", updateFTTableErr)
 	}
@@ -1403,7 +1403,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 			TransactionID:   b.GetTid(),
 			TransactionType: b.GetTransType(),
 			BlockID:         bid,
-			Mode:            wallet.RecvMode,
+			Mode:            wallet.FTTransferMode,
 			Amount:          sc.GetTotalRBTs(),
 			SenderDID:       sc.GetSenderDID(),
 			ReceiverDID:     sc.GetReceiverDID(),

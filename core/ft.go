@@ -20,8 +20,8 @@ import (
 	"github.com/rubixchain/rubixgoplatform/wrapper/uuid"
 )
 
-func (c *Core) CreateFTs(reqID string, did string, ftcount int, ftname string, wholeToken int) {
-	err := c.createFTs(reqID, ftname, ftcount, wholeToken, did)
+func (c *Core) CreateFTs(reqID string, did string, ftcount int, ftname string, wholeToken int, ftNumStartIndex int) {
+	err := c.createFTs(reqID, ftname, ftcount, wholeToken, did, ftNumStartIndex)
 	br := model.BasicResponse{
 		Status:  true,
 		Message: "FT created successfully",
@@ -38,7 +38,7 @@ func (c *Core) CreateFTs(reqID string, did string, ftcount int, ftname string, w
 	channel.OutChan <- &br
 }
 
-func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens int, did string) error {
+func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens int, did string, ftNumStartIndex int) error {
 	if did == "" {
 		c.log.Error("DID is empty")
 		return fmt.Errorf("DID is empty")
@@ -56,7 +56,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 
 	var FT []wallet.FT
 
-	c.s.Read(wallet.FTStorage, &FT, "ft_name=? AND  creator_did=?", FTName, did)
+	c.s.Read(wallet.FTStorage, &FT, "ft_name=? AND creator_did=?", FTName, did)
 
 	if len(FT) != 0 {
 		c.log.Error("FT Name already exists")
@@ -89,14 +89,14 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	}
 
 	newFTs := make([]wallet.FTToken, 0, numFTs)
-	newFTTokenIDs := make([]string, numFTs)
+	var newFTTokenIDs []string
 
 	var parentTokenIDsArray []string
 	for _, token := range wholeTokens {
 		parentTokenIDsArray = append(parentTokenIDsArray, token.TokenID)
 	}
 	parentTokenIDs := strings.Join(parentTokenIDsArray, ",")
-	for i := 0; i < numFTs; i++ {
+	for i := ftNumStartIndex; i < ftNumStartIndex+numFTs; i++ {
 		racType := &rac.RacType{
 			Type:        c.RACFTType(),
 			DID:         did,
@@ -129,9 +129,6 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 			return err
 		}
 
-		// racBlockData := racBlocks[0].GetBlock()
-		// fr := bytes.NewBuffer(racBlockData)
-		//TODO : Adding timestamp to creaet FT to prevent sequence error. Need to check if DID can be used instead.
 		ftnumString := strconv.Itoa(i)
 		parts := []string{FTName, ftnumString, did}
 		result := strings.Join(parts, " ")
@@ -142,8 +139,9 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 			c.log.Error("Failed to create FT, Failed to add token to IPFS", "err", err)
 			return err
 		}
-		c.log.Info("FT created: " + ftID)
-		newFTTokenIDs[i] = ftID
+		c.log.Info("FT created: " + ftID + " FT Num: " + ftnumString)
+		newFTTokenIDs = append(newFTTokenIDs, ftID)
+
 		bti := &block.TransInfo{
 			Tokens: []block.TransTokens{
 				{
@@ -262,7 +260,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 			return err
 		}
 	}
-	updateFTTableErr := c.updateFTTable(did)
+	updateFTTableErr := c.updateFTTable()
 	if updateFTTableErr != nil {
 		c.log.Error("Failed to update FT table after FT creation", "err", err)
 		return updateFTTableErr
@@ -270,7 +268,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	return nil
 }
 
-func (c *Core) GetFTInfo(did string) ([]model.FTInfo, error) {
+func (c *Core) GetFTInfoByDID(did string) ([]model.FTInfo, error) {
 	if !c.w.IsDIDExist(did) {
 		c.log.Error("DID does not exist")
 		return nil, fmt.Errorf("DID does not exist")
@@ -371,7 +369,7 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 	var creatorDID string
 	if req.CreatorDID == "" {
 		// Checking for same FTs with different creators
-		info, err := c.GetFTInfo(did)
+		info, err := c.GetFTInfoByDID(did)
 		if err != nil || info == nil {
 			c.log.Error("Failed to get FT info for transfer", "err", err)
 			resp.Message = "Failed to get FT info for transfer"
@@ -565,7 +563,7 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		FTTokenList:     FTTokenIDs,
 	}
 
-	updateFTTableErr := c.updateFTTable(did)
+	updateFTTableErr := c.updateFTTable()
 	if updateFTTableErr != nil {
 		c.log.Error("Failed to update FT table after transfer ", "err", updateFTTableErr)
 		resp.Message = "Failed to update FT table after transfer"
@@ -621,14 +619,14 @@ func (c *Core) GetPresiceFractionalValue(a, b int) (float64, error) {
 	return result, nil
 }
 
-func (c *Core) updateFTTable(did string) error {
-	AllFTs, err := c.w.GetFTsAndCount(did)
+func (c *Core) updateFTTable() error {
+	AllFTs, err := c.w.GetAllFTsAndCount()
 	// If no records are found, remove all entries from the FT table
 	if err != nil {
 		fetchErr := fmt.Sprint(err)
 		if strings.Contains(fetchErr, "no records found") {
 			c.log.Info("No records found. Removing all entries from FT table.")
-			err = c.s.Delete(wallet.FTStorage, &wallet.FT{}, "ft_name!=?", "")
+			err = c.s.Delete(wallet.FTStorage, &wallet.FT{}, "did=?")
 			if err != nil {
 				deleteErr := fmt.Sprint(err)
 				if strings.Contains(deleteErr, "no records found") {

@@ -282,6 +282,10 @@ func (s *Server) APICreateDIDFromPubKey(req *ensweb.Request) *ensweb.Result {
 		PubKeyFile: "",
 	}
 
+	if !s.cfg.EnableAuth {
+		didCreate.Dir = DIDRootDir
+	}
+
 	//pass the public key and other required data to create a did
 	did, err := s.c.CreateDIDFromPubKey(&didCreate, didReq.PubKey)
 	if err != nil {

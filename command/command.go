@@ -109,6 +109,7 @@ const (
 	CreateDIDFromPubKeyCmd         string = "createdidfrompubkey"
 	AddUserAPIKeyCmd               string = "adduserapikey"
 	AddPeerDetailsFromExplorer     string = "exppeerdetails"
+	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
 )
 
 var commands = []string{VersionCmd,
@@ -175,6 +176,9 @@ var commands = []string{VersionCmd,
 	FetchNftCmd,
 	GetNftsByDidCmd,
 	CreateDIDFromPubKeyCmd,
+	AddUserAPIKeyCmd,
+	AddPeerDetailsFromExplorer,
+	GetFTTxnDetailsCmd,
 }
 
 var commandsHelp = []string{"To get tool version",
@@ -239,6 +243,10 @@ var commandsHelp = []string{"To get tool version",
 	"This command will subscribe NFT",
 	"This command will fetch NFT",
 	"This command will get all NFTs owned by the did",
+	"",
+	"",
+	"",
+	"This command will get FT transaction details by DID",
 }
 
 type Command struct {
@@ -332,6 +340,7 @@ type Command struct {
 	defaultSetup                 bool
 	apiKey                       string
 	nftValue                     float64
+	ftNumStartIndex              int
 }
 
 func showVersion() {
@@ -552,6 +561,7 @@ func Run(args []string) {
 	flag.BoolVar(&cmd.defaultSetup, "defaultSetup", false, "Add Faucet Quorums")
 	flag.StringVar(&cmd.apiKey, "apikey", "", "Give the API Key corresponding to the DID")
 	flag.Float64Var(&cmd.nftValue, "nftValue", 0.0, "Value of the NFT")
+	flag.IntVar(&cmd.ftNumStartIndex, "ftStartIndex", 0, "Start index of the FTs to be created")
 
 	if len(os.Args) < 2 {
 		fmt.Println("Invalid Command")
@@ -761,6 +771,8 @@ func Run(args []string) {
 		cmd.addUserAPIKey()
 	case AddPeerDetailsFromExplorer:
 		cmd.addPeerDetailsFromExplorer()
+	case GetFTTxnDetailsCmd:
+		cmd.getFTTxnDetails()
 	default:
 		cmd.log.Error("Invalid command")
 	}

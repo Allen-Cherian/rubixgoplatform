@@ -191,3 +191,53 @@ func (s *Server) APIGetTxnByNode(req *ensweb.Request) *ensweb.Result {
 	}
 	return s.RenderJSON(req, &Result, http.StatusOK)
 }
+
+// @Summary Get FT transaction details by DID
+// @Description Retrieves the details of a FT transaction based on DID, role (sender or receiver) and date range (on and after start date and before end date).
+// @ID get-ft-txn-by-did
+// @Tags FT
+// @Accept json
+// @Produce json
+// @Param DID query string true "DID of sender/receiver"
+// @Param Role query string false "Filter by role as sender or receiver"
+// @Param StartDate query string false "Start date of the date range (format: YYYY-MM-DD)"
+// @Param EndDate query string false "End date of the date range (format: YYYY-MM-DD)"
+// @Success 200 {object} model.BasicResponse
+// @Router /api/get-ft-txn-by-did [get]
+func (s *Server) APIGetFTTxnByDID(req *ensweb.Request) *ensweb.Result {
+	did := s.GetQuerry(req, "DID")
+	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(did)
+	if !strings.HasPrefix(did, "bafybmi") || len(did) != 59 || !is_alphanumeric {
+		s.log.Error("Invalid DID")
+		return s.BasicResponse(req, false, "Invalid DID", nil)
+	}
+	role := s.GetQuerry(req, "Role")
+	startDate := s.GetQuerry(req, "StartDate")
+	endDate := s.GetQuerry(req, "EndDate")
+
+	results, err := s.c.GetFTTransactionsByDID(did, role, startDate, endDate)
+	if err != nil {
+		s.log.Info("Error fetching FT transaction details. " + err.Error())
+		td := model.TxnDetails{
+			BasicResponse: model.BasicResponse{
+				Status:  false,
+				Message: err.Error(),
+				Result:  "No data found",
+			},
+			TxnDetails: make([]model.TransactionDetails, 0),
+		}
+		return s.RenderJSON(req, &td, http.StatusOK)
+	}
+	ftTransactionDetails := model.TxnDetails{
+		BasicResponse: model.BasicResponse{
+			Status:  true,
+			Message: "Retrieved FT Txn Details",
+			Result:  "Successful",
+		},
+		TxnDetails: make([]model.TransactionDetails, 0),
+	}
+
+	ftTransactionDetails.TxnDetails = append(ftTransactionDetails.TxnDetails, results...)
+
+	return s.RenderJSON(req, &ftTransactionDetails, http.StatusOK)
+}

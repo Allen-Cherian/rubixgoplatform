@@ -95,6 +95,7 @@ const (
 	APIRequestDIDForPubKey              string = "/api/request-did-for-pubkey"
 	APISendJWTFromWallet                string = "/api/send-jwt-from-wallet"
 	APIAddPeerDetailsFromExplorer       string = "/api/add-peer-details-from-explorer"
+	APIGetFTTxnByDID                    string = "/api/get-ft-txn-by-did"
 	APIPrePledge                        string = "/api/prepledge"
 )
 

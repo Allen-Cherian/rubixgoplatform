@@ -1084,7 +1084,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			TransactionID:   tid,
 			TransactionType: nb.GetTransType(),
 			BlockID:         nbid,
-			Mode:            wallet.SendMode,
+			Mode:            wallet.FTTransferMode,
 			SenderDID:       sc.GetSenderDID(),
 			ReceiverDID:     sc.GetReceiverDID(),
 			Comment:         sc.GetComment(),

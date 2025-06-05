@@ -1,21 +1,5 @@
 package model
 
-type NFTReq struct {
-	DID        string
-	NumTokens  int
-	Fields     map[string][]string
-	FileNames  []string
-	FolderName string
-}
-
-type CreateNFTReq struct {
-	DID      string
-	UserID   string
-	UserInfo string
-	FileInfo string
-	Files    []string
-}
-
 type NFTStatus struct {
 	Token       string `json:"token"`
 	TokenStatus int    `json:"token_status"`
@@ -33,6 +17,8 @@ type NFTEvent struct {
 	Type         int     `json:"type"`
 	NFTBlockHash string  `json:"nftBlockHash"`
 	NFTValue     float64 `json:"nftValue"`
+	NFTMetadata  string  `json:"nftMetadata"`
+	NFTFileName  string  `json:"nftFileName"`
 }
 
 type DeployNFTRequest struct {
@@ -41,6 +27,8 @@ type DeployNFTRequest struct {
 	QuorumType int     `json:"quorum_type"`
 	NFTValue   float64 `json:"nft_value"`
 	NFTData    string  `json:"nft_data"`
+	NFTMetadata string `json:"nft_metadata"`
+	NFTFileName string `json:"nft_file_name"`
 }
 
 type ExecuteNFTRequest struct {
@@ -57,18 +45,13 @@ type NewNFTSubscription struct {
 	NFT string `json:"nft"`
 }
 
-type NewNFTEvent struct {
-	NFT          string `json:"nft"`
-	OwnerDid     string `json:"ownerDid"`
-	ReceiverDid  string `json:"receiverDid"`
-	Type         int    `json:"type"`
-	NFTBlockHash string `json:"nftBlockHash"`
-}
 
 type NFTInfo struct {
 	NFTId string  `json:"nft"`
 	Owner string  `json:"owner_did"`
 	Value float64 `json:"nft_value"`
+	Metadata string  `json:"nft_metadata"`
+	FileName string  `json:"nft_file_name"`
 }
 
 type NFTList struct {

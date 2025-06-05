@@ -130,3 +130,58 @@ func (c *Core) GetCountofTxn(did string) (model.TransactionCount, error) {
 	result.TxnReceived = len(txnAsReceiver)
 	return result, nil
 }
+
+func (c *Core) GetFTTransactionsByDID(did string, role string, startDateStr string, endDateStr string) ([]model.TransactionDetails, error) {
+	var startDate, endDate time.Time
+	var err error
+
+	// Parse startDate if provided
+	if startDateStr != "" {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			// Handle invalid date format
+			c.log.Error("Invalid StartDate format", err)
+			return nil, err
+		}
+	}
+	// Parse endDate if provided
+	if endDateStr != "" {
+		endDate, err = time.Parse("2006-01-02", endDateStr)
+		if err != nil {
+			// Handle invalid date format
+			c.log.Error("Invalid EndDate format", err)
+			return nil, err
+		}
+	}
+
+	var ftTransactions []model.TransactionDetails
+
+	switch strings.ToLower(role) {
+	case "":
+		ftTransactions, err = c.w.GetAllFTTransactionDetailsByDID(did)
+	case "sender":
+		ftTransactions, err = c.w.GetFTTransactionBySender(did)
+	case "receiver":
+		ftTransactions, err = c.w.GetFTTransactionByReceiver(did)
+	default:
+		c.log.Error("invalid role : " + role)
+		return nil, fmt.Errorf("invalid role: %s", role)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// If no date filtering is needed, return the results directly
+	if startDateStr == "" && endDateStr == "" {
+		return ftTransactions, nil
+	}
+
+	// Apply date range filtering
+	filteredFtTransactions, err := c.FilterTxnDetailsByDateRange(ftTransactions, startDate, endDate)
+	if err != nil {
+		c.log.Error("failed to filter by date range", err)
+		return nil, err
+	}
+	return filteredFtTransactions, nil
+}
