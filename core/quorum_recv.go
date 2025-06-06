@@ -1260,15 +1260,13 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 	if err != nil {
 		return nil, fmt.Errorf("Failed to update token status, failed to get block ID, err: %v", err)
 	}
-	// Only save the transaction details in Transaction history table whenever
-	// its a general RBT transfer
 	if sc.GetSenderDID() != sc.GetReceiverDID() {
 		td := &model.TransactionDetails{
 			TransactionID:   b.GetTid(),
 			TransactionType: b.GetTransType(),
 			BlockID:         bid,
 			Mode:            wallet.FTTransferMode,
-			Amount:          sc.GetTotalRBTs(),
+			Amount:          float64(len(b.GetTransTokens())),
 			SenderDID:       sc.GetSenderDID(),
 			ReceiverDID:     sc.GetReceiverDID(),
 			Comment:         sc.GetComment(),
