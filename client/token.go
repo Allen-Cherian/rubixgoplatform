@@ -106,3 +106,13 @@ func (c *Client) ValidateToken(token string) (*model.BasicResponse, error) {
 	}
 	return &br, nil
 }
+
+func (c *Client) PrePledgeRBT(rt *model.PrePledgeRequest) (*model.BasicResponse, error) {
+	var br model.BasicResponse
+	err := c.sendJSONRequest("POST", setup.APIPrePledge, nil, rt, &br, time.Minute*2)
+	if err != nil {
+		c.log.Error("Failed RBT Pre-pledge", "err", err)
+		return nil, err
+	}
+	return &br, nil
+}

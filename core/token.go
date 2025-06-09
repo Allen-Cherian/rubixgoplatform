@@ -1382,10 +1382,10 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 		return resp
 	}
 
-	senderDID := req.DID
+	ownerDID := req.DID
 	isSelfRBTTransfer := false
 
-	dc, err := c.SetupDID(reqID, senderDID)
+	dc, err := c.SetupDID(reqID, ownerDID)
 	if err != nil {
 		resp.Message = "Failed to setup DID, " + err.Error()
 		return resp
@@ -1423,7 +1423,7 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 			c.log.Error("token is burnt, can't transfer further; token ", tokeninfo.TokenID)
 			continue
 		case block.TokenTransferredType:
-			if blockHeight != 0 {
+			if blockHeight != 0 { // In mainnet, migrated tokens' genesis block has block type - TokenTransferredType
 				// validate quorums
 				quorumSignList, err := latestBlock.GetQuorumSignatureList()
 				if err != nil || quorumSignList == nil {
@@ -1464,10 +1464,12 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 				}
 			}
 			tokensToPrePledge = append(tokensToPrePledge, tokeninfo)
+			// TODO : In case of mining, add another case to verify prev-quorum signatures and
+			// add tokens to the list - tokensToPrePledge
 		}
 
 		// pin token by token owner, in case it is not pinned
-		c.w.Pin(tokeninfo.TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.DID, "", tokeninfo.TokenValue)
+		c.w.Pin(tokeninfo.TokenID, wallet.OwnerRole, ownerDID, "TID-Not Generated", req.DID, "", tokeninfo.TokenValue)
 
 		// fetch latest block details and prepare tokens for consensus
 		blockId, err := latestBlock.GetBlockID(tokeninfo.TokenID)
@@ -1484,8 +1486,6 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 			BlockID:    blockId,
 		}
 		tokenInfoList = append(tokenInfoList, tokenInfo)
-		// tokenListForExplorer = append(tokenListForExplorer, Token{TokenHash: tokenInfo.Token, TokenValue: tokenInfo.TokenValue})
-
 	}
 
 	convertReq := &model.RBTTransferRequest{
@@ -1508,7 +1508,7 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 	cr.Mode = PrePledgingMode
 
 	// initiate consensus for pre-pledging
-	_, _, _, err = c.initiateConsensus(cr, sc, dc)
+	txnDetails, _, _, err := c.initiateConsensus(cr, sc, dc)
 	if err != nil {
 		c.log.Error("Consensus failed ", "err", err)
 		resp.Message = "Consensus failed " + err.Error()
@@ -1516,7 +1516,23 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 	}
 
 	// TODO : add transaction details to DB
-	
+	et := time.Now()
+	dif := et.Sub(st)
+
+	var amt float64 = 0
+	for _, tknInfo := range tokensToPrePledge {
+		amt += tknInfo.TokenValue
+	}
+	txnDetails.Amount = amt
+
+	txnDetails.TotalTime = float64(dif.Milliseconds())
+
+	if err := c.w.AddTransactionHistory(txnDetails); err != nil {
+		errMsg := fmt.Sprintf("Error occured while adding transaction details: %v", err)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return resp
+	}
 
 	return resp
 }

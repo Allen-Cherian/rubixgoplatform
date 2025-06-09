@@ -102,3 +102,7 @@ type PinCheckReply struct {
 	PinDetails *TokenProviderMap `json:"pin_details"`
 }
 
+type PrePledgeRequest struct {
+	DID string `json:"did"`
+	QuorumType int `json:"quorum_type"`
+}
