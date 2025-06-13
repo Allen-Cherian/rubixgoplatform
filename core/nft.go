@@ -633,7 +633,7 @@ func (c *Core) GetNFTsByDid(did string) model.NFTList {
 	}
 	nftDetails := make([]model.NFTInfo, 0)
 	for _, nft := range nftList {
-		nftDetails = append(nftDetails, model.NFTInfo{NFTId: nft.TokenID, Owner: nft.DID, Value: nft.TokenValue})
+		nftDetails = append(nftDetails, model.NFTInfo{NFTId: nft.TokenID, Owner: nft.DID, Value: nft.TokenValue, Metadata: nft.Metadata, FileName: nft.Filename})
 	}
 	response.NFTs = nftDetails
 	response.Status = true
