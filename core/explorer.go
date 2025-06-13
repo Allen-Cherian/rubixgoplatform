@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/rubixchain/rubixgoplatform/block"
+	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/storage"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
 	"github.com/rubixchain/rubixgoplatform/wrapper/config"
@@ -47,10 +48,11 @@ type ExplorerClient struct {
 }
 
 type ExplorerDID struct {
-	PeerID  string  `json:"peer_id"`
-	DID     string  `json:"user_did"`
-	Balance float64 `json:"balance"`
-	DIDType int     `json:"did_type"`
+	PeerID    string         `json:"peer_id"`
+	DID       string         `json:"user_did"`
+	Balance   float64        `json:"balance"`
+	DIDType   int            `json:"did_type"`
+	FTDetails []model.FTInfo `json:"FTDetails"`
 }
 
 type ExplorerMapDID struct {
@@ -473,12 +475,18 @@ func (c *Core) ExplorerUserCreate() []string {
 							c.log.Error(fmt.Sprintf("Error getting account info for DID %v: %v", d.DID, err))
 							return
 						}
+						ftInfo, err := c.GetFTInfoByDID(d.DID)
+						if err != nil {
+							c.log.Error("Failed to get ft info for DID %v", d.DID)
+							return
+						}
 						balance := float64(accInfo.RBTAmount) // Convert to float64 if necessary
 						ed := ExplorerDID{
-							DID:     d.DID,
-							Balance: balance,
-							PeerID:  c.peerID,
-							DIDType: d.Type,
+							DID:       d.DID,
+							Balance:   balance,
+							PeerID:    c.peerID,
+							DIDType:   d.Type,
+							FTDetails: ftInfo,
 						}
 						err = c.ec.ExplorerUserCreate(&ed)
 						if err != nil {
@@ -534,12 +542,20 @@ func (c *Core) UpdateUserInfo(dids []string) {
 				c.log.Error("Failed to get account info for DID %v", did)
 				return
 			}
+
+			ftInfo, err := c.GetFTInfoByDID(did)
+			if err != nil {
+				c.log.Error("Failed to get ft info for DID %v", did)
+				return
+			}
+
 			_ = c.s.Read(wallet.DIDStorage, &didList, "did=?", did)
 			var er ExplorerResponse
 			ed := ExplorerDID{
-				PeerID:  c.peerID,
-				Balance: accInfo.RBTAmount,
-				DIDType: didList.Type,
+				PeerID:    c.peerID,
+				Balance:   accInfo.RBTAmount,
+				DIDType:   didList.Type,
+				FTDetails: ftInfo,
 			}
 			err = c.ec.SendExplorerJSONRequest("PUT", ExplorerUpdateUserInfoAPI+"/"+did, &ed, &er)
 			if err != nil {
