@@ -788,17 +788,18 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				return nil, nil, nil, fmt.Errorf(errMsg)
 			}
 			c.log.Debug("issue type in int is ", issueTypeInt)
-			syncIssueTokenDetails, err2 := c.w.ReadToken(token)
+			syncIssueTokenDetails, err2 := c.w.ReadFTToken(token)
 			if err2 != nil {
 				errMsg := fmt.Sprintf("Consensus failed due to tokenchain sync issue, err %v", err2)
 				c.log.Error(errMsg)
 				return nil, nil, nil, fmt.Errorf(errMsg)
 			}
 			c.log.Debug("sync issue token details ", syncIssueTokenDetails)
+
 			if issueTypeInt == TokenChainNotSynced {
 				syncIssueTokenDetails.TokenStatus = wallet.TokenChainSyncIssue
 				c.log.Debug("Token sync issue details updated:", syncIssueTokenDetails)
-				c.w.UpdateToken(syncIssueTokenDetails)
+				c.w.UpdateFTToken(syncIssueTokenDetails)
 				return nil, nil, nil, errors.New(br.Message)
 			}
 		}
