@@ -25,7 +25,7 @@ const (
 	ExplorerTokenCreateNFTAPI     string = "/api/v2/token/nft/create"
 	ExplorerTokenCreateSCAPI      string = "/api/v2/token/sc/create"
 	ExplorerCreateUserAPI         string = "/api/user/create"
-	ExplorerUpdateUserInfoAPI     string = "/api/user/update-user-info"
+	ExplorerUpdateUserInfoAPI     string = "/api/v2/user/update-user-info"
 	ExplorerUpdateTokenInfoAPI    string = "/api/token/update-token-info"
 	ExplorerGetUserKeyAPI         string = "/api/user/get-api-key"
 	ExplorerGenerateUserKeyAPI    string = "/api/user/generate-api-key"

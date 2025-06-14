@@ -305,6 +305,7 @@ func (c *Core) RegisterDID(reqID string, did string) {
 		br.Status = false
 		br.Message = err.Error()
 	}
+	c.UpdateUserInfo([]string{did}) //Updating the balance
 	dc := c.GetWebReq(reqID)
 	if dc == nil {
 		c.log.Error("Failed to get did channels")
