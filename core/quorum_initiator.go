@@ -523,10 +523,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 					c.AddPeerDetails(*qDidInfo)
 				}
 			}
-			fmt.Println("qDidInfo", qDidInfo)
-
 			if qDidInfo.DIDType == nil {
-				c.log.Debug("DID type of quorum is nil, fetching from explorer", qdid)
 				qdidPeerMap, err := c.GetPeerDIDInfo(qdid)
 				if err != nil {
 					c.log.Error("could not fetch did type of quorum", qdid, "err", err)

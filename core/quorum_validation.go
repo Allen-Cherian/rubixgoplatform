@@ -178,7 +178,7 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 				c.log.Error("failed to update parent token sync status as incomplete, token ", pt)
 			}
 		}
-		
+
 	}
 	if ptb.GetTransType() != block.TokenBurntType {
 		issueType = ParentTokenNotBurned // parent token is not in burnt stage
@@ -369,6 +369,8 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			if err != nil {
 				c.log.Error("failed to write to db, token ", ti[i].Token, "err", err)
 				return false, err
+			} else {
+				fmt.Println("Token created successfully", tokenInfo, "!!! TokenID", tokenInfo.TokenID)
 			}
 		}
 
