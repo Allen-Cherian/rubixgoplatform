@@ -52,7 +52,7 @@ type ExplorerDID struct {
 	DID       string         `json:"user_did"`
 	Balance   float64        `json:"balance"`
 	DIDType   int            `json:"did_type"`
-	FTDetails []model.FTInfo `json:"FTDetails"`
+	FTDetails []model.FTInfo `json:"ft_detials"`
 }
 
 type ExplorerMapDID struct {
