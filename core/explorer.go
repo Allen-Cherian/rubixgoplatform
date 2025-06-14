@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -549,9 +548,6 @@ func (c *Core) UpdateUserInfo(dids []string) {
 				c.log.Error("Failed to get ft info for DID %v", did)
 				return
 			}
-			// 🔍 Print FTInfo for inspection
-			c.log.Info(fmt.Sprintf("FTInfo for DID %s: %+v", did, ftInfo))
-
 			_ = c.s.Read(wallet.DIDStorage, &didList, "did=?", did)
 			var er ExplorerResponse
 			ed := ExplorerDID{
@@ -560,13 +556,6 @@ func (c *Core) UpdateUserInfo(dids []string) {
 				DIDType:   didList.Type,
 				FTDetails: ftInfo,
 			}
-			// 🧾 Marshal JSON payload for inspection
-			jsonData, err := json.MarshalIndent(ed, "", "  ")
-			if err != nil {
-				c.log.Error("Failed to marshal JSON for DID %v: %v", did, err)
-				return
-			}
-			c.log.Info(fmt.Sprintf("JSON request for DID %s:\n%s", did, string(jsonData)))
 
 			err = c.ec.SendExplorerJSONRequest("PUT", ExplorerUpdateUserInfoAPI+"/"+did, &ed, &er)
 			if err != nil {
