@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,11 +49,11 @@ type ExplorerClient struct {
 }
 
 type ExplorerDID struct {
-	PeerID    string         `json:"peer_id"`
-	DID       string         `json:"user_did"`
-	Balance   float64        `json:"balance"`
-	DIDType   int            `json:"did_type"`
-	FTDetails []model.FTInfo `json:"ft_detials"`
+	PeerID    string                    `json:"peer_id"`
+	DID       string                    `json:"user_did"`
+	Balance   float64                   `json:"balance"`
+	DIDType   int                       `json:"did_type"`
+	FTDetails []model.FTInfoForExplorer `json:"ft_detials"`
 }
 
 type ExplorerMapDID struct {
@@ -480,13 +481,21 @@ func (c *Core) ExplorerUserCreate() []string {
 							c.log.Error("Failed to get ft info for DID %v", d.DID)
 							return
 						}
+						ftInfoForExplorer := make([]model.FTInfoForExplorer, len(ftInfo))
+						for i, item := range ftInfo {
+							ftInfoForExplorer[i] = model.FTInfoForExplorer{
+								FTName:     item.FTName,
+								FTCount:    item.FTCount,
+								CreatorDID: item.CreatorDID,
+							}
+						}
 						balance := float64(accInfo.RBTAmount) // Convert to float64 if necessary
 						ed := ExplorerDID{
 							DID:       d.DID,
 							Balance:   balance,
 							PeerID:    c.peerID,
 							DIDType:   d.Type,
-							FTDetails: ftInfo,
+							FTDetails: ftInfoForExplorer,
 						}
 						err = c.ec.ExplorerUserCreate(&ed)
 						if err != nil {
@@ -548,14 +557,30 @@ func (c *Core) UpdateUserInfo(dids []string) {
 				c.log.Error("Failed to get ft info for DID %v", did)
 				return
 			}
+
+			ftInfoForExplorer := make([]model.FTInfoForExplorer, len(ftInfo))
+			for i, item := range ftInfo {
+				ftInfoForExplorer[i] = model.FTInfoForExplorer{
+					FTName:     item.FTName,
+					FTCount:    item.FTCount,
+					CreatorDID: item.CreatorDID,
+				}
+			}
 			_ = c.s.Read(wallet.DIDStorage, &didList, "did=?", did)
 			var er ExplorerResponse
 			ed := ExplorerDID{
 				PeerID:    c.peerID,
 				Balance:   accInfo.RBTAmount,
 				DIDType:   didList.Type,
-				FTDetails: ftInfo,
+				FTDetails: ftInfoForExplorer,
 			}
+
+			jsonData, err := json.MarshalIndent(ed, "", "  ")
+			if err != nil {
+				c.log.Error("Failed to marshal JSON for DID %v: %v", did, err)
+				return
+			}
+			c.log.Info(fmt.Sprintf("JSON request for DID %s:\n%s", did, string(jsonData)))
 
 			err = c.ec.SendExplorerJSONRequest("PUT", ExplorerUpdateUserInfoAPI+"/"+did, &ed, &er)
 			if err != nil {
