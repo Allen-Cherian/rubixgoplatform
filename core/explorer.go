@@ -2,7 +2,6 @@ package core
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -574,13 +573,6 @@ func (c *Core) UpdateUserInfo(dids []string) {
 				DIDType:   didList.Type,
 				FTDetails: ftInfoForExplorer,
 			}
-
-			jsonData, err := json.MarshalIndent(ed, "", "  ")
-			if err != nil {
-				c.log.Error("Failed to marshal JSON for DID %v: %v", did, err)
-				return
-			}
-			c.log.Info(fmt.Sprintf("JSON request for DID %s:\n%s", did, string(jsonData)))
 
 			err = c.ec.SendExplorerJSONRequest("PUT", ExplorerUpdateUserInfoAPI+"/"+did, &ed, &er)
 			if err != nil {
