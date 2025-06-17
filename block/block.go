@@ -60,7 +60,7 @@ const (
 	TokenContractCommited string = "11"
 	TokenPinnedAsService  string = "12"
 	TokenIsBurntForFT     string = "13"
-	TokenPrePledgedType     string = "14"
+	TokenPrePledgedType   string = "14"
 )
 
 const (
@@ -621,6 +621,40 @@ func (b *Block) GetTokenType(t string) int {
 	return util.GetIntFromMap(ti, TTTokenTypeKey)
 }
 
+func (b *Block) UpdateTokenType(t string, newTokenType int) (*Block, bool) {
+	fmt.Println("****** token is : ", t)
+	tim := util.GetFromMap(b.bm, TCTransInfoKey)
+	if tim == nil {
+		return nil, false
+	}
+	tm := util.GetFromMap(tim, TITokensKey)
+	if tm == nil {
+		return nil, false
+	}
+	ti := util.GetFromMap(tm, t)
+	if ti == nil {
+		return nil, false
+	}
+	switch tokenTypeMap := ti.(type) {
+	case map[string]interface{}:
+		fmt.Println("***** current token type-1 to be updated :", util.GetIntFromMap(ti, TTTokenTypeKey))
+		tokenTypeMap[TTTokenTypeKey] = newTokenType
+	case map[interface{}]interface{}:
+		fmt.Println("*****current token type-2 to be updated :", util.GetIntFromMap(ti, TTTokenTypeKey))
+		tokenTypeMap[TTTokenTypeKey] = newTokenType
+	}
+
+	updatedBlock := InitBlock(nil, b.bm)
+	if updatedBlock == nil {
+		fmt.Println("unable to update token type of token : ", t)
+		return nil, false
+	} else {
+		fmt.Println("*****token type updated :", updatedBlock.GetTokenType(t))
+	}
+
+	return updatedBlock, true
+}
+
 func (b *Block) GetUnpledgeId(t string) string {
 	tim := util.GetFromMap(b.bm, TCTransInfoKey)
 	if tim == nil {
@@ -675,6 +709,7 @@ func (b *Block) GetComment() string {
 	return b.getTrasnInfoString(TICommentKey)
 }
 
+// TODO: correct the below function name
 func (b *Block) GetParentDetials(t string) (string, []string, error) {
 	gtm := b.getGenesisTokenMap(t)
 	if gtm == nil {

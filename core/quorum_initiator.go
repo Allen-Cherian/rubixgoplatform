@@ -35,7 +35,7 @@ const (
 	PinningServiceMode
 	NFTExecuteMode
 	FTTransferMode
-	PrePledgingMode
+	SpendableRBTTransferMode
 )
 
 type ConensusRequest struct {
@@ -121,6 +121,7 @@ type SendTokenRequest struct {
 	TransactionEpoch   int                  `json:"transaction_epoch"`
 	PinningServiceMode bool                 `json:"pinning_service_mode"`
 	FTInfo             model.FTInfo         `json:"ft_info"`
+	CVRStage           int                  `json:"cvr_stage"`
 	// TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"token_chain_sync_info"`
 }
 
@@ -344,7 +345,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	// TODO:: Need to correct for part tokens
 	switch cr.Mode {
-	case RBTTransferMode, NFTSaleContractMode, SelfTransferMode, PinningServiceMode, PrePledgingMode:
+	case RBTTransferMode, NFTSaleContractMode, SelfTransferMode, PinningServiceMode, SpendableRBTTransferMode:
 		ti := sc.GetTransTokenInfo()
 		for i := range ti {
 			reqPledgeTokens = reqPledgeTokens + ti[i].TokenValue
@@ -476,15 +477,16 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		rejectedQuorums[qrmAddr] = struct{}{}
 	}
 
+	// TODO : handle the case where quorums are not responding for a long time, use select-case functionality
 	for i := 0; i < QuorumRequired && len(selectedQuorums) < MinQuorumRequired; i++ {
 		resp := <-responseCh
 		if resp.Message == "" && resp.PledgingAmount >= (floatPrecision(reqPledgeTokens, MaxDecimalPlaces))/5 {
 			qrmIPFSObj, exists := ipfsPortQrm[resp.DID]
 			if exists {
 				selectedQuorums[resp.DID] = qrmIPFSObj
+				delete(rejectedQuorums, resp.DID)
 			}
 
-			delete(rejectedQuorums, resp.DID)
 		} else if resp.Message == "Quorum is not setup" {
 			c.log.Error("Quorums are not setup, please setup quorums and retry")
 			return nil, nil, nil, fmt.Errorf(resp.Message)
@@ -514,9 +516,19 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	// create new block for trans-tokens
 	nb, err := c.createTransTokenBlock(cr, sc, tid, dc)
 	if err != nil {
-		c.log.Error("Failed to pledge token", "err", err)
+		c.log.Error("Failed to  create transaction block, ", "err", err)
 		return nil, nil, nil, err
 	}
+
+	// // create another block for sender's self transaction
+	// var selfTransferBlock *block.Block
+	// if cr.Mode == SpendableRBTTransferMode {
+	// 	selfTransferBlock, err = c.createTransTokenBlock(cr, sc, tid, dc)
+	// 	if err != nil {
+	// 		c.log.Error("Failed to create self-transfer block for cvr-2, ", "err", err)
+	// 		return nil, nil, nil, err
+	// 	}
+	// }
 
 	// wait group for 2nd round of concurrent quorum-connection for consensus
 	var wgConsensus sync.WaitGroup
@@ -591,7 +603,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}
 
 	switch cr.Mode {
-	case PrePledgingMode:
+	case SpendableRBTTransferMode:
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
@@ -1339,7 +1351,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		// Self update for self transfer tokens
-		updatedTokenHashes, _, err := c.updateReceiverToken(selfAddress, "", ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, false)
+		updatedTokenHashes, _, err := c.updateReceiverToken(selfAddress, "", ti, nb.GetBlock(), cr.QuorumList, quorumInfo, wallet.CVRStage2_Sender_to_Receiver, cr.TransactionEpoch, false)
 		if err != nil {
 			errMsg := fmt.Errorf("failed while update of self transfer tokens, err: %v", err)
 			c.log.Error(errMsg.Error())
@@ -2272,23 +2284,25 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 			SmartContract:   sc.GetBlock(),
 			PledgeDetails:   ptds,
 		}
-	} else if cr.Mode == PrePledgingMode {
-		bti.SenderDID = sc.GetSenderDID()
-		bti.ReceiverDID = sc.GetReceiverDID()
-		tcb = block.TokenChainBlock{
-			TransactionType: block.TokenPrePledgedType,
-			TokenOwner:      sc.GetSenderDID(),
-			TransInfo:       bti,
-			SmartContract:   sc.GetBlock(),
-			PledgeDetails:   ptds,
-			Epoch:           cr.TransactionEpoch,
-		}
 	} else {
 		bti.SenderDID = sc.GetSenderDID()
 		bti.ReceiverDID = sc.GetReceiverDID()
 		tcb = block.TokenChainBlock{
 			TransactionType: block.TokenTransferredType,
 			TokenOwner:      sc.GetReceiverDID(),
+			TransInfo:       bti,
+			SmartContract:   sc.GetBlock(),
+			PledgeDetails:   ptds,
+			Epoch:           cr.TransactionEpoch,
+		}
+	}
+
+	if cr.Mode == SpendableRBTTransferMode {
+		bti.SenderDID = sc.GetSenderDID()
+		bti.ReceiverDID = sc.GetReceiverDID()
+		tcb = block.TokenChainBlock{
+			TransactionType: block.TokenPrePledgedType,
+			TokenOwner:      sc.GetSenderDID(),
 			TransInfo:       bti,
 			SmartContract:   sc.GetBlock(),
 			PledgeDetails:   ptds,
@@ -2305,10 +2319,13 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 		return nil, fmt.Errorf("failed to create new token chain block - qrm init")
 	}
 
-	err := nb.SignByInitiator(dc)
-	if err != nil {
-		c.log.Error("Failed to update initiator signature")
-		return nil, err
+	// if dc is nil, it implies CVR-2
+	if cr.Mode == SpendableRBTTransferMode {
+		err := nb.SignByInitiator(dc)
+		if err != nil {
+			c.log.Error("Failed to update initiator signature")
+			return nil, err
+		}
 	}
 
 	cr.TransTokenBlock = nb.GetBlock()

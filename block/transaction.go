@@ -87,6 +87,7 @@ func newTransToken(b *Block, tt *TransTokens) map[string]interface{} {
 		return nil
 	}
 	nttb := make(map[string]interface{})
+	
 	nttb[TTTokenTypeKey] = tt.TokenType
 	// pledged detials moved out of trans token
 	if tt.UnplededID != "" {

@@ -289,7 +289,7 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	crep.Hash = txnBlockHash
 
 	// quorum pledge finality in case of pre-pledging
-	if cr.Mode == PrePledgingMode {
+	if cr.Mode == SpendableRBTTransferMode {
 		// updated token state hashes
 		var txnTokenHashes []string = make([]string, 0)
 		for _, info := range ti {
@@ -1051,7 +1051,7 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 
 func (c *Core) updateReceiverToken(
 	senderAddress string, receiverAddress string, tokenInfo []contract.TokenInfo, tokenChainBlock []byte,
-	quorumList []string, quorumInfo []QuorumDIDPeerMap, transactionEpoch int, pinningServiceMode bool,
+	quorumList []string, quorumInfo []QuorumDIDPeerMap, CVRStage int, transactionEpoch int, pinningServiceMode bool,
 ) ([]string, *ipfsport.Peer, error) {
 	var receiverPeerId string = ""
 	var receiverDID string = ""
@@ -1070,14 +1070,20 @@ func (c *Core) updateReceiverToken(
 		}
 	}
 
+	var updatedTokenStateHashes []string
+
 	b := block.InitBlock(tokenChainBlock, nil)
 	if b == nil {
 		return nil, nil, fmt.Errorf("invalid token chain block")
 	}
 
 	var senderPeer *ipfsport.Peer
+	senderPeerId, _, ok := util.ParseAddress(senderAddress)
+	if !ok {
+		return nil, senderPeer, fmt.Errorf("unable to parse sender address: %v", senderAddress)
+	}
 
-	if receiverAddress != "" {
+	if receiverAddress != "" && CVRStage == wallet.CVRStage1_Sender_to_Receiver {
 		var err error
 		senderPeer, err = c.getPeer(senderAddress)
 		if err != nil {
@@ -1121,92 +1127,108 @@ func (c *Core) updateReceiverToken(
 			if c.checkIsPledged(ptcb) {
 				return nil, senderPeer, fmt.Errorf("Token " + t + " is a pledged Token")
 			}
+
+			// updating token type as per cvr stage
+			if CVRStage == wallet.CVRStage1_Sender_to_Receiver {
+				updatedBlock, status := b.UpdateTokenType(t, token.CVR_RBTTokenType+ti.TokenType)
+				if !status {
+					c.log.Error("failed to update token cvr type")
+					return nil, senderPeer, fmt.Errorf("failed to update tokenType of  Token " + t)
+				}
+				updatedTokenStateHashes, err = c.w.TokensReceived(receiverDID, tokenInfo, updatedBlock, senderPeerId, receiverPeerId, pinningServiceMode, c.ipfs)
+				if err != nil {
+					return nil, senderPeer, fmt.Errorf("failed to update token status, error: %v", err)
+				}
+
+			}
+		}
+
+		sc := contract.InitContract(b.GetSmartContract(), nil)
+		if sc == nil {
+			return nil, senderPeer, fmt.Errorf("failed to update token status, missing smart contract")
+		}
+
+		bid, err := b.GetBlockID(tokenInfo[0].Token)
+		if err != nil {
+			return nil, senderPeer, fmt.Errorf("failed to update token status, failed to get block ID, err: %v", err)
+		}
+
+		// Store the transaction info only when we are dealing with RBT transfer between
+		// two DIDs that are situated on different nodes, as this avoid Unique Constraint
+		// issue while adding to Transaction History table from the Sender's end
+		if sc.GetSenderDID() != sc.GetReceiverDID() && senderPeerId != receiverPeerId {
+			td := &model.TransactionDetails{
+				TransactionID:   b.GetTid(),
+				TransactionType: b.GetTransType(),
+				BlockID:         bid,
+				Mode:            wallet.RecvMode,
+				Amount:          sc.GetTotalRBTs(),
+				SenderDID:       sc.GetSenderDID(),
+				ReceiverDID:     sc.GetReceiverDID(),
+				Comment:         sc.GetComment(),
+				DateTime:        time.Now(),
+				Status:          true,
+				Epoch:           int64(transactionEpoch),
+			}
+			if td.Epoch == 0 {
+				td.Epoch = time.Now().Unix()
+			}
+			c.w.AddTransactionHistory(td)
+		}
+		//updating the token type in cvr stage1
+
+	}
+
+	if CVRStage == wallet.CVRStage2_Sender_to_Receiver {
+
+		results := make([]MultiPinCheckRes, len(tokenInfo))
+		var wg sync.WaitGroup
+		for i, ti := range tokenInfo {
+			t := ti.Token
+			wg.Add(1)
+
+			go c.pinCheck(t, i, senderPeerId, receiverPeerId, results, &wg)
+		}
+		wg.Wait()
+
+		for i := range results {
+			if results[i].Error != nil {
+				return nil, senderPeer, fmt.Errorf("error while cheking Token multiple Pins for token %v, error : %v", results[i].Token, results[i].Error)
+			}
+			if results[i].Status {
+				return nil, senderPeer, fmt.Errorf("token %v has multiple owners: %v", results[i].Token, results[i].Owners)
+			}
+		}
+
+		tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
+		for i, ti := range tokenInfo {
+			t := ti.Token
+			wg.Add(1)
+			go c.checkTokenState(t, receiverDID, i, tokenStateCheckResult, &wg, quorumList, ti.TokenType)
+		}
+		wg.Wait()
+
+		for i := range tokenStateCheckResult {
+			if tokenStateCheckResult[i].Error != nil {
+				return nil, senderPeer, fmt.Errorf("error while cheking Token State Message : %v", tokenStateCheckResult[i].Message)
+			}
+			if tokenStateCheckResult[i].Exhausted {
+				c.log.Debug("Token state has been exhausted, Token being Double spent:", tokenStateCheckResult[i].Token)
+				return nil, senderPeer, fmt.Errorf("token state has been exhausted, Token being Double spent: %v, msg: %v", tokenStateCheckResult[i].Token, tokenStateCheckResult[i].Message)
+			}
+			c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
+		}
+		var err error
+		updatedTokenStateHashes, err = c.w.TokensReceived(receiverDID, tokenInfo, b, senderPeerId, receiverPeerId, pinningServiceMode, c.ipfs)
+		if err != nil {
+			return nil, senderPeer, fmt.Errorf("failed to update token status, error: %v", err)
+		}
+		//Adding quorums to DIDPeerTable of receiver
+		for _, qrm := range quorumInfo {
+			c.w.AddDIDPeerMap(qrm.DID, qrm.PeerID, *qrm.DIDType)
 		}
 	}
 
-	senderPeerId, _, ok := util.ParseAddress(senderAddress)
-	if !ok {
-		return nil, senderPeer, fmt.Errorf("unable to parse sender address: %v", senderAddress)
-	}
-
-	results := make([]MultiPinCheckRes, len(tokenInfo))
-	var wg sync.WaitGroup
-	for i, ti := range tokenInfo {
-		t := ti.Token
-		wg.Add(1)
-
-		go c.pinCheck(t, i, senderPeerId, receiverPeerId, results, &wg)
-	}
-	wg.Wait()
-
-	for i := range results {
-		if results[i].Error != nil {
-			return nil, senderPeer, fmt.Errorf("error while cheking Token multiple Pins for token %v, error : %v", results[i].Token, results[i].Error)
-		}
-		if results[i].Status {
-			return nil, senderPeer, fmt.Errorf("token %v has multiple owners: %v", results[i].Token, results[i].Owners)
-		}
-	}
-
-	tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
-	for i, ti := range tokenInfo {
-		t := ti.Token
-		wg.Add(1)
-		go c.checkTokenState(t, receiverDID, i, tokenStateCheckResult, &wg, quorumList, ti.TokenType)
-	}
-	wg.Wait()
-
-	for i := range tokenStateCheckResult {
-		if tokenStateCheckResult[i].Error != nil {
-			return nil, senderPeer, fmt.Errorf("error while cheking Token State Message : %v", tokenStateCheckResult[i].Message)
-		}
-		if tokenStateCheckResult[i].Exhausted {
-			c.log.Debug("Token state has been exhausted, Token being Double spent:", tokenStateCheckResult[i].Token)
-			return nil, senderPeer, fmt.Errorf("token state has been exhausted, Token being Double spent: %v, msg: %v", tokenStateCheckResult[i].Token, tokenStateCheckResult[i].Message)
-		}
-		c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
-	}
-	updatedTokenStateHashes, err := c.w.TokensReceived(receiverDID, tokenInfo, b, senderPeerId, receiverPeerId, pinningServiceMode, c.ipfs)
-	if err != nil {
-		return nil, senderPeer, fmt.Errorf("failed to update token status, error: %v", err)
-	}
-	sc := contract.InitContract(b.GetSmartContract(), nil)
-	if sc == nil {
-		return nil, senderPeer, fmt.Errorf("failed to update token status, missing smart contract")
-	}
-
-	bid, err := b.GetBlockID(tokenInfo[0].Token)
-	if err != nil {
-		return nil, senderPeer, fmt.Errorf("failed to update token status, failed to get block ID, err: %v", err)
-	}
-
-	// Store the transaction info only when we are dealing with RBT transfer between
-	// two DIDs that are situated on different nodes, as this avoid Unique Constraint
-	// issue while adding to Transaction History table from the Sender's end
-	if sc.GetSenderDID() != sc.GetReceiverDID() && senderPeerId != receiverPeerId {
-		td := &model.TransactionDetails{
-			TransactionID:   b.GetTid(),
-			TransactionType: b.GetTransType(),
-			BlockID:         bid,
-			Mode:            wallet.RecvMode,
-			Amount:          sc.GetTotalRBTs(),
-			SenderDID:       sc.GetSenderDID(),
-			ReceiverDID:     sc.GetReceiverDID(),
-			Comment:         sc.GetComment(),
-			DateTime:        time.Now(),
-			Status:          true,
-			Epoch:           int64(transactionEpoch),
-		}
-		if td.Epoch == 0 {
-			td.Epoch = time.Now().Unix()
-		}
-		c.w.AddTransactionHistory(td)
-	}
-
-	//Adding quorums to DIDPeerTable of receiver
-	for _, qrm := range quorumInfo {
-		c.w.AddDIDPeerMap(qrm.DID, qrm.PeerID, *qrm.DIDType)
-	}
 	return updatedTokenStateHashes, senderPeer, nil
 }
 
@@ -1232,6 +1254,7 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 		sr.TokenChainBlock,
 		sr.QuorumList,
 		sr.QuorumInfo,
+		sr.CVRStage,
 		sr.TransactionEpoch,
 		sr.PinningServiceMode,
 	)
@@ -1244,41 +1267,48 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
 
-	// receiver fetches tokens to be synced
-	tokensSyncInfo := make([]TokenSyncInfo, 0)
-	for _, token := range sr.TokenInfo {
-		tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: token.Token, TokenType: token.TokenType})
-		if token.TokenType == c.TokenType(PartString) {
-			tokenInfo, err := c.w.ReadToken(token.Token)
-			if err != nil {
-				c.log.Error("failed to fetch parent token info, err ", err)
-				//TODO : handle the situation when not able to fetch parent tokenId to sync parent token chain
-				continue
-			}
-			// parentTokenId := tokenInfo.ParentTokenID
-			parentTokenInfo, err := c.w.ReadToken(tokenInfo.ParentTokenID)
-			if err != nil {
-				c.log.Error("failed to fetch parent token value, err ", err)
-				// update token sync status
-				c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID, wallet.SyncIncomplete)
-				continue
-			}
-			if parentTokenInfo.TokenValue != 1.0 {
-				tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(PartString)})
-			} else {
-				tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(RBTString)})
+	if sr.CVRStage == wallet.CVRStage1_Sender_to_Receiver {
+		// receiver fetches tokens to be synced
+		tokensSyncInfo := make([]TokenSyncInfo, 0)
+		for _, token := range sr.TokenInfo {
+			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: token.Token, TokenType: token.TokenType})
+			if token.TokenType == c.TokenType(PartString) {
+				tokenInfo, err := c.w.ReadToken(token.Token)
+				if err != nil {
+					c.log.Error("failed to fetch parent token info, err ", err)
+					//TODO : handle the situation when not able to fetch parent tokenId to sync parent token chain
+					continue
+				}
+				// parentTokenId := tokenInfo.ParentTokenID
+				parentTokenInfo, err := c.w.ReadToken(tokenInfo.ParentTokenID)
+				if err != nil {
+					c.log.Error("failed to fetch parent token value, err ", err)
+					// update token sync status
+					c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID, wallet.SyncIncomplete)
+					continue
+				}
+				if parentTokenInfo.TokenValue != 1.0 {
+					tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(PartString)})
+				} else {
+					tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(RBTString)})
+				}
 			}
 		}
+		tokenSyncMap := make(map[string][]TokenSyncInfo)
+		tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
+
+		// syncing starts in the background
+		go c.syncFullTokenChains(tokenSyncMap)
+
+		crep.Status = true
+		crep.Message = "Token received successfully"
+		crep.Result = updatedtokenhashes
+
+	} else {
+		crep.Status = true
+		crep.Message = "CVR status updated to 2"
+		crep.Result = updatedtokenhashes
 	}
-	tokenSyncMap := make(map[string][]TokenSyncInfo)
-	tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
-
-	// syncing starts in the background
-	go c.syncFullTokenChains(tokenSyncMap)
-
-	crep.Status = true
-	crep.Message = "Token received successfully"
-	crep.Result = updatedtokenhashes
 
 	return c.l.RenderJSON(req, &crep, http.StatusOK)
 }

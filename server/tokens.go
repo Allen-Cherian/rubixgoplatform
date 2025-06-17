@@ -438,7 +438,7 @@ func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
 		s.log.Error("Invalid sender or receiver DID")
 		return s.BasicResponse(req, false, "Invalid sender or receiver DID", nil)
 	}
-	
+
 	if prePledgeReq.QuorumType < 1 || prePledgeReq.QuorumType > 2 {
 		s.log.Error("Invalid trans type. TransType should be 1 or 2")
 		return s.BasicResponse(req, false, "Invalid trans type. TransType should be 1 or 2", nil)
@@ -447,6 +447,6 @@ func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
 		return s.BasicResponse(req, false, "DID does not have an access", nil)
 	}
 	s.c.AddWebReq(req)
-	go s.c.InitiateRBTPrePledge(req.ID, prePledgeReq)
+	go s.c.InitiateRBTCVRTwo(req.ID, prePledgeReq)
 	return s.didResponse(req, req.ID)
 }

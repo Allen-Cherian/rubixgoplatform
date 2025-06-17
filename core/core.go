@@ -689,3 +689,7 @@ func (c *Core) InitialiseDID(didStr string, didType int) (did.DIDCrypto, error) 
 		return did.InitDIDBasic(didStr, c.didDir, nil), nil
 	}
 }
+
+// func (c *Core)ConvertContractToBlock(contract *contract.ContractType) *block.Block {
+
+// }

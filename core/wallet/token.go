@@ -37,6 +37,11 @@ const (
 	Zero int = iota
 	One
 )
+const (
+	CVRStage1_Sender_to_Receiver int = iota
+	CVRStage2_Sender_to_Receiver
+	CVRStage2_Sender_to_Quorum
+)
 
 const (
 	RACTestTokenType int = iota
@@ -51,8 +56,11 @@ const (
 )
 
 type PrePledgeRequest struct {
-	DID string `json:"did"`
-	QuorumType int `json:"quorum_type"`
+	DID        string `json:"did"`
+	QuorumType int    `json:"quorum_type"`
+	TxnID      string `json:"txn_id"`
+	SCBlock    []byte `json:"sc_block"`
+	TxnEpoch   int64  `json:"txn_epoch"`
 }
 
 type Token struct {
@@ -316,7 +324,7 @@ func (w *Wallet) GetWholeTokens(did string, num int, trnxMode int) ([]Token, int
 			return nil, num, err
 		}
 	} else {
-		err := w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value=?", did, TokenIsFree, 1.0)
+		err := w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value=?", did, TokenIsSpendable, 1.0) //TODO: should have a discussion about this, whether we use Free tokens for any other transactions or not
 		if err != nil {
 			return nil, num, err
 		}
@@ -836,15 +844,23 @@ func (w *Wallet) CommitTokens(did string, rbtTokens []string) error {
 	return nil
 }
 
-func (w *Wallet) GetAllPartTokens(did string) ([]Token, error) {
+func (w *Wallet) GetAllPartTokens(did string, txnMode int) ([]Token, error) {
 	w.l.Lock()
 	defer w.l.Unlock()
 	var t []Token
-	err := w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value>? AND token_value<? ORDER BY token_value DESC", did, TokenIsFree, Zero, One)
+	var err error
+
+	if txnMode == 0 {
+		err = w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value>? AND token_value<? ORDER BY token_value DESC", did, TokenIsFree, Zero, One)
+	} else {
+		err = w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value>? AND token_value<? ORDER BY token_value DESC", did, TokenIsSpendable, Zero, One)
+	}
+
 	if err != nil {
 		w.log.Error("Failed to get tokens", "err", err)
 		return nil, err
 	}
+
 	for i := range t {
 		t[i].TokenStatus = TokenIsLocked
 		err = w.s.Update(TokenStorage, &t[i], "did=? AND token_id=?", did, t[i].TokenID)
@@ -853,6 +869,7 @@ func (w *Wallet) GetAllPartTokens(did string) ([]Token, error) {
 			return nil, err
 		}
 	}
+
 	return t, nil
 }
 
@@ -1143,4 +1160,49 @@ func (w *Wallet) UpdateTokenSyncStatus(tokenID string, syncStatus int) error {
 		return err
 	}
 	return nil
+}
+
+// This function gets the pre pledged tokens from the tokens table
+func (w *Wallet) GetPrePledgedTokenIDs() ([]string, error) {
+	var tokensList []Token
+
+	// Query the database for records where token_status is TokenIsPrePledged
+	err := w.s.Read(TokenStorage, &tokensList, "token_status=?", TokenIsSpendable)
+	if err != nil {
+		if strings.Contains(fmt.Sprint(err), "no records found") {
+			w.log.Info("No pre-pledged tokens found")
+			return nil, nil // Return nil if no records are found
+		}
+		w.log.Error("Failed to read token storage", "err", err)
+		return nil, err
+	}
+
+	// Extract token IDs from the records
+	var tokenIDs []string
+	for _, token := range tokensList {
+		tokenIDs = append(tokenIDs, token.TokenID)
+	}
+
+	// Return the list of token IDs
+	return tokenIDs, nil
+}
+
+func (w *Wallet) GetTokensByTxnID(txnId string) ([]Token, error) {
+	var tokensList []Token
+	err := w.s.Read(TokenStorage, &tokensList, " transaction_id=?", txnId)
+	if err != nil {
+		if strings.Contains(fmt.Sprint(err), "no records found") {
+			w.log.Info(fmt.Sprintf("No tokens found with Txn Id : ", txnId))
+			return nil, nil // Return nil if no records are found
+		}
+		w.log.Error("Failed to read token storage", "err", err)
+		return nil, err
+	}
+
+	// // Extract token IDs from the records
+	// var tokenIDs []string
+	// for _, token := range tokensList {
+	// 	tokenIDs = append(tokenIDs, token.TokenID)
+	// }
+	return tokensList, nil
 }

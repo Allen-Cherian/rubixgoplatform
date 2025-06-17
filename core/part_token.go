@@ -47,7 +47,7 @@ func (c *Core) GetTokens(dc did.DIDCrypto, did string, value float64, trnxMode i
 	wt := make([]wallet.Token, 0)
 	if wholeValue != 0 {
 		wt, remWhole, err = c.w.GetWholeTokens(did, wholeValue, trnxMode)
-		if err != nil {
+		if err != nil { 
 			c.log.Error("failed to get token", "err", err)
 			return nil, err
 		}

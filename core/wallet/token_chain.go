@@ -31,6 +31,8 @@ const (
 	ReferenceType          string = "rf"
 	SmartContractTokenType string = "st"
 	FTTokenType            string = "ft"
+	CVRTokenType           string = "cvr"
+	// CVRTestTokenType       string = "tcvr"
 )
 
 const TCBlockCountLimit int = 100
@@ -92,7 +94,16 @@ func tcsPrefix(tokenType int, t string) string {
 	return tt + "-" + t + "-"
 }
 
+func IsCVR(tokenType int) (int, bool) {
+	if tokenType >= tkn.CVR_RBTTokenType {
+		return tokenType - 50, true
+	} else {
+		return tokenType, false
+	}
+
+}
 func tcsKey(tokenType int, t string, blockID string) string {
+	tokenType, isCVR := IsCVR(tokenType)
 	tt := "wt"
 	switch tokenType {
 	case tkn.RBTTokenType:
@@ -113,6 +124,10 @@ func tcsKey(tokenType int, t string, blockID string) string {
 		tt = SmartContractTokenType
 	case tkn.FTTokenType:
 		tt = FTTokenType
+
+	}
+	if isCVR {
+		tt = CVRTokenType + "_" + tt
 	}
 	bs := strings.Split(blockID, "-")
 	if len(bs) == 2 {
@@ -378,8 +393,8 @@ func (w *Wallet) addBlock(token string, b *block.Block) error {
 	tt := b.GetTokenType(token)
 	db := w.getChainDB(tt)
 	if db == nil {
-		w.log.Error("Failed to add block, invalid token type")
-		return fmt.Errorf("failed to get db")
+		w.log.Error("Failed to get tokenchain from db")
+		return fmt.Errorf("failed to get tokenchain from db")
 	}
 
 	bid, err := b.GetBlockID(token)

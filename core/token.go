@@ -146,6 +146,10 @@ func (c *Core) GetAccountInfo(did string) (model.DIDAccountInfo, error) {
 		case wallet.TokenIsPinnedAsService:
 			info.PinnedRBT = info.PinnedRBT + t.TokenValue
 			info.PinnedRBT = floatPrecision(info.PinnedRBT, MaxDecimalPlaces)
+		case wallet.TokenIsSpendable:
+			info.SpendableRBT = info.SpendableRBT + t.TokenValue
+			info.SpendableRBT = floatPrecision(info.SpendableRBT, MaxDecimalPlaces)
+
 		}
 	}
 	return info, nil
@@ -711,7 +715,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 				return requiredTokens, remainingAmount, nil
 			}
 			c.log.Debug("No more whole token left in wallet , rest of needed amt ", reqAmt)
-			allPartTokens, err := c.w.GetAllPartTokens(did)
+			allPartTokens, err := c.w.GetAllPartTokens(did, txnMode)
 			if err != nil {
 				// In GetAllPartTokens, we first check if there are any part tokens present in
 				// TokensTable. Now there could be a situation, where there aren't any part tokens
@@ -774,7 +778,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 		if len(wholeTokens) == 0 && remWhole > 0 {
 			c.log.Debug("No whole tokens found. proceeding to get part tokens for txn")
 
-			allPartTokens, err := c.w.GetAllPartTokens(did)
+			allPartTokens, err := c.w.GetAllPartTokens(did, txnMode)
 			if err != nil && err.Error() != "no records found" {
 				c.log.Error("failed to search for part tokens", "err", err)
 				return nil, 0.0, err
@@ -1357,8 +1361,8 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 
 }
 
-func (c *Core) InitiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) {
-	br := c.initiateRBTPrePledge(reqID, req)
+func (c *Core) InitiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) {
+	br := c.initiateRBTCVRTwo(reqID, req)
 	dc := c.GetWebReq(reqID)
 	if dc == nil {
 		c.log.Error("Failed to get did channels")
@@ -1367,15 +1371,13 @@ func (c *Core) InitiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 	dc.OutChan <- br
 }
 
-func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) *model.BasicResponse {
-	st := time.Now()
-	txEpoch := int(st.Unix())
-
+func (c *Core) initiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) *model.BasicResponse {
 	resp := &model.BasicResponse{
 		Status: false,
 	}
 
-	freeTokensList, err := c.w.GetAllFreeToken(req.DID)
+	tokensList, err := c.w.GetTokensByTxnID(req.TxnID)
+	// TODO : proper error handling needed for db locking and unlocking
 	if err != nil {
 		c.log.Error("failed to get tokens to pre pledge, err ", err)
 		resp.Message = err.Error()
@@ -1385,16 +1387,16 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 	senderDID := req.DID
 	isSelfRBTTransfer := false
 
-	dc, err := c.SetupDID(reqID, senderDID)
-	if err != nil {
-		resp.Message = "Failed to setup DID, " + err.Error()
-		return resp
-	}
+	// dc, err := c.SetupDID(reqID, senderDID)
+	// if err != nil {
+	// 	resp.Message = "Failed to setup DID, " + err.Error()
+	// 	return resp
+	// }
 
 	tokenInfoList := make([]contract.TokenInfo, 0)
 	tokensToPrePledge := make([]wallet.Token, 0)
 
-	for _, tokeninfo := range freeTokensList {
+	for _, tokeninfo := range tokensList {
 		tokenTypeStr := "rbt"
 		if tokeninfo.TokenValue != 1 {
 			tokenTypeStr = "part"
@@ -1402,21 +1404,49 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 		tokenType := c.TokenType(tokenTypeStr)
 
 		// get latest block of the token
-		latestBlock := c.w.GetLatestTokenBlock(tokeninfo.TokenID, tokenType)
-		if latestBlock == nil {
+		tempBlock := c.w.GetLatestTokenBlock(tokeninfo.TokenID, tokenType)
+		if tempBlock == nil {
 			c.log.Error("failed to get latest block, invalid token chain")
 			resp.Message = "failed to get latest block, invalid token chain"
 			return resp
 		}
 
-		// fetch pledged-quorum details from latest block and store their details
-		blockHeight, err := latestBlock.GetBlockNumber(tokeninfo.TokenID)
+		// get block id of the last CVR block from the latest temp block
+		prevBlockID, err := tempBlock.GetPrevBlockID(tokeninfo.TokenID)
 		if err != nil {
-			c.log.Error("failed to fetch token chain height; token ", tokeninfo.TokenID)
-			continue
+			errMsg := fmt.Sprintf("failed to get previous block ID from latest block, token : %v; err : %v", tokeninfo.TokenID, err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
 		}
+
+		// get the block bytes of the last cvr block from the block id
+		prevBlockBytes, err := c.w.GetTokenBlock(tokeninfo.TokenID, tokenType, prevBlockID)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to get prev CVR block from the prev block id : %v; err : %v", prevBlockID, err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+
+		// initiate the last cvr block from the block bytes
+		prevBlock := block.InitBlock(prevBlockBytes, nil)
+		if prevBlock == nil {
+			errMsg := fmt.Sprintf("failed to initiate last CVR block, token : %v", tokeninfo.TokenID)
+			c.log.Error(errMsg)
+		}
+
+		// fetch pledged-quorum details from latest block and store their details
+		blockHeight, err := prevBlock.GetBlockNumber(tokeninfo.TokenID)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to fetch token chain height; token : %v; err : %v", tokeninfo.TokenID, err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+
 		//check if the transaction in prev block involved any quorums
-		switch latestBlock.GetTransType() {
+		switch prevBlock.GetTransType() {
 		case block.TokenBurntType:
 			tokeninfo.TokenStatus = wallet.TokenIsBurnt
 			c.w.UpdateToken(&tokeninfo)
@@ -1425,7 +1455,7 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 		case block.TokenTransferredType:
 			if blockHeight != 0 {
 				// validate quorums
-				quorumSignList, err := latestBlock.GetQuorumSignatureList()
+				quorumSignList, err := prevBlock.GetQuorumSignatureList()
 				if err != nil || quorumSignList == nil {
 					c.log.Error("failed to get quorum signature list")
 				}
@@ -1464,51 +1494,55 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 				}
 			}
 			tokensToPrePledge = append(tokensToPrePledge, tokeninfo)
+		default:
+			c.log.Error(fmt.Sprintf("invalid trans type : %v, token : %v", prevBlock.GetTransType(), tokeninfo.TokenID))
+			continue
 		}
 
 		// pin token by token owner, in case it is not pinned
 		c.w.Pin(tokeninfo.TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.DID, "", tokeninfo.TokenValue)
 
-		// fetch latest block details and prepare tokens for consensus
-		blockId, err := latestBlock.GetBlockID(tokeninfo.TokenID)
-		if err != nil {
-			c.log.Error("failed to get block id", "err", err)
-			resp.Message = "failed to get block id, " + err.Error()
-			return resp
-		}
 		tokenInfo := contract.TokenInfo{
 			Token:      tokeninfo.TokenID,
 			TokenType:  tokenType,
 			TokenValue: floatPrecision(tokeninfo.TokenValue, MaxDecimalPlaces),
 			OwnerDID:   tokeninfo.DID,
-			BlockID:    blockId,
+			BlockID:    prevBlockID,
 		}
 		tokenInfoList = append(tokenInfoList, tokenInfo)
 		// tokenListForExplorer = append(tokenListForExplorer, Token{TokenHash: tokenInfo.Token, TokenValue: tokenInfo.TokenValue})
 
 	}
 
-	convertReq := &model.RBTTransferRequest{
-		Sender:   req.DID,
-		Receiver: "", // no receiver while pre-pledging
-		Type:     req.QuorumType,
-	}
+	// convertReq := &model.RBTTransferRequest{
+	// 	Sender:   req.DID,
+	// 	Receiver: "", // no receiver while pre-pledging
+	// 	Type:     req.QuorumType,
+	// }
 
-	contractType := getContractType(reqID, convertReq, tokenInfoList, isSelfRBTTransfer)
-	sc := contract.CreateNewContract(contractType)
+	// contractType := getContractType(reqID, convertReq, tokenInfoList, isSelfRBTTransfer)
+	// sc := contract.CreateNewContract(contractType)
 
-	err = sc.UpdateSignature(dc)
-	if err != nil {
-		c.log.Error(err.Error())
-		resp.Message = err.Error()
+	// err = sc.UpdateSignature(dc)
+	// if err != nil {
+	// 	c.log.Error(err.Error())
+	// 	resp.Message = err.Error()
+	// 	return resp
+	// }
+
+	sc := contract.InitContract(req.SCBlock, nil)
+	rpeerid := c.w.GetPeerID(sc.GetReceiverDID())
+	if rpeerid == "" {
+		errMsg := fmt.Sprintf("unexpected error, unable to find receiver peer id in CVR-2 even after token has been transferred to receiver : %v", sc.GetReceiverDID())
+		c.log.Error(errMsg)
+		resp.Message = errMsg
 		return resp
 	}
-
-	cr := getConsensusRequest(req.QuorumType, c.peerID, "", sc.GetBlock(), txEpoch, isSelfRBTTransfer)
-	cr.Mode = PrePledgingMode
+	cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCBlock, int(req.TxnEpoch), isSelfRBTTransfer)
+	cr.Mode = SpendableRBTTransferMode
 
 	// initiate consensus for pre-pledging
-	_, _, _, err = c.initiateConsensus(cr, sc, dc)
+	_, _, _, err = c.initiateConsensus(cr, sc, nil)
 	if err != nil {
 		c.log.Error("Consensus failed ", "err", err)
 		resp.Message = "Consensus failed " + err.Error()
@@ -1516,7 +1550,6 @@ func (c *Core) initiateRBTPrePledge(reqID string, req *wallet.PrePledgeRequest) 
 	}
 
 	// TODO : add transaction details to DB
-	
 
 	return resp
 }
