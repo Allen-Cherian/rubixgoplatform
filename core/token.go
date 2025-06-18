@@ -288,13 +288,23 @@ func (c *Core) syncTokenChain(req *ensweb.Request) *ensweb.Result {
 			Message: "Failed to parse request",
 		}, http.StatusBadRequest)
 	}
+	var tcbr TCBSyncReply
+	tcbr.Message = "Got all blocks"
 
+	fmt.Println("Received TCBSyncRequest token:", tr.Token)
+	fmt.Println("Received TCBSyncRequest token type:", tr.TokenType)
+	fmt.Println("Received TCBSyncRequest block ID:", tr.BlockID)
 	// Fetch token blocks
 	blks, nextID, err := c.w.GetAllTokenBlocks(tr.Token, tr.TokenType, tr.BlockID)
 	if err != nil {
-		c.log.Error("Error fetching token blocks", "error", err)
+		blks, nextID, err = c.w.GetAllTokenBlocks(tr.Token, tr.TokenType, "")
+		if err != nil {
+			c.log.Error("Error fetching token blocks", "error", err)
+		} else {
+			fmt.Println("in else confition")
+			tcbr.Message = "Sent all blocks"
+		}
 	}
-
 	/* // Handle case where both error occurred and blocks are nil
 	if err != nil && blks == nil {
 		c.log.Warn("Token blocks missing and error occurred, falling back to role-based logic", "token", tr.Token)
@@ -303,16 +313,14 @@ func (c *Core) syncTokenChain(req *ensweb.Request) *ensweb.Result {
 
 	// Handle other errors
 	if err != nil {
-		return c.l.RenderJSON(req, &TCBSyncReply{
-			Status:  false,
-			Message: "Error fetching token blocks",
-		}, http.StatusInternalServerError)
+		respMsg := "token block not found for token: " + tr.Token + " and block: " + tr.BlockID
+		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: respMsg}, http.StatusInternalServerError)
 	}
 
 	// Success response
 	return c.l.RenderJSON(req, &TCBSyncReply{
 		Status:      true,
-		Message:     "Got all blocks",
+		Message:     tcbr.Message,
 		TCBlock:     blks,
 		NextBlockID: nextID,
 	}, http.StatusOK)
@@ -399,8 +407,15 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 	// }
 	// defer p.Close()
 	var err error
-	var blkHeight uint64
+	var blkHeight = uint64(123)
 	blk := c.w.GetLatestTokenBlock(token, tokenType)
+	if blk != nil {
+		blkHeight, err = blk.GetBlockNumber(token)
+		if err != nil {
+			c.log.Error("Failed to get block number while syncing", "err", err)
+			return err
+		}
+	}
 	blkID := ""
 	if blk != nil {
 		blkID, err = blk.GetBlockID(token)
@@ -412,6 +427,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 			return nil
 		}
 		blkHeight, err = blk.GetBlockNumber(token)
+		fmt.Println("blk height in sync ", blkHeight)
 		if err != nil {
 			c.log.Error("invalid block, failed to get block number")
 			return err
@@ -422,6 +438,10 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		TokenType: tokenType,
 		BlockID:   blkID,
 	}
+	fmt.Println("token in sync ", syncReq.Token)
+	fmt.Println("token type in sync ", syncReq.TokenType)
+	fmt.Println("block id in sync ", syncReq.BlockID)
+	fmt.Println("block height in sync ", blkHeight)
 
 	if tokenType == c.TokenType(RBTString) || tokenType == c.TokenType(PartString) {
 		syncReq.BlockHeight = blkHeight
@@ -450,6 +470,37 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 			if !trep.Status {
 				c.log.Error("Failed to sync token chain block", "msg", trep.Message)
 				return fmt.Errorf(trep.Message)
+			}
+			fmt.Println("len(trep.TCBlock) ", len(trep.TCBlock), "||| int(blkHeight) ", int(blkHeight), " --- ", blkHeight, "||| trep.Messae ", trep.Message)
+			if strings.Contains(trep.Message, "Sent all blocks") && len(trep.TCBlock) == int(blkHeight) {
+				// Get syncer latest token block hash
+				syncerLatestBlk := block.InitBlock(trep.TCBlock[len(trep.TCBlock)-1], nil)
+				syncerLatestBlkHash, err := syncerLatestBlk.GetHash()
+				if err != nil {
+					c.log.Error("Failed to get block hash of synced block", "err", err)
+					return err
+				}
+
+				// Get DID owner latest token block hash
+				didOwnerAllTknBlks, _, err := c.w.GetAllTokenBlocks(token, tokenType, "")
+				didOwnerBlock := block.InitBlock(didOwnerAllTknBlks[len(trep.TCBlock)-1], nil)
+				didOwnerLatestBlkHash, err := didOwnerBlock.GetHash()
+				if err != nil {
+					c.log.Error("Failed to get block hash of owner block", "err", err)
+					return err
+				}
+				fmt.Println("syncerLatestBlkHash:", syncerLatestBlkHash)
+				fmt.Println("didOwnerLatestBlkHash:", didOwnerLatestBlkHash)
+
+				// Compare both block hashes
+				if strings.Contains(syncerLatestBlkHash, didOwnerLatestBlkHash) {
+					syncerLatestBlkID, err := syncerLatestBlk.GetBlockID(token)
+					if err != nil {
+						c.log.Error("Failed to get block id of synced block", "err", err)
+						return err
+					}
+					return fmt.Errorf("syncer block height discrepency|%s", syncerLatestBlkID)
+				}
 			}
 			for _, bb := range trep.TCBlock {
 				blk := block.InitBlock(bb, nil)

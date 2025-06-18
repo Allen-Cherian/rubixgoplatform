@@ -390,7 +390,9 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 				return resp
 			}
 		}
-		creatorDID = info[0].CreatorDID
+		if info != nil && len(info) > 0 {
+			creatorDID = info[0].CreatorDID
+		}
 	}
 	var AllFTs []wallet.FTToken
 	if req.CreatorDID != "" {
@@ -626,7 +628,7 @@ func (c *Core) updateFTTable() error {
 		fetchErr := fmt.Sprint(err)
 		if strings.Contains(fetchErr, "no records found") {
 			c.log.Info("No records found. Removing all entries from FT table.")
-			err = c.s.Delete(wallet.FTStorage, &wallet.FT{}, "did=?")
+			err = c.s.Delete(wallet.FTStorage, &wallet.FT{}, "ft_name!=?", "")
 			if err != nil {
 				deleteErr := fmt.Sprint(err)
 				if strings.Contains(deleteErr, "no records found") {
