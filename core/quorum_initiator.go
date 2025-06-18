@@ -1477,18 +1477,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			return nil, nil, nil, pledgeFinalityError
 		}
 
-		newEvent := model.NFTEvent{
-			NFT:          cr.NFT,
-			ExecutorDid:  sc.GetDeployerDID(),
-			NFTBlockHash: newnftIDTokenStateHash,
-			Type:         DeployType,
-		}
-
-		err = c.publishNewNftEvent(&newEvent)
-		if err != nil {
-			c.log.Error("Failed to publish NFT info")
-		}
-
 		txnDetails := model.TransactionDetails{
 			TransactionID:   tid,
 			TransactionType: nb.GetTransType(),
@@ -1540,19 +1528,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			return nil, nil, nil, pledgeFinalityError
 		}
 
-		newEvent := model.NFTEvent{
-			NFT:          cr.NFT,
-			ExecutorDid:  sc.GetExecutorDID(),
-			ReceiverDid:  sc.GetReceiverDID(),
-			Type:         ExecuteType,
-			NFTBlockHash: newBlockId,
-			NFTValue:     sc.GetTotalRBTs(),
-		}
-
-		err = c.publishNewNftEvent(&newEvent)
-		if err != nil {
-			c.log.Error("Failed to publish NFT executed  info")
-		}
 
 		prevBlockId, _ := nb.GetPrevBlockID((cr.NFT))
 		nftTokenStateDataOld := cr.NFT + prevBlockId
