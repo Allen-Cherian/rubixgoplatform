@@ -653,7 +653,6 @@ func (w *Wallet) GetAllTokenBlocks(token string, tokenType int, blockID string) 
 
 // GetLatestTokenBlock get latest token block from the storage
 func (w *Wallet) GetLatestTokenBlock(token string, tokenType int) *block.Block {
-	fmt.Println("getting block fot token ", token, " | ", tokenType)
 	return w.getLatestBlock(tokenType, token)
 }
 

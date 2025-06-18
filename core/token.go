@@ -291,9 +291,6 @@ func (c *Core) syncTokenChain(req *ensweb.Request) *ensweb.Result {
 	var tcbr TCBSyncReply
 	tcbr.Message = "Got all blocks"
 
-	fmt.Println("Received TCBSyncRequest token:", tr.Token)
-	fmt.Println("Received TCBSyncRequest token type:", tr.TokenType)
-	fmt.Println("Received TCBSyncRequest block ID:", tr.BlockID)
 	// Fetch token blocks
 	blks, nextID, err := c.w.GetAllTokenBlocks(tr.Token, tr.TokenType, tr.BlockID)
 	if err != nil {
@@ -301,7 +298,6 @@ func (c *Core) syncTokenChain(req *ensweb.Request) *ensweb.Result {
 		if err != nil {
 			c.log.Error("Error fetching token blocks", "error", err)
 		} else {
-			fmt.Println("in else confition")
 			tcbr.Message = "Sent all blocks"
 		}
 	}
@@ -427,7 +423,6 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 			return nil
 		}
 		blkHeight, err = blk.GetBlockNumber(token)
-		fmt.Println("blk height in sync ", blkHeight)
 		if err != nil {
 			c.log.Error("invalid block, failed to get block number")
 			return err
@@ -438,10 +433,6 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		TokenType: tokenType,
 		BlockID:   blkID,
 	}
-	fmt.Println("token in sync ", syncReq.Token)
-	fmt.Println("token type in sync ", syncReq.TokenType)
-	fmt.Println("block id in sync ", syncReq.BlockID)
-	fmt.Println("block height in sync ", blkHeight)
 
 	if tokenType == c.TokenType(RBTString) || tokenType == c.TokenType(PartString) {
 		syncReq.BlockHeight = blkHeight
@@ -471,7 +462,6 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 				c.log.Error("Failed to sync token chain block", "msg", trep.Message)
 				return fmt.Errorf(trep.Message)
 			}
-			fmt.Println("len(trep.TCBlock) ", len(trep.TCBlock), "||| int(blkHeight) ", int(blkHeight), " --- ", blkHeight, "||| trep.Messae ", trep.Message)
 			if strings.Contains(trep.Message, "Sent all blocks") {
 				diffVar := int(blkHeight) - len(trep.TCBlock)
 				if diffVar > 2 {
@@ -495,8 +485,6 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 						c.log.Error("Failed to get block hash of owner block", "err", err)
 						return err
 					}
-					fmt.Println("syncerLatestBlkHash:", syncerLatestBlkHash)
-					fmt.Println("didOwnerLatestBlkHash:", didOwnerLatestBlkHash)
 
 					// Compare both block hashes
 					if strings.Contains(syncerLatestBlkHash, didOwnerLatestBlkHash) {
@@ -603,7 +591,7 @@ func (c *Core) syncFullTokenChains(tokenSyncMap map[string][]TokenSyncInfo) {
 		defer p.Close()
 		// start syncing all tokens in queue
 		for _, tokenToSync := range tokenSyncInfo {
-			c.log.Debug("syncing token ", tokenToSync.TokenID)
+			c.log.Debug("syncing token: " + tokenToSync.TokenID)
 			err := c.syncFullTokenChain(p, tokenToSync)
 			if err != nil {
 				c.log.Error("failed to sync token chain for token ", tokenToSync.TokenID, "error", err)
@@ -617,7 +605,7 @@ func (c *Core) syncFullTokenChains(tokenSyncMap map[string][]TokenSyncInfo) {
 				c.log.Error("failed to update sync status after sync completed, token ", tokenToSync.TokenID)
 				continue
 			}
-			c.log.Debug("sync completed, updated sync status, token ", tokenToSync.TokenID)
+			c.log.Debug("sync completed, updated sync status, token: " + tokenToSync.TokenID)
 		}
 	}
 
@@ -984,7 +972,6 @@ func (c *Core) generateTestTokensFaucet(reqID string, numTokens int, did string)
 	// Get the current value from Faucet
 	resp, err := http.Get("http://103.209.145.177:3999/api/current-token-value")
 	if err != nil {
-		fmt.Println("Error fetching value from React:", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -995,7 +982,6 @@ func (c *Core) generateTestTokensFaucet(reqID string, numTokens int, did string)
 	//Populating the tokendetail with current token number and current token level received from Faucet.
 	json.Unmarshal(body, &tokendetail)
 	if err != nil {
-		fmt.Println("Error parsing JSON response:", err)
 		return nil, err
 	}
 	//Updating the Faucet token details with each new token
@@ -1116,7 +1102,6 @@ func (c *Core) FaucetTokenCheck(tokenID string, did string) model.BasicResponse 
 	}
 
 	tokenval := string(b)
-	fmt.Println("Token value from IPFS: ", tokenval)
 	tokencontent := strings.Split(tokenval, ",")
 	if len(tokencontent) != 3 {
 		br.Message = "Non-faucet token"
@@ -1148,7 +1133,6 @@ func (c *Core) FaucetTokenCheck(tokenID string, did string) model.BasicResponse 
 	// Get the current value from Faucet
 	resp, err := http.Get("http://103.209.145.177:3999/api/current-token-value")
 	if err != nil {
-		fmt.Println("Error fetching value from React:", err)
 		br.Status = false
 		br.Message = "Unable to fetch latest value"
 		return br
@@ -1159,21 +1143,17 @@ func (c *Core) FaucetTokenCheck(tokenID string, did string) model.BasicResponse 
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error reading response:", err)
 		br.Status = false
 		br.Message = "Unable to fetch latest value"
 		return br
 	}
-	fmt.Println(body)
 	//Populating the tokendetail with current token number and current token level received from Faucet.
 	err = json.Unmarshal(body, &tokendetail)
 	if err != nil {
-		fmt.Println("Error populating with the data:", err)
 		br.Status = false
 		br.Message = "Unable to fetch latest value"
 		return br
 	}
-	fmt.Println("tokenLevel Faucet: ", tokendetail)
 	if tokenLevel > tokendetail.TokenLevel {
 		br.Message = "Invalid token level"
 		return br

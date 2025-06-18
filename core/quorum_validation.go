@@ -239,8 +239,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 					c.log.Error("Failed to get block number - block height discrepency", "err", err)
 					return false, fmt.Errorf("Failed to get block number in block height discrepency")
 				}
-				fmt.Println("verificationBlkNum: ", verificationBlkNum)
-				fmt.Println("blockHeight: ", blockHeight)
 				if verificationBlkNum != uint64(blockHeight) {
 					c.log.Error("Failed to verify block number - block height discrepency", "err", err)
 					return false, fmt.Errorf("Failed to verify block number in block height discrepency")
@@ -252,10 +250,6 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 					c.log.Error("Failed to verify sender/receiver - block height discrepency exist", "err", err)
 					return false, fmt.Errorf("Failed to verify sender/receiver in block height discrepency")
 				}
-				fmt.Println("latestBlkRec: ", latestBlkRec)
-				fmt.Println("latestBlkSender: ", latestBlkSender)
-				fmt.Println("sc.GetReceiverDID(): ", sc.GetReceiverDID())
-				fmt.Println("sc.GetSenderDID(): ", sc.GetSenderDID())
 				err = c.w.RemoveTokenChainBlocklatest(ti[i].Token, ti[i].TokenType)
 				if err != nil {
 					c.log.Error("Failed to resolve sync issue", ti[i].Token, "err", err)

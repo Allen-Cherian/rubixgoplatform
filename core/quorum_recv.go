@@ -1178,7 +1178,6 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 			return nil, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
 		} else {
 			err = nil
-			fmt.Println("syncer block height discrepency skipped")
 		}
 
 		if c.TokenType(PartString) == ti.TokenType {

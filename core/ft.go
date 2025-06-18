@@ -627,7 +627,6 @@ func (c *Core) updateFTTable() error {
 	if err != nil {
 		fetchErr := fmt.Sprint(err)
 		if strings.Contains(fetchErr, "no records found") {
-			c.log.Info("No records found. Removing all entries from FT table.")
 			err = c.s.Delete(wallet.FTStorage, &wallet.FT{}, "ft_name!=?", "")
 			if err != nil {
 				deleteErr := fmt.Sprint(err)
