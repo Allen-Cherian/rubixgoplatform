@@ -1362,7 +1362,7 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 }
 
 func (c *Core) InitiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) {
-	br := c.initiateRBTCVRTwo(reqID, req)
+	br := c.initiateRBTCVRTwo(req)
 	dc := c.GetWebReq(reqID)
 	if dc == nil {
 		c.log.Error("Failed to get did channels")
@@ -1371,7 +1371,7 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) {
 	dc.OutChan <- br
 }
 
-func (c *Core) initiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) *model.BasicResponse {
+func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicResponse {
 	resp := &model.BasicResponse{
 		Status: false,
 	}
@@ -1530,7 +1530,7 @@ func (c *Core) initiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) *mo
 	// 	return resp
 	// }
 
-	sc := contract.InitContract(req.SCBlock, nil)
+	sc := contract.InitContract(req.SCTransferBlock, nil)
 	rpeerid := c.w.GetPeerID(sc.GetReceiverDID())
 	if rpeerid == "" {
 		errMsg := fmt.Sprintf("unexpected error, unable to find receiver peer id in CVR-2 even after token has been transferred to receiver : %v", sc.GetReceiverDID())
@@ -1538,7 +1538,7 @@ func (c *Core) initiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) *mo
 		resp.Message = errMsg
 		return resp
 	}
-	cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCBlock, int(req.TxnEpoch), isSelfRBTTransfer)
+	cr := getConsensusRequest(req.QuorumType, req.ReqID, c.peerID, rpeerid, req.SCTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
 	cr.Mode = SpendableRBTTransferMode
 
 	// initiate consensus for pre-pledging
@@ -1552,4 +1552,17 @@ func (c *Core) initiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) *mo
 	// TODO : add transaction details to DB
 
 	return resp
+}
+
+func (c *Core) UpdateTransferredTokensInfo(tokenList []wallet.Token, newTokenStatus int, txnID string) error {
+	for _, tokenInfo := range tokenList {
+		err := c.w.UpdateToken(&tokenInfo)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to update token : %v from Tokentable, err : %v", tokenInfo.TokenID, err)
+			c.log.Error(errMsg)
+			return fmt.Errorf(errMsg)
+		}
+
+	}
+	return nil
 }

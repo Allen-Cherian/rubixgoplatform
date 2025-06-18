@@ -520,7 +520,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		return nil, nil, nil, err
 	}
 
-	// // create another block for sender's self transaction
+	// create another block for sender's self transaction
 	// var selfTransferBlock *block.Block
 	// if cr.Mode == SpendableRBTTransferMode {
 	// 	selfTransferBlock, err = c.createTransTokenBlock(cr, sc, tid, dc)
@@ -2297,17 +2297,22 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 		}
 	}
 
+	// TODO : self transfer block for sender with tokens not transferring
+	// var selfTransferBlock *block.Block
 	if cr.Mode == SpendableRBTTransferMode {
 		bti.SenderDID = sc.GetSenderDID()
-		bti.ReceiverDID = sc.GetReceiverDID()
+		bti.ReceiverDID = sc.GetSenderDID()
 		tcb = block.TokenChainBlock{
-			TransactionType: block.TokenPrePledgedType,
+			TransactionType: block.TokenTransferredType,
 			TokenOwner:      sc.GetSenderDID(),
 			TransInfo:       bti,
 			SmartContract:   sc.GetBlock(),
 			PledgeDetails:   ptds,
 			Epoch:           cr.TransactionEpoch,
 		}
+
+
+
 	}
 
 	if cr.Mode == DTCommitMode {
@@ -2319,8 +2324,7 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 		return nil, fmt.Errorf("failed to create new token chain block - qrm init")
 	}
 
-	// if dc is nil, it implies CVR-2
-	if cr.Mode == SpendableRBTTransferMode {
+	if cr.Mode != SpendableRBTTransferMode {
 		err := nb.SignByInitiator(dc)
 		if err != nil {
 			c.log.Error("Failed to update initiator signature")

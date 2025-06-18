@@ -1135,6 +1135,7 @@ func (c *Core) updateReceiverToken(
 					c.log.Error("failed to update token cvr type")
 					return nil, senderPeer, fmt.Errorf("failed to update tokenType of  Token " + t)
 				}
+				//TODO: handle the sync status, as aliredy synced in cvr-1, can update the synce status to completed in cvrstage-2
 				updatedTokenStateHashes, err = c.w.TokensReceived(receiverDID, tokenInfo, updatedBlock, senderPeerId, receiverPeerId, pinningServiceMode, c.ipfs)
 				if err != nil {
 					return nil, senderPeer, fmt.Errorf("failed to update token status, error: %v", err)

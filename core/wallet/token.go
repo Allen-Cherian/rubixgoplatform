@@ -56,11 +56,14 @@ const (
 )
 
 type PrePledgeRequest struct {
-	DID        string `json:"did"`
-	QuorumType int    `json:"quorum_type"`
-	TxnID      string `json:"txn_id"`
-	SCBlock    []byte `json:"sc_block"`
-	TxnEpoch   int64  `json:"txn_epoch"`
+	DID                 string `json:"did"`
+	QuorumType          int    `json:"quorum_type"`
+	TxnID               string `json:"txn_id"`
+	SelftransferTxnID   string `json:"self_txn_id"`
+	SCTransferBlock     []byte `json:"sc_transfer_block"`
+	SCSelfTransferBlock []byte `json:"sc_self_transfer_block"`
+	TxnEpoch            int64  `json:"txn_epoch"`
+	ReqID               string `json:"request_id"`
 }
 
 type Token struct {
@@ -712,7 +715,15 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 		t.TokenStatus = tokenStatus
 		t.TransactionID = b.GetTid()
 		t.TokenStateHash = tokenHashMap[tokenInfo.Token]
-		t.SyncStatus = SyncIncomplete
+
+		// if sender peer id and receiver peer id is same, then they both are sharing the same level DB,
+		// and thus do not need to sync the token chain again.
+		// Also in case of cvr stage-2 we don't need to sync the token chain as it is already synced in cvr stage-1
+		if senderPeerId == receiverPeerId {
+			t.SyncStatus = SyncCompleted
+		} else {
+			t.SyncStatus = SyncIncomplete
+		}
 
 		err = w.s.Update(TokenStorage, &t, "token_id=?", tokenInfo.Token)
 		if err != nil {

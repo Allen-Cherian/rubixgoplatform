@@ -164,6 +164,56 @@ func gatherTokensForTransaction(c *Core, req *model.RBTTransferRequest, dc did.D
 	}
 }
 
+func (c *Core) getUniqueTransTokensFromLatestBlocks(tokensForTxn []wallet.Token) ([]string, error) {
+	uniqueTransTokens := make([]string, 0)
+	// Create a map for quick lookup of tokensForTxn TokenIDs
+	tokensForTxnMap := make(map[string]bool)
+	for _, token := range tokensForTxn {
+		tokensForTxnMap[token.TokenID] = true
+	}
+
+	for _, token := range tokensForTxn {
+		// Determine token type
+		tts := "rbt"
+		if token.TokenValue != 1 {
+			tts = "part"
+		}
+		tt := c.TokenType(tts)
+
+		// Get the latest token block
+		blk := c.w.GetLatestTokenBlock(token.TokenID, tt)
+		if blk == nil {
+			return nil, fmt.Errorf("failed to get latest block for token %v, invalid token chain", token.TokenID)
+		}
+		// blk.GetTokenBlock()
+		// Get trans tokens from the block
+		transTokens := blk.GetTransTokens()
+		if transTokens == nil {
+			continue // Skip if no trans tokens
+		}
+
+		// Check each trans token
+		for _, transToken := range transTokens {
+			// Only add if transToken is not in tokensForTxn
+			if !tokensForTxnMap[transToken] {
+				// Avoid duplicates in output
+				found := false
+				for _, addedToken := range uniqueTransTokens {
+					if addedToken == transToken {
+						found = true
+						break
+					}
+				}
+				if !found {
+					uniqueTransTokens = append(uniqueTransTokens, transToken)
+				}
+			}
+		}
+	}
+
+	return uniqueTransTokens, nil
+}
+
 func getContractType(reqID string, req *model.RBTTransferRequest, transTokenInfo []contract.TokenInfo, isSelfRBTTransfer bool) *contract.ContractType {
 	if !isSelfRBTTransfer {
 		return &contract.ContractType{
@@ -200,9 +250,9 @@ func getContractType(reqID string, req *model.RBTTransferRequest, transTokenInfo
 	}
 }
 
-func getConsensusRequest(consensusRequestType int, senderPeerID string, receiverPeerID string, contractBlock []byte, transactionEpoch int, isSelfTransfer bool) *ConensusRequest {
+func getConsensusRequest(consensusRequestType int, requestId string, senderPeerID string, receiverPeerID string, contractBlock []byte, transactionEpoch int, isSelfTransfer bool) *ConensusRequest {
 	var consensusRequest *ConensusRequest = &ConensusRequest{
-		ReqID:            uuid.New().String(),
+		ReqID:            requestId,
 		Type:             consensusRequestType,
 		SenderPeerID:     senderPeerID,
 		ReceiverPeerID:   receiverPeerID,
@@ -314,6 +364,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	tis := make([]contract.TokenInfo, 0)
 	tokenListForExplorer := []Token{}
+	selfTransferTokensMap := make(map[string]struct{})
 
 	for i := range tokensForTxn {
 		tts := "rbt"
@@ -335,7 +386,6 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 				return resp
 			}
 		}
-
 		bid, err := blk.GetBlockID(tokensForTxn[i].TokenID)
 		if err != nil {
 			c.log.Error("failed to get block id", "err", err)
@@ -351,6 +401,22 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		}
 		tis = append(tis, ti)
 		tokenListForExplorer = append(tokenListForExplorer, Token{TokenHash: ti.Token, TokenValue: ti.TokenValue})
+
+		// gather tokens for self-transfer : check if the transToken exists in the self-transfer map,
+		// if exists delete the toekn from the self-transfer map, if does not exist
+		// then fetch the list of all tokens from the latest block, and
+		// add all the tokens to the self-transfer map except the trans-token
+		_, exists := selfTransferTokensMap[tokensForTxn[i].TokenID]
+		if exists {
+			delete(selfTransferTokensMap, tokensForTxn[i].TokenID)
+		} else {
+			transTokensInBlock := blk.GetTransTokens()
+			for _, token := range transTokensInBlock {
+				if token != tokensForTxn[i].TokenID {
+					selfTransferTokensMap[token] = struct{}{}
+				}
+			}
+		}
 
 	}
 
@@ -389,6 +455,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		}
 	}
 
+	// preaparing the block for tokens to be transferred to receiver
 	contractType := getContractType(reqID, req, tis, isSelfRBTTransfer)
 	sc := contract.CreateNewContract(contractType)
 
@@ -438,6 +505,98 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		resp.Message = "failed to create new token chain block - qrm init"
 		return resp
 	}
+
+	// get all self-transfer tokens
+	selfTransferTokensList := make([]contract.TokenInfo, 0)
+	for selfTransferToken := range selfTransferTokensMap {
+		selftransferToken, err := c.w.GetToken(selfTransferToken, wallet.TokenIsFree)
+
+		tts := "rbt"
+		if selftransferToken.TokenValue != 1 {
+			tts = "part"
+		}
+		tt := c.TokenType(tts)
+		blk := c.w.GetLatestTokenBlock(selfTransferToken, tt)
+		if blk == nil {
+			c.log.Error("failed to get latest block, invalid token chain")
+			resp.Message = "failed to get latest block, invalid token chain"
+			return resp
+		}
+		bid, err := blk.GetBlockID(selfTransferToken)
+		if err != nil {
+			c.log.Error("failed to get block id", "err", err)
+			resp.Message = "failed to get block id, " + err.Error()
+			return resp
+		}
+
+		selftransferTokeninfo := contract.TokenInfo{
+			Token:      selfTransferToken,
+			TokenType:  tt,
+			TokenValue: selftransferToken.TokenValue,
+			OwnerDID:   sc.GetSenderDID(),
+			BlockID:    bid,
+		}
+		selfTransferTokensList = append(selfTransferTokensList, selftransferTokeninfo)
+
+	}
+	//create new contract for self transfer
+	selfTransferContractType := getContractType(reqID, req, selfTransferTokensList, isSelfRBTTransfer)
+	selfTransferContract := contract.CreateNewContract(selfTransferContractType)
+
+	err = selfTransferContract.UpdateSignature(dc)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to update the signature on the self transfer contract, error: %v", err)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return resp
+	}
+
+	// creating self transfer block in cvr stage-2
+	selfTransactionID := util.HexToStr(util.CalculateHash(selfTransferContract.GetBlock(), "SHA3-256"))
+	selfTransferTokens := make([]block.TransTokens, 0)
+	latestTokenChainBlock := make(map[string]*block.Block)
+
+	for i := range selfTransferTokensList {
+		tt := block.TransTokens{
+			Token:     selfTransferTokensList[i].Token,
+			TokenType: selfTransferTokensList[i].TokenType,
+		}
+		selfTransferTokens = append(selfTransferTokens, tt)
+		b := c.w.GetLatestTokenBlock(tis[i].Token, tis[i].TokenType)
+		ctcb[tis[i].Token] = b
+	}
+
+	selfTransBlockTransInfo := &block.TransInfo{
+		Comment: selfTransferContract.GetComment(),
+		TID:     selfTransactionID,
+		Tokens:  selfTransferTokens,
+	}
+
+	seltTransferTCB := block.TokenChainBlock{
+		TransactionType: block.TokenTransferredType,
+		TokenOwner:      selfTransferContract.GetReceiverDID(), //ReceiverDID is same as senderDID because it is self transfer
+		TransInfo:       selfTransBlockTransInfo,
+		SmartContract:   selfTransferContract.GetBlock(),
+		Epoch:           txEpoch,
+	}
+
+	selfTransferBlock := block.CreateNewBlock(latestTokenChainBlock, &seltTransferTCB)
+	if selfTransferBlock == nil {
+		c.log.Error("Failed to create a selftransfer token chain block - qrm init")
+		resp.Message = "Failed to create a selftransfer token chain block - qrm init"
+		return resp
+	}
+
+	//update the levelDB and SqliteDB
+	updatedTokenStateHashesAfterSelfTransfer, err := c.w.TokensReceived(senderDID, selfTransferTokensList, selfTransferBlock, c.peerID, c.peerID, false, c.ipfs)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to update token status, error: %v", err)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return resp
+	}
+	//TODO: Send these updatedTokenStateHashesAfterSelfTransfer to quorums for pinning
+	fmt.Printf("Updated token state hashes after self transfer are:%v", updatedTokenStateHashesAfterSelfTransfer)
 
 	sr := SendTokenRequest{
 		Address:         c.peerID + "." + sc.GetSenderDID(),
@@ -508,9 +667,18 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		return resp
 	}
 
-	// TODO : update token status based on the situation 
+	// update token status based on the situations:
 	// 1. sender receiver on different ports
 	// 2. sender receiver on same port
+	if rpeerid != c.peerID {
+		err = c.UpdateTransferredTokensInfo(tokensForTxn, wallet.TokenIsTransferred, transactionID)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to update trans tokens in DB, err : %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+	}
 
 	nbid, err := nb.GetBlockID(tis[0].Token)
 	if err != nil {
@@ -572,15 +740,27 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	resp.Message = msg
 	//TODO: return and initiate go routine
 	// Starting CVR stage-2
-	//pre-pledging related api will get call here
-	cr := getConsensusRequest(req.Type, c.peerID, rpeerid, sc.GetBlock(), txEpoch, isSelfRBTTransfer)
-
-	td, _, _, err = c.initiateConsensus(cr, sc, dc)
-	if err != nil {
-		c.log.Error("Consensus failed ", "err", err)
-		resp.Message = "Consensus failed " + err.Error()
-		return resp
+	cvrRequest := &wallet.PrePledgeRequest{
+		DID:                 senderDID,
+		QuorumType:          req.Type,
+		TxnID:               transactionID,
+		SelftransferTxnID:   selfTransactionID,
+		SCTransferBlock:     sc.GetBlock(),
+		SCSelfTransferBlock: selfTransferBlock.GetBlock(),
+		TxnEpoch:            int64(txEpoch),
+		ReqID:               reqID,
 	}
+	go c.initiateRBTCVRTwo(cvrRequest)
+
+	// //pre-pledging related api will get call here
+	// cr := getConsensusRequest(req.Type, c.peerID, rpeerid, sc.GetBlock(), txEpoch, isSelfRBTTransfer)
+
+	// td, _, _, err = c.initiateConsensus(cr, sc, dc)
+	// if err != nil {
+	// 	c.log.Error("Consensus failed ", "err", err)
+	// 	resp.Message = "Consensus failed " + err.Error()
+	// 	return resp
+	// }
 
 	return resp
 }
