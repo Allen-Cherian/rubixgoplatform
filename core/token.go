@@ -472,34 +472,41 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 				return fmt.Errorf(trep.Message)
 			}
 			fmt.Println("len(trep.TCBlock) ", len(trep.TCBlock), "||| int(blkHeight) ", int(blkHeight), " --- ", blkHeight, "||| trep.Messae ", trep.Message)
-			if strings.Contains(trep.Message, "Sent all blocks") && len(trep.TCBlock) == int(blkHeight) {
-				// Get syncer latest token block hash
-				syncerLatestBlk := block.InitBlock(trep.TCBlock[len(trep.TCBlock)-1], nil)
-				syncerLatestBlkHash, err := syncerLatestBlk.GetHash()
-				if err != nil {
-					c.log.Error("Failed to get block hash of synced block", "err", err)
-					return err
-				}
-
-				// Get DID owner latest token block hash
-				didOwnerAllTknBlks, _, err := c.w.GetAllTokenBlocks(token, tokenType, "")
-				didOwnerBlock := block.InitBlock(didOwnerAllTknBlks[len(trep.TCBlock)-1], nil)
-				didOwnerLatestBlkHash, err := didOwnerBlock.GetHash()
-				if err != nil {
-					c.log.Error("Failed to get block hash of owner block", "err", err)
-					return err
-				}
-				fmt.Println("syncerLatestBlkHash:", syncerLatestBlkHash)
-				fmt.Println("didOwnerLatestBlkHash:", didOwnerLatestBlkHash)
-
-				// Compare both block hashes
-				if strings.Contains(syncerLatestBlkHash, didOwnerLatestBlkHash) {
-					syncerLatestBlkID, err := syncerLatestBlk.GetBlockID(token)
+			if strings.Contains(trep.Message, "Sent all blocks") {
+				diffVar := int(blkHeight) - len(trep.TCBlock)
+				if diffVar > 2 {
+					// Quorum is ahead of sender by more than 1 block — not allowed
+					c.log.Error("Block height discrepancy too large")
+					return fmt.Errorf("sync failed: block height discrepancy too large (diff: %d)", diffVar)
+				} else {
+					// Get syncer latest token block hash
+					syncerLatestBlk := block.InitBlock(trep.TCBlock[len(trep.TCBlock)-1], nil)
+					syncerLatestBlkHash, err := syncerLatestBlk.GetHash()
 					if err != nil {
-						c.log.Error("Failed to get block id of synced block", "err", err)
+						c.log.Error("Failed to get block hash of synced block", "err", err)
 						return err
 					}
-					return fmt.Errorf("syncer block height discrepency|%s", syncerLatestBlkID)
+
+					// Get DID owner latest token block hash
+					didOwnerAllTknBlks, _, err := c.w.GetAllTokenBlocks(token, tokenType, "")
+					didOwnerBlock := block.InitBlock(didOwnerAllTknBlks[len(trep.TCBlock)-1], nil)
+					didOwnerLatestBlkHash, err := didOwnerBlock.GetHash()
+					if err != nil {
+						c.log.Error("Failed to get block hash of owner block", "err", err)
+						return err
+					}
+					fmt.Println("syncerLatestBlkHash:", syncerLatestBlkHash)
+					fmt.Println("didOwnerLatestBlkHash:", didOwnerLatestBlkHash)
+
+					// Compare both block hashes
+					if strings.Contains(syncerLatestBlkHash, didOwnerLatestBlkHash) {
+						syncerLatestBlkID, err := syncerLatestBlk.GetBlockID(token)
+						if err != nil {
+							c.log.Error("Failed to get block id of synced block", "err", err)
+							return err
+						}
+						return fmt.Errorf("syncer block height discrepency|%s", syncerLatestBlkID)
+					}
 				}
 			}
 			for _, bb := range trep.TCBlock {
