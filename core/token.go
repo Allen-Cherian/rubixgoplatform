@@ -403,7 +403,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 	// }
 	// defer p.Close()
 	var err error
-	var blkHeight = uint64(123)
+	var blkHeight uint64
 	blk := c.w.GetLatestTokenBlock(token, tokenType)
 	if blk != nil {
 		blkHeight, err = blk.GetBlockNumber(token)
