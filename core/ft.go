@@ -312,6 +312,7 @@ func (c *Core) InitiateFTTransfer(reqID string, req *model.TransferFTReq) {
 
 func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model.BasicResponse {
 	st := time.Now()
+	txEpoch := int(st.Unix())
 	resp := &model.BasicResponse{
 		Status: false,
 	}
@@ -492,13 +493,14 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		return resp
 	}
 	cr := &ConensusRequest{
-		Mode:           FTTransferMode,
-		ReqID:          uuid.New().String(),
-		Type:           req.QuorumType,
-		SenderPeerID:   c.peerID,
-		ReceiverPeerID: rpeerid,
-		ContractBlock:  sc.GetBlock(),
-		FTinfo:         FTData,
+		Mode:             FTTransferMode,
+		ReqID:            uuid.New().String(),
+		Type:             req.QuorumType,
+		SenderPeerID:     c.peerID,
+		ReceiverPeerID:   rpeerid,
+		ContractBlock:    sc.GetBlock(),
+		FTinfo:           FTData,
+		TransactionEpoch: txEpoch,
 	}
 	td, _, pds, err := c.initiateConsensus(cr, sc, dc)
 	if err != nil {
