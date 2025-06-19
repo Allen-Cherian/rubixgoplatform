@@ -308,10 +308,10 @@ func (c *Core) syncTokenChain(req *ensweb.Request) *ensweb.Result {
 	} */
 
 	// Handle other errors
-	if err != nil {
-		respMsg := "token block not found for token: " + tr.Token + " and block: " + tr.BlockID
-		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: respMsg}, http.StatusInternalServerError)
-	}
+	// if err != nil {
+	// 	respMsg := "token block not found for token: " + tr.Token + " and block: " + tr.BlockID
+	// 	return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: respMsg}, http.StatusInternalServerError)
+	// }
 
 	// Success response
 	return c.l.RenderJSON(req, &TCBSyncReply{
