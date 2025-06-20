@@ -502,86 +502,107 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		FTinfo:           FTData,
 		TransactionEpoch: txEpoch,
 	}
-	td, _, pds, err := c.initiateConsensus(cr, sc, dc)
-	if err != nil {
-		c.log.Error("Consensus failed ", "err", err)
-		resp.Message = "Consensus failed " + err.Error()
-		return resp
-	}
-	et := time.Now()
-	dif := et.Sub(st)
-	td.Amount = float64(req.FTCount)
-	td.TotalTime = float64(dif.Milliseconds())
-	c.w.AddTransactionHistory(td)
 
-	//TODO :  Extra details regarding the FT need to added in the explorer
-	// etrans := &ExplorerTrans{
-	// 	TID:         td.TransactionID,
-	// 	SenderDID:   did,
-	// 	ReceiverDID: rdid,
-	// 	Amount:      float64(req.FTCount),
-	// 	TrasnType:   req.QuorumType,
-	// 	TokenIDs:    FTTokenIDs,
-	// 	QuorumList:  cr.QuorumList,
-	// 	TokenTime:   float64(dif.Milliseconds()),
-	// }
-	// explorerErr := c.ec.ExplorerTransaction(etrans)
-	// if explorerErr != nil {
-	// 	c.log.Error("Failed to send FT transaction to explorer ", "err", explorerErr)
-	// }
-	AllTokens := make([]AllToken, len(FTsForTxn))
-	for i := range FTsForTxn {
-		tokenDetail := AllToken{}
-		tokenDetail.TokenHash = FTsForTxn[i].TokenID
-		tt := c.TokenType(FTString)
-		blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
-		bid, _ := blk.GetBlockID(FTsForTxn[i].TokenID)
+	resultChan := make(chan *model.BasicResponse, 1)
 
-		blockNoPart := strings.Split(bid, "-")[0]
-		// Convert the string part to an int
-		blockNoInt, err := strconv.Atoi(blockNoPart)
-		if err != nil {
-			log.Printf("Error getting BlockID: %v", err)
-			continue
+	// start transacion in go routine
+	go func() {
+		td, _, pds, FTconsErr := c.initiateConsensus(cr, sc, dc)
+		if FTconsErr != nil {
+			resp.Message = fmt.Sprintf("Consensus failed " + FTconsErr.Error())
+			resp.Status = false
+			resultChan <- resp
+			return
 		}
-		tokenDetail.BlockNumber = blockNoInt
-		tokenDetail.BlockHash = strings.Split(bid, "-")[1]
+		et := time.Now()
+		dif := et.Sub(st)
+		td.Amount = float64(req.FTCount)
+		td.TotalTime = float64(dif.Milliseconds())
+		if td.TotalTime < 0.00 {
+			td.TotalTime = 0.00
+		}
+		if err := c.w.AddTransactionHistory(td); err != nil {
+			errMsg := fmt.Sprintf("Error occured while adding FT transaction details: %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return
+		}
+		AllTokens := make([]AllToken, len(FTsForTxn))
+		for i := range FTsForTxn {
+			tokenDetail := AllToken{}
+			tokenDetail.TokenHash = FTsForTxn[i].TokenID
+			tt := c.TokenType(FTString)
+			blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
+			bid, _ := blk.GetBlockID(FTsForTxn[i].TokenID)
 
-		AllTokens[i] = tokenDetail
-	}
+			blockNoPart := strings.Split(bid, "-")[0]
+			// Convert the string part to an int
+			blockNoInt, err := strconv.Atoi(blockNoPart)
+			if err != nil {
+				log.Printf("Error getting BlockID: %v", err)
+				continue
+			}
+			tokenDetail.BlockNumber = blockNoInt
+			tokenDetail.BlockHash = strings.Split(bid, "-")[1]
 
-	eTrans := &ExplorerFTTrans{
-		FTBlockHash:     AllTokens,
-		CreatorDID:      creatorDID,
-		SenderDID:       did,
-		ReceiverDID:     rdid,
-		FTName:          req.FTName,
-		FTTransferCount: req.FTCount,
-		Network:         req.QuorumType,
-		FTSymbol:        "N/A",
-		Comments:        req.Comment,
-		TransactionID:   td.TransactionID,
-		PledgeInfo:      PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
-		QuorumList:      extractQuorumDID(cr.QuorumList),
-		Amount:          FTsForTxn[0].TokenValue * float64(req.FTCount),
-		FTTokenList:     FTTokenIDs,
-	}
+			AllTokens[i] = tokenDetail
+		}
 
-	updateFTTableErr := c.updateFTTable()
-	if updateFTTableErr != nil {
-		c.log.Error("Failed to update FT table after transfer ", "err", updateFTTableErr)
-		resp.Message = "Failed to update FT table after transfer"
+		eTrans := &ExplorerFTTrans{
+			FTBlockHash:     AllTokens,
+			CreatorDID:      creatorDID,
+			SenderDID:       did,
+			ReceiverDID:     rdid,
+			FTName:          req.FTName,
+			FTTransferCount: req.FTCount,
+			Network:         req.QuorumType,
+			FTSymbol:        "N/A",
+			Comments:        req.Comment,
+			TransactionID:   td.TransactionID,
+			PledgeInfo:      PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
+			QuorumList:      extractQuorumDID(cr.QuorumList),
+			Amount:          FTsForTxn[0].TokenValue * float64(req.FTCount),
+			FTTokenList:     FTTokenIDs,
+		}
+		c.log.Info("FT Transfer finished successfully", "duration", dif, " trnxid", td.TransactionID)
+		msg := fmt.Sprintf("FT Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
+		resp.Status = true
+		resp.Message = msg
+
+		updateFTTableErr := c.updateFTTable()
+		if updateFTTableErr != nil {
+			c.log.Error("Failed to update FT table after transfer ", "err", updateFTTableErr)
+			resp.Message = "Failed to update FT table after transfer"
+			return
+		}
+
+		c.ec.ExplorerFTTransaction(eTrans)
+		// Send final transaction completion response if not already timed out
+		select {
+		case resultChan <- resp:
+			// Successfully sent to resultChan
+		default:
+			// If no one is listening (already timed out), just log and exit
+			c.log.Debug("FT Transaction completed but resultChan is not being read anymore")
+		}
+
+	}()
+	select {
+	case result := <-resultChan:
+		// Transaction completed within 40s or failed
+		c.log.Debug("FT transaction completed before 20 secs")
+		return result
+
+	case <-time.After(20 * time.Second):
+		// Timeout occurred, return Transaction ID only
+		c.log.Debug("FT transaction still processing with txn id ", cr.TransactionID)
+
+		msg := fmt.Sprintf("FT Transaction is still processing, with transaction id %v ", cr.TransactionID)
+		resp.Result = cr.TransactionID
+		resp.Message = msg
+		resp.Status = true
 		return resp
 	}
-	explorerErr := c.ec.ExplorerFTTransaction(eTrans)
-	if explorerErr != nil {
-		c.log.Error("Failed to send FT transaction to explorer ", "err", explorerErr)
-	}
-	c.log.Info("FT Transfer finished successfully", "duration", dif, " trnxid", td.TransactionID)
-	msg := fmt.Sprintf("FT Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
-	resp.Status = true
-	resp.Message = msg
-	return resp
 }
 
 func (c *Core) GetPresiceFractionalValue(a, b int) (float64, error) {
