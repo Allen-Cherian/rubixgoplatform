@@ -148,7 +148,11 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		Status: false,
 	}
 
-	sc := contract.InitContract(cr.ContractBlock, nil)
+	ok, sc := c.verifyContract(cr, did)
+	if !ok {
+		crep.Message = "failed to verify sender signature"
+		return c.l.RenderJSON(req, &crep, http.StatusOK)
+	}
 	//initiate trans token block
 	transTknBlock := block.InitBlock(cr.TransTokenBlock, nil, block.NoSignature())
 	if transTknBlock == nil {
@@ -156,13 +160,13 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		crep.Message = "Failed to do signature, invalid token chanin block"
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
-	//Validate sender signature
-	response, err := c.ValidateTxnInitiator(transTknBlock)
-	if err != nil {
-		c.log.Error("signature request failed, msg", response.Message, "err", err)
-		crep.Message = response.Message
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
-	}
+	// //Validate sender signature
+	// response, err := c.ValidateTxnInitiator(transTknBlock)
+	// if err != nil {
+	// 	c.log.Error("signature request failed, msg", response.Message, "err", err)
+	// 	crep.Message = response.Message
+	// 	return c.l.RenderJSON(req, &crep, http.StatusOK)
+	// }
 
 	//check if token has multiple pins
 	ti := sc.GetTransTokenInfo()
@@ -254,7 +258,10 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	var receiver string
-	if sc.GetReceiverDID() != "" {
+
+	// if receiver did is provided and is not same as sender did, then it is a normal transfer,
+	// else it is a self-transfer
+	if sc.GetReceiverDID() != "" && sc.GetReceiverDID() != sc.GetSenderDID() {
 		receiver = cr.ReceiverPeerID + "." + sc.GetReceiverDID()
 	} else {
 		receiver = ""
@@ -310,6 +317,7 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 			TransactionEpoch:            cr.TransactionEpoch,
 		}
 
+		// pledge finality
 		response := c.UpdatePledgeToken(pledgeFinalityReq, did)
 		if !response.Status {
 			c.log.Error("failed to update pledge tokens, err ", response.Message)
@@ -419,30 +427,30 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 	// setup the did to verify the signature
 	c.log.Debug("VEryfying the deployer signature")
 
-	// var verifyDID string
+	var verifyDID string
 
-	// if consensusRequest.Mode == SmartContractDeployMode {
-	// 	c.log.Debug("Fetching Deployer DID")
-	// 	verifyDID = consensusContract.GetDeployerDID()
-	// 	c.log.Debug("deployer did ", verifyDID)
-	// } else {
-	// 	c.log.Debug("Fetching Executor DID")
-	// 	verifyDID = consensusContract.GetExecutorDID()
-	// 	c.log.Debug("executor did ", verifyDID)
-	// }
+	if consensusRequest.Mode == SmartContractDeployMode {
+		c.log.Debug("Fetching Deployer DID")
+		verifyDID = consensusContract.GetDeployerDID()
+		c.log.Debug("deployer did ", verifyDID)
+	} else {
+		c.log.Debug("Fetching Executor DID")
+		verifyDID = consensusContract.GetExecutorDID()
+		c.log.Debug("executor did ", verifyDID)
+	}
 
-	// dc, err := c.SetupForienDID(verifyDID, did)
-	// if err != nil {
-	// 	c.log.Error("Failed to get DID for verification", "err", err)
-	// 	consensusReply.Message = "Failed to get DID for verification"
-	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	// }
-	// err = consensusContract.VerifySignature(dc)
-	// if err != nil {
-	// 	c.log.Error("Failed to verify signature", "err", err)
-	// 	consensusReply.Message = "Failed to verify signature"
-	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	// }
+	dc, err := c.SetupForienDID(verifyDID, did)
+	if err != nil {
+		c.log.Error("Failed to get DID for verification", "err", err)
+		consensusReply.Message = "Failed to get DID for verification"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
+	err = consensusContract.VerifySignature(dc)
+	if err != nil {
+		c.log.Error("Failed to verify signature", "err", err)
+		consensusReply.Message = "Failed to verify signature"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
 
 	//initiate trans token block
 	transSCBlock := block.InitBlock(consensusRequest.TransTokenBlock, nil, block.NoSignature())
@@ -451,13 +459,13 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 		consensusReply.Message = "Failed to do signature, invalid NFT"
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	//Validate sender signature
-	response, err := c.ValidateTxnInitiator(transSCBlock)
-	if err != nil {
-		c.log.Error("signature request failed, msg", response.Message, "err", err)
-		consensusReply.Message = response.Message
-		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	}
+
+	// response, err := c.ValidateTxnInitiator(transSCBlock)
+	// if err != nil {
+	// 	c.log.Error("signature request failed, msg", response.Message, "err", err)
+	// 	consensusReply.Message = response.Message
+	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	// }
 
 	//check if deployment or execution
 
@@ -598,30 +606,30 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	// setup the did to verify the signature
 	c.log.Info("Verifying the deployer signature while deploying nft")
 
-	// var verifyDID string
+	var verifyDID string
 
-	// if consensusRequest.Mode == NFTDeployMode {
-	// 	c.log.Debug("Fetching NFT Deployer DID")
-	// 	verifyDID = consensusContract.GetDeployerDID()
-	// 	c.log.Debug("deployer did ", verifyDID)
-	// } else {
-	// 	c.log.Debug("Fetching NFT Executor DID")
-	// 	verifyDID = consensusContract.GetExecutorDID()
-	// 	c.log.Debug("Executor did ", verifyDID)
-	// }
+	if consensusRequest.Mode == NFTDeployMode {
+		c.log.Debug("Fetching NFT Deployer DID")
+		verifyDID = consensusContract.GetDeployerDID()
+		c.log.Debug("deployer did ", verifyDID)
+	} else {
+		c.log.Debug("Fetching NFT Executor DID")
+		verifyDID = consensusContract.GetExecutorDID()
+		c.log.Debug("Executor did ", verifyDID)
+	}
 
-	// dc, err := c.SetupForienDID(verifyDID, did)
-	// if err != nil {
-	// 	c.log.Error("Failed to get DID for verification", "err", err)
-	// 	consensusReply.Message = "Failed to get DID for verification"
-	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	// }
-	// err = consensusContract.VerifySignature(dc)
-	// if err != nil {
-	// 	c.log.Error("Failed to verify signature", "err", err)
-	// 	consensusReply.Message = "Failed to verify signature"
-	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	// }
+	dc, err := c.SetupForienDID(verifyDID, did)
+	if err != nil {
+		c.log.Error("Failed to get DID for verification", "err", err)
+		consensusReply.Message = "Failed to get DID for verification"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
+	err = consensusContract.VerifySignature(dc)
+	if err != nil {
+		c.log.Error("Failed to verify signature", "err", err)
+		consensusReply.Message = "Failed to verify signature"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
 
 	//initiate trans token block
 	transNFTBlock := block.InitBlock(consensusRequest.TransTokenBlock, nil, block.NoSignature())
@@ -630,13 +638,13 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		consensusReply.Message = "Failed to do signature, invalid NFT"
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	//Validate sender signature
-	response, err := c.ValidateTxnInitiator(transNFTBlock)
-	if err != nil {
-		c.log.Error("signature request failed, msg", response.Message, "err", err)
-		consensusReply.Message = response.Message
-		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	}
+	// //Validate sender signature
+	// response, err := c.ValidateTxnInitiator(transNFTBlock)
+	// if err != nil {
+	// 	c.log.Error("signature request failed, msg", response.Message, "err", err)
+	// 	consensusReply.Message = response.Message
+	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	// }
 
 	//check if deployment or execution
 
@@ -769,9 +777,11 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		Status: false,
 	}
 
-	sc := contract.InitContract(consensusRequest.ContractBlock, nil)
-	// setup the did to verify the signature
-	c.log.Debug("VEryfying the initiator signature")
+	ok, sc := c.verifyContract(consensusRequest, did)
+	if !ok {
+		consensusReply.Message = "Failed to verify sender signature"
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
 
 	//initiate trans token block
 	transNFTBlock := block.InitBlock(consensusRequest.TransTokenBlock, nil, block.NoSignature())
@@ -780,13 +790,13 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		consensusReply.Message = "Failed to do signature, invalid NFT"
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	//Validate sender signature
-	response, err := c.ValidateTxnInitiator(transNFTBlock)
-	if err != nil {
-		c.log.Error("signature request failed, msg", response.Message, "err", err)
-		consensusReply.Message = response.Message
-		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	}
+	// //Validate sender signature
+	// response, err := c.ValidateTxnInitiator(transNFTBlock)
+	// if err != nil {
+	// 	c.log.Error("signature request failed, msg", response.Message, "err", err)
+	// 	consensusReply.Message = response.Message
+	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	// }
 	//check if token has multiple pins
 	ti := sc.GetTransTokenInfo()
 	results := make([]MultiPinCheckRes, len(ti))
@@ -922,7 +932,7 @@ func (c *Core) quorumConensus(req *ensweb.Request) *ensweb.Result {
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
 	switch cr.Mode {
-	case RBTTransferMode, SelfTransferMode, PinningServiceMode:
+	case RBTTransferMode, SelfTransferMode, PinningServiceMode, SpendableRBTTransferMode:
 		c.log.Debug("RBT consensus started")
 		return c.quorumRBTConsensus(req, did, qdc, &cr)
 	case DTCommitMode:
@@ -1129,19 +1139,19 @@ func (c *Core) updateReceiverToken(
 			}
 
 			// updating token type as per cvr stage
-			if CVRStage == wallet.CVRStage1_Sender_to_Receiver {
-				updatedBlock, status := b.UpdateTokenType(t, token.CVR_RBTTokenType+ti.TokenType)
-				if !status {
-					c.log.Error("failed to update token cvr type")
-					return nil, senderPeer, fmt.Errorf("failed to update tokenType of  Token " + t)
-				}
-				//TODO: handle the sync status, as aliredy synced in cvr-1, can update the synce status to completed in cvrstage-2
-				updatedTokenStateHashes, err = c.w.TokensReceived(receiverDID, tokenInfo, updatedBlock, senderPeerId, receiverPeerId, pinningServiceMode, c.ipfs)
-				if err != nil {
-					return nil, senderPeer, fmt.Errorf("failed to update token status, error: %v", err)
-				}
-
+			// if CVRStage == wallet.CVRStage1_Sender_to_Receiver {
+			b, ok = b.UpdateTokenType(t, token.CVR_RBTTokenType+ti.TokenType)
+			if !ok {
+				c.log.Error("failed to update token cvr type")
+				return nil, senderPeer, fmt.Errorf("failed to update tokenType of  Token " + t)
 			}
+
+			// }
+		}
+		//TODO: handle the sync status, as aliredy synced in cvr-1, can update the synce status to completed in cvrstage-2
+		updatedTokenStateHashes, err = c.w.TokensReceived(receiverDID, tokenInfo, b, senderPeerId, receiverPeerId, pinningServiceMode, c.ipfs)
+		if err != nil {
+			return nil, senderPeer, fmt.Errorf("failed to update token status, error: %v", err)
 		}
 
 		sc := contract.InitContract(b.GetSmartContract(), nil)
@@ -1186,6 +1196,15 @@ func (c *Core) updateReceiverToken(
 		var wg sync.WaitGroup
 		for i, ti := range tokenInfo {
 			t := ti.Token
+
+			// if latest block is cvr-1 block, remove it before adding cvr-2 block
+			err := c.RemoveSpendableRBTTransferredBlock(t, ti.TokenType)
+			if err != nil {
+				// TODO : if failed to remove cvr-1 block then store the info in DB and retry it
+				c.log.Error(err.Error())
+				return nil, nil, fmt.Errorf(err.Error())
+			}
+
 			wg.Add(1)
 
 			go c.pinCheck(t, i, senderPeerId, receiverPeerId, results, &wg)
@@ -1552,12 +1571,13 @@ func (c *Core) updatePledgeToken(req *ensweb.Request) *ensweb.Result {
 }
 
 func (c *Core) UpdatePledgeToken(pledgeFinalityReq UpdatePledgeRequest, quorumDID string) model.BasicResponse {
+	c.log.Debug("********************pledge finality req: ", pledgeFinalityReq, "quorumDID ", quorumDID)
 	crep := model.BasicResponse{
 		Status: false,
 	}
 	dc, ok := c.qc[quorumDID]
 	if !ok {
-		c.log.Debug("did crypto initilisation failed")
+		// c.log.Debug("did crypto initilisation failed")
 		c.log.Error("Failed to setup quorum crypto")
 		crep.Message = "Failed to setup quorum crypto"
 		return crep

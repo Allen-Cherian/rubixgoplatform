@@ -558,7 +558,7 @@ func (w *Wallet) TokensTransferred(did string, ti []contract.TokenInfo, b *block
 		var tokenStatus int
 		if pinningServiceMode {
 			tokenStatus = TokenIsPinnedAsService
-		} else if b.GetTransType() == block.TokenPrePledgedType {
+		} else if b.GetTransType() == block.OwnershipTransferredType {
 			tokenStatus = TokenIsSpendable
 		} else {
 			tokenStatus = TokenIsTransferred
@@ -1216,4 +1216,9 @@ func (w *Wallet) GetTokensByTxnID(txnId string) ([]Token, error) {
 	// 	tokenIDs = append(tokenIDs, token.TokenID)
 	// }
 	return tokensList, nil
+}
+
+func (w *Wallet) RemoveLatestBlockByKey(key string, token string) error {
+	
+	return nil
 }

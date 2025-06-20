@@ -11,6 +11,7 @@ import (
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
 	"github.com/rubixchain/rubixgoplatform/did"
+	"github.com/rubixchain/rubixgoplatform/token"
 	"github.com/rubixchain/rubixgoplatform/util"
 	"github.com/rubixchain/rubixgoplatform/wrapper/uuid"
 )
@@ -250,9 +251,9 @@ func getContractType(reqID string, req *model.RBTTransferRequest, transTokenInfo
 	}
 }
 
-func getConsensusRequest(consensusRequestType int, requestId string, senderPeerID string, receiverPeerID string, contractBlock []byte, transactionEpoch int, isSelfTransfer bool) *ConensusRequest {
+func getConsensusRequest(consensusRequestType int, senderPeerID string, receiverPeerID string, contractBlock []byte, transactionEpoch int, isSelfTransfer bool) *ConensusRequest {
 	var consensusRequest *ConensusRequest = &ConensusRequest{
-		ReqID:            requestId,
+		ReqID:            uuid.New().String(),
 		Type:             consensusRequestType,
 		SenderPeerID:     senderPeerID,
 		ReceiverPeerID:   receiverPeerID,
@@ -378,11 +379,12 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			resp.Message = "failed to get latest block, invalid token chain"
 			return resp
 		}
-		//sender verifies whether the previous block is a prepledged block or not
+		//sender verifies whether the previous block is a cvr stage-2 block or not
 		if transferMode == SpendableRBTTransferMode {
-			if blk.GetTransType() != block.TokenPrePledgedType {
-				c.log.Error("previous block is not of type", block.TokenPrePledgedType)
-				resp.Message = "previous block is not of prepledged type"
+			if blk.GetTransType() != block.OwnershipTransferredType {
+				errmsg := fmt.Sprintf("previous block is not of type : %v", block.OwnershipTransferredType)
+				c.log.Error(errmsg)
+				resp.Message = errmsg
 				return resp
 			}
 		}
@@ -492,7 +494,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	}
 
 	tcb := block.TokenChainBlock{
-		TransactionType: block.TokenTransferredType,
+		TransactionType: block.SpendableRBTTransferredType,
 		TokenOwner:      sc.GetReceiverDID(),
 		TransInfo:       bti,
 		SmartContract:   sc.GetBlock(),
@@ -573,7 +575,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	}
 
 	seltTransferTCB := block.TokenChainBlock{
-		TransactionType: block.TokenTransferredType,
+		TransactionType: block.SpendableRBTTransferredType,
 		TokenOwner:      selfTransferContract.GetReceiverDID(), //ReceiverDID is same as senderDID because it is self transfer
 		TransInfo:       selfTransBlockTransInfo,
 		SmartContract:   selfTransferContract.GetBlock(),
@@ -585,6 +587,19 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		c.log.Error("Failed to create a selftransfer token chain block - qrm init")
 		resp.Message = "Failed to create a selftransfer token chain block - qrm init"
 		return resp
+	}
+	//update token type
+	var ok bool
+	for _, t := range selfTransferTokensList {
+
+		selfTransferBlock, ok = selfTransferBlock.UpdateTokenType(t.Token, token.CVR_RBTTokenType+t.TokenType)
+		if !ok {
+			errMsg := fmt.Sprintf("failed to update token cvr-1 type for self transfer block, error: %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+
 	}
 
 	//update the levelDB and SqliteDB

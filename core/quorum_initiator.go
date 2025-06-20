@@ -470,7 +470,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}(peerObj)
 	}
 
-	// Collect first 5 servers with sufficient balance
+	// Collect first 5 quorums with sufficient balance
 	selectedQuorums := make(map[string]*ipfsport.Peer)
 	rejectedQuorums := make(map[string]struct{})
 	for _, qrmAddr := range cr.QuorumList {
@@ -499,7 +499,11 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	if len(selectedQuorums) < MinQuorumRequired {
 		c.log.Error("could not proceed for consensus, not enough quorums available")
-		return nil, nil, nil, fmt.Errorf("quorums unavailable to pledge")
+		//notify all the quorums to unlock their pledge tokens because of insuffiecent number of quorums selected.
+		for quorumAddr := range ipfsPortQrm {
+			go c.notifyUnusedQuorums(ipfsPortQrm[quorumAddr], cr.ReqID)
+		}
+		return nil, nil, nil, fmt.Errorf("not enough quorums available")
 	}
 
 	// Notify remaining servers in the background without error handling
@@ -2297,24 +2301,6 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 		}
 	}
 
-	// TODO : self transfer block for sender with tokens not transferring
-	// var selfTransferBlock *block.Block
-	if cr.Mode == SpendableRBTTransferMode {
-		bti.SenderDID = sc.GetSenderDID()
-		bti.ReceiverDID = sc.GetSenderDID()
-		tcb = block.TokenChainBlock{
-			TransactionType: block.TokenTransferredType,
-			TokenOwner:      sc.GetSenderDID(),
-			TransInfo:       bti,
-			SmartContract:   sc.GetBlock(),
-			PledgeDetails:   ptds,
-			Epoch:           cr.TransactionEpoch,
-		}
-
-
-
-	}
-
 	if cr.Mode == DTCommitMode {
 		tcb.TransactionType = block.TokenCommittedType
 	}
@@ -2324,13 +2310,13 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 		return nil, fmt.Errorf("failed to create new token chain block - qrm init")
 	}
 
-	if cr.Mode != SpendableRBTTransferMode {
-		err := nb.SignByInitiator(dc)
-		if err != nil {
-			c.log.Error("Failed to update initiator signature")
-			return nil, err
-		}
-	}
+	// if cr.Mode != SpendableRBTTransferMode {
+	// 	err := nb.SignByInitiator(dc)
+	// 	if err != nil {
+	// 		c.log.Error("Failed to update initiator signature")
+	// 		return nil, err
+	// 	}
+	// }
 
 	cr.TransTokenBlock = nb.GetBlock()
 	return nb, nil
