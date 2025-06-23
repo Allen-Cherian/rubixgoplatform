@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/rubixchain/rubixgoplatform/core/model"
-	"github.com/rubixchain/rubixgoplatform/core/wallet"
 	"github.com/rubixchain/rubixgoplatform/did"
 	"github.com/rubixchain/rubixgoplatform/util"
 	"github.com/rubixchain/rubixgoplatform/wrapper/ensweb"
@@ -422,7 +421,7 @@ func (s *Server) TxnReqFromWallet(txnReq *model.RBTTransferRequest, req *ensweb.
 // initiates pre pledging of all free tokens
 func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
 
-	var prePledgeReq *wallet.CvrAPIRequest
+	var prePledgeReq *model.CvrAPIRequest
 	err := s.ParseJSON(req, &prePledgeReq)
 	if err != nil {
 		return s.BasicResponse(req, false, "Invalid input to pre-pledge request", nil)

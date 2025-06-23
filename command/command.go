@@ -110,6 +110,7 @@ const (
 	AddUserAPIKeyCmd               string = "adduserapikey"
 	AddPeerDetailsFromExplorer     string = "exppeerdetails"
 	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
+	InitiateRBTPrePledgeCmd        string = "prepledgerbt"
 )
 
 var commands = []string{VersionCmd,
@@ -179,6 +180,7 @@ var commands = []string{VersionCmd,
 	AddUserAPIKeyCmd,
 	AddPeerDetailsFromExplorer,
 	GetFTTxnDetailsCmd,
+	InitiateRBTPrePledgeCmd,
 }
 
 var commandsHelp = []string{"To get tool version",
@@ -773,6 +775,8 @@ func Run(args []string) {
 		cmd.addPeerDetailsFromExplorer()
 	case GetFTTxnDetailsCmd:
 		cmd.getFTTxnDetails()
+	case InitiateRBTPrePledgeCmd:
+		cmd.InitiateRBTPrePledge()
 	default:
 		cmd.log.Error("Invalid command")
 	}

@@ -66,10 +66,6 @@ type PrePledgeRequest struct {
 	ReqID               string `json:"request_id"`
 }
 
-type CvrAPIRequest struct {
-	DID        string `json:"did"`
-	QuorumType int    `json:"quorum_type"`
-}
 
 type Token struct {
 	TokenID        string  `gorm:"column:token_id;primaryKey"`

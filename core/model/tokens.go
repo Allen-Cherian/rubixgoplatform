@@ -102,3 +102,8 @@ type PinCheckReply struct {
 	Message    string            `json:"message"`
 	PinDetails *TokenProviderMap `json:"pin_details"`
 }
+
+type CvrAPIRequest struct {
+	DID        string `json:"did"`
+	QuorumType int    `json:"quorum_type"`
+}

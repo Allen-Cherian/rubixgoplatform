@@ -1368,7 +1368,7 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 
 }
 
-func (c *Core) InitiateRBTCVRTwo(reqID string, req *wallet.CvrAPIRequest) {
+func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 	// gather free tokens for cvr and prepare contract block
 	freeTokensList, err := c.w.GetAllFreeToken(req.DID)
 	if err != nil {
