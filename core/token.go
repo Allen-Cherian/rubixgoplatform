@@ -15,7 +15,6 @@ import (
 	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
-	"github.com/rubixchain/rubixgoplatform/did"
 	"github.com/rubixchain/rubixgoplatform/rac"
 	"github.com/rubixchain/rubixgoplatform/token"
 	"github.com/rubixchain/rubixgoplatform/util"
@@ -488,7 +487,7 @@ func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo TokenSyncInfo)
 		return err
 	}
 
-	// TODO ; if token chain is missing then sync the entire chain 
+	// TODO ; if token chain is missing then sync the entire chain
 	if minMissingBlockId == "" && maxMissingblockId == "" {
 		c.log.Debug("token chain is completely synced")
 		// update token sync status
@@ -603,7 +602,7 @@ func (c *Core) syncGenesisAndLatestBlock(req *ensweb.Request) *ensweb.Result {
 		c.log.Error(err.Error())
 		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: err.Error()}, http.StatusOK)
 	}
-	
+
 	latestBlockHeight, err := latestBlock.GetBlockNumber(tr.Token)
 	if err != nil {
 		c.log.Error("failed to get token chain height, err", err)
@@ -1369,14 +1368,142 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 
 }
 
-func (c *Core) InitiateRBTCVRTwo(reqID string, req *wallet.PrePledgeRequest) {
-	br := c.initiateRBTCVRTwo(req)
-	dc := c.GetWebReq(reqID)
-	if dc == nil {
+func (c *Core) InitiateRBTCVRTwo(reqID string, req *wallet.CvrAPIRequest) {
+	// gather free tokens for cvr and prepare contract block
+	freeTokensList, err := c.w.GetAllFreeToken(req.DID)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to get all free tokens for DID : %v, err : %v", req.DID, err)
+		c.log.Error(errMsg)
+		return
+	}
+
+	if len(freeTokensList) == 0 {
+		c.log.Error("No tokens present for cvr")
+		return
+	}
+
+	// release the locked tokens before exit
+	defer c.w.ReleaseTokens(freeTokensList)
+
+	senderDID := req.DID
+	dc, err := c.SetupDID(reqID, senderDID)
+	if err != nil {
+		c.log.Error("Failed to setup DID, err ", err)
+		return
+	}
+
+	//TODO: handle the error in Pin func
+	for i := range freeTokensList {
+		c.w.Pin(freeTokensList[i].TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.DID, "", freeTokensList[i].TokenValue)
+	}
+
+	tis := make([]contract.TokenInfo, 0)
+	totalValue := 0
+
+	for i := range freeTokensList {
+		tts := "rbt"
+		if freeTokensList[i].TokenValue != 1 {
+			tts = "part"
+		}
+		tt := c.TokenType(tts)
+		blk := c.w.GetLatestTokenBlock(freeTokensList[i].TokenID, tt)
+		if blk == nil {
+			c.log.Error("failed to get latest block, invalid token chain")
+			return
+		}
+
+		bid, err := blk.GetBlockID(freeTokensList[i].TokenID)
+		if err != nil {
+			c.log.Error("failed to get block id", "err", err)
+			return
+		}
+		ti := contract.TokenInfo{
+			Token:      freeTokensList[i].TokenID,
+			TokenType:  tt,
+			TokenValue: floatPrecision(freeTokensList[i].TokenValue, MaxDecimalPlaces),
+			OwnerDID:   freeTokensList[i].DID,
+			BlockID:    bid,
+		}
+		tis = append(tis, ti)
+
+		// calculate all free tokens sum
+		totalValue += int(freeTokensList[i].TokenValue)
+
+	}
+
+	//check if sender has previous block pledged quorums' details
+	//TODO: Reuse blk for GetLatestTokenBlock
+	for _, tokeninfo := range tis {
+		b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
+		//check if the transaction in prev block involved any quorums
+		switch b.GetTransType() {
+		case block.TokenGeneratedType:
+			continue
+		case block.TokenBurntType:
+			c.log.Error("token is burnt, can't transfer anymore; token:", tokeninfo.Token)
+			return
+		case block.TokenTransferredType:
+			//fetch all the pledged quorums, if the transaction involved quorums
+			prevQuorums, _ := b.GetSigner()
+
+			for _, prevQuorum := range prevQuorums {
+				//check if the sender has prev pledged quorum's did type; if not, fetch it from the prev sender
+				fmt.Println("Checking if the sender has previous block pledged quorum's did type")
+				prevQuorumInfo, err := c.GetPeerDIDInfo(prevQuorum)
+				if err != nil {
+					if strings.Contains(err.Error(), "retry") {
+						c.AddPeerDetails(*prevQuorumInfo)
+					}
+				}
+				if prevQuorumInfo == nil || *prevQuorumInfo.DIDType == -1 {
+					//if a signle pledged quorum is also not found, we can assume that other pledged quorums will also be not found,
+					//and request prev sender to share details of all the pledged quorums, and thus breaking the for loop
+					break
+				}
+
+			}
+		}
+	}
+
+	rbtTransferreq := &model.RBTTransferRequest{
+		Sender:   senderDID,
+		Receiver: "",
+		Type:     req.QuorumType,
+	}
+
+	// preaparing the block for tokens to be transferred to receiver
+	contractType := getContractType(reqID, rbtTransferreq, tis, false)
+	sc := contract.CreateNewContract(contractType)
+
+	// Starting CVR stage-1
+	// TODO : handle cvr stage-0 : quorum's signature
+	// And handle self-transfer of sender's remaining amount
+
+	err = sc.UpdateSignature(dc)
+	if err != nil {
+		c.log.Error(err.Error())
+		return
+	}
+
+	st := time.Now()
+	txEpoch := int(st.Unix())
+
+	cvrReq := &wallet.PrePledgeRequest{
+		DID:                 req.DID,
+		QuorumType:          req.QuorumType,
+		SCTransferBlock:     sc.GetBlock(),
+		SCSelfTransferBlock: nil,
+		ReqID:               reqID,
+		TxnEpoch:            int64(txEpoch),
+	}
+
+	br := c.initiateRBTCVRTwo(cvrReq)
+	didChannel := c.GetWebReq(reqID)
+	if didChannel == nil {
 		c.log.Error("Failed to get did channels")
 		return
 	}
-	dc.OutChan <- br
+	didChannel.OutChan <- br
 }
 
 func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicResponse {
@@ -1384,15 +1511,15 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		Status: false,
 	}
 
-	tokensList, err := c.w.GetTokensByTxnID(req.TxnID)
-	// TODO : proper error handling needed for db locking and unlocking
-	if err != nil {
-		c.log.Error("failed to get tokens to pre pledge, err ", err)
-		resp.Message = err.Error()
-		return resp
-	}
+	// tokensList, err := c.w.GetTokensByTxnID(req.TxnID)
+	// // TODO : proper error handling needed for db locking and unlocking
+	// if err != nil {
+	// 	c.log.Error("failed to get tokens to pre pledge, err ", err)
+	// 	resp.Message = err.Error()
+	// 	return resp
+	// }
 
-	senderDID := req.DID
+	// senderDID := req.DID
 	isSelfRBTTransfer := false
 
 	// dc, err := c.SetupDID(reqID, senderDID)
@@ -1401,142 +1528,72 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 	// 	return resp
 	// }
 
-	tokenInfoList := make([]contract.TokenInfo, 0)
-	tokensToPrePledge := make([]wallet.Token, 0)
+	// tokenInfoList := make([]contract.TokenInfo, 0)
+	// tokensToPrePledge := make([]wallet.Token, 0)
 
-	for _, tokeninfo := range tokensList {
-		tokenTypeStr := "rbt"
-		if tokeninfo.TokenValue != 1 {
-			tokenTypeStr = "part"
-		}
-		tokenType := c.TokenType(tokenTypeStr)
+	// for _, tokeninfo := range tokensList {
+	// 	tokenTypeStr := "rbt"
+	// 	if tokeninfo.TokenValue != 1 {
+	// 		tokenTypeStr = "part"
+	// 	}
+	// 	tokenType := c.TokenType(tokenTypeStr)
 
-		// get latest block of the token
-		tempBlock := c.w.GetLatestTokenBlock(tokeninfo.TokenID, tokenType)
-		if tempBlock == nil {
-			c.log.Error("failed to get latest block, invalid token chain")
-			resp.Message = "failed to get latest block, invalid token chain"
-			return resp
-		}
+	// 	// get latest block of the token
+	// 	tempBlock := c.w.GetLatestTokenBlock(tokeninfo.TokenID, tokenType)
+	// 	if tempBlock == nil {
+	// 		c.log.Error("failed to get latest block, invalid token chain")
+	// 		resp.Message = "failed to get latest block, invalid token chain"
+	// 		return resp
+	// 	}
 
-		// get block id of the last CVR block from the latest temp block
-		prevBlockID, err := tempBlock.GetPrevBlockID(tokeninfo.TokenID)
-		if err != nil {
-			errMsg := fmt.Sprintf("failed to get previous block ID from latest block, token : %v; err : %v", tokeninfo.TokenID, err)
-			c.log.Error(errMsg)
-			resp.Message = errMsg
-			return resp
-		}
+	// 	// get block id of the last CVR block from the latest temp block
+	// 	prevBlockID, err := tempBlock.GetPrevBlockID(tokeninfo.TokenID)
+	// 	if err != nil {
+	// 		errMsg := fmt.Sprintf("failed to get previous block ID from latest block, token : %v; err : %v", tokeninfo.TokenID, err)
+	// 		c.log.Error(errMsg)
+	// 		resp.Message = errMsg
+	// 		return resp
+	// 	}
 
-		// get the block bytes of the last cvr block from the block id
-		prevBlockBytes, err := c.w.GetTokenBlock(tokeninfo.TokenID, tokenType, prevBlockID)
-		if err != nil {
-			errMsg := fmt.Sprintf("failed to get prev CVR block from the prev block id : %v; err : %v", prevBlockID, err)
-			c.log.Error(errMsg)
-			resp.Message = errMsg
-			return resp
-		}
+	// 	// get the block bytes of the last cvr block from the block id
+	// 	prevBlockBytes, err := c.w.GetTokenBlock(tokeninfo.TokenID, tokenType, prevBlockID)
+	// 	if err != nil {
+	// 		errMsg := fmt.Sprintf("failed to get prev CVR block from the prev block id : %v; err : %v", prevBlockID, err)
+	// 		c.log.Error(errMsg)
+	// 		resp.Message = errMsg
+	// 		return resp
+	// 	}
 
-		// initiate the last cvr block from the block bytes
-		prevBlock := block.InitBlock(prevBlockBytes, nil)
-		if prevBlock == nil {
-			errMsg := fmt.Sprintf("failed to initiate last CVR block, token : %v", tokeninfo.TokenID)
-			c.log.Error(errMsg)
-		}
+	// 	// initiate the last cvr block from the block bytes
+	// 	prevBlock := block.InitBlock(prevBlockBytes, nil)
+	// 	if prevBlock == nil {
+	// 		errMsg := fmt.Sprintf("failed to initiate last CVR block, token : %v", tokeninfo.TokenID)
+	// 		c.log.Error(errMsg)
+	// 	}
 
-		// fetch pledged-quorum details from latest block and store their details
-		blockHeight, err := prevBlock.GetBlockNumber(tokeninfo.TokenID)
-		if err != nil {
-			errMsg := fmt.Sprintf("failed to fetch token chain height; token : %v; err : %v", tokeninfo.TokenID, err)
-			c.log.Error(errMsg)
-			resp.Message = errMsg
-			return resp
-		}
+	// 	// fetch pledged-quorum details from latest block and store their details
+	// 	blockHeight, err := prevBlock.GetBlockNumber(tokeninfo.TokenID)
+	// 	if err != nil {
+	// 		errMsg := fmt.Sprintf("failed to fetch token chain height; token : %v; err : %v", tokeninfo.TokenID, err)
+	// 		c.log.Error(errMsg)
+	// 		resp.Message = errMsg
+	// 		return resp
+	// 	}
 
-		//check if the transaction in prev block involved any quorums
-		switch prevBlock.GetTransType() {
-		case block.TokenBurntType:
-			tokeninfo.TokenStatus = wallet.TokenIsBurnt
-			c.w.UpdateToken(&tokeninfo)
-			c.log.Error("token is burnt, can't transfer further; token ", tokeninfo.TokenID)
-			continue
-		case block.TokenTransferredType:
-			if blockHeight != 0 {
-				// validate quorums
-				quorumSignList, err := prevBlock.GetQuorumSignatureList()
-				if err != nil || quorumSignList == nil {
-					c.log.Error("failed to get quorum signature list")
-				}
-
-				for _, qrm := range quorumSignList {
-					prevQuorumInfo := &wallet.DIDPeerMap{
-						DID: qrm.DID,
-					}
-					liteDidType := did.LiteDIDMode
-					basicDidType := did.BasicDIDMode
-					// decide did type as per sign type
-					if qrm.SignType == strconv.Itoa(did.BIPVersion) { //qrm sign type = 0, means qrm signature is BIP sign and DID is created in Lite mode
-						prevQuorumInfo.DIDType = &liteDidType
-					} else {
-						prevQuorumInfo.DIDType = &basicDidType
-					}
-					prevQuorumPeerId := c.w.GetPeerID(qrm.DID)
-					if prevQuorumPeerId == "" {
-						// if peer id not found in table, try to fetch from explorer for mainnet RBTs
-						peerDIDInfo, err := c.GetPeerFromExplorer(qrm.DID)
-						if err != nil {
-							c.log.Error("failed to fetch peer Id from explorer for ", qrm.DID, "err", err)
-						} else if peerDIDInfo == nil {
-							c.log.Error("failed to fetch peer Id from explorer for ", qrm.DID)
-						} else {
-							prevQuorumInfo.PeerID = peerDIDInfo.PeerID
-							// check if did type and sign type mismatch
-							if peerDIDInfo.DIDType != prevQuorumInfo.DIDType {
-								prevQuorumInfo.DIDType = peerDIDInfo.DIDType
-							}
-						}
-					} else {
-						prevQuorumInfo.PeerID = prevQuorumPeerId
-					}
-					c.AddPeerDetails(*prevQuorumInfo)
-				}
-			}
-			tokensToPrePledge = append(tokensToPrePledge, tokeninfo)
-		default:
-			c.log.Error(fmt.Sprintf("invalid trans type : %v, token : %v", prevBlock.GetTransType(), tokeninfo.TokenID))
-			continue
-		}
-
-		// pin token by token owner, in case it is not pinned
-		c.w.Pin(tokeninfo.TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.DID, "", tokeninfo.TokenValue)
-
-		tokenInfo := contract.TokenInfo{
-			Token:      tokeninfo.TokenID,
-			TokenType:  tokenType,
-			TokenValue: floatPrecision(tokeninfo.TokenValue, MaxDecimalPlaces),
-			OwnerDID:   tokeninfo.DID,
-			BlockID:    prevBlockID,
-		}
-		tokenInfoList = append(tokenInfoList, tokenInfo)
-		// tokenListForExplorer = append(tokenListForExplorer, Token{TokenHash: tokenInfo.Token, TokenValue: tokenInfo.TokenValue})
-
-	}
-
-	// convertReq := &model.RBTTransferRequest{
-	// 	Sender:   req.DID,
-	// 	Receiver: "", // no receiver while pre-pledging
-	// 	Type:     req.QuorumType,
-	// }
-
-	// contractType := getContractType(reqID, convertReq, tokenInfoList, isSelfRBTTransfer)
-	// sc := contract.CreateNewContract(contractType)
-
-	// err = sc.UpdateSignature(dc)
-	// if err != nil {
-	// 	c.log.Error(err.Error())
-	// 	resp.Message = err.Error()
-	// 	return resp
-	// }
+	// 	//check if the transaction in prev block involved any quorums
+	// 	switch prevBlock.GetTransType() {
+	// 	case block.TokenBurntType:
+	// 		tokeninfo.TokenStatus = wallet.TokenIsBurnt
+	// 		c.w.UpdateToken(&tokeninfo)
+	// 		c.log.Error("token is burnt, can't transfer further; token ", tokeninfo.TokenID)
+	// 		continue
+	// 	case block.TokenTransferredType:
+	// 		if blockHeight != 0 {
+	// 			// validate quorums
+	// 			quorumSignList, err := prevBlock.GetQuorumSignatureList()
+	// 			if err != nil || quorumSignList == nil {
+	// 				c.log.Error("failed to get quorum signature list")
+	// 			}
 
 	//cvrstage-2  sender to receiver transfer
 	sc := contract.InitContract(req.SCTransferBlock, nil)
@@ -1550,8 +1607,8 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 	cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
 	cr.Mode = SpendableRBTTransferMode
 
-	// initiate consensus for pre-pledging
-	_, _, _, err = c.initiateConsensus(cr, sc, nil)
+	// initiate consensus for sender to receiver transaction.
+	_, _, _, err := c.initiateConsensus(cr, sc, nil)
 	if err != nil {
 		errMsg := fmt.Sprintf("Consensus failed for  sender to receiver transfer, err: %v", err)
 		c.log.Error(errMsg)
@@ -1559,21 +1616,23 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		return resp
 	}
 
-	// TODO : add transaction details to DB
+	// TODO : add transaction details to DB, if not added alreay in initiate consensus
 
-	//cvrstage-2  sender to receiver transfer
-	selfTransferContractBlock := contract.InitContract(req.SCSelfTransferBlock, nil)
+	if req.SCSelfTransferBlock != nil {
+		//cvrstage-2  for sef transfer
+		selfTransferContractBlock := contract.InitContract(req.SCSelfTransferBlock, nil)
 
-	selfTransferConsensusReq := getConsensusRequest(req.QuorumType, c.peerID, c.peerID, req.SCSelfTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
-	selfTransferConsensusReq.Mode = SpendableRBTTransferMode
+		selfTransferConsensusReq := getConsensusRequest(req.QuorumType, c.peerID, c.peerID, req.SCSelfTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
+		selfTransferConsensusReq.Mode = SpendableRBTTransferMode
 
-	// initiate consensus for pre-pledging
-	_, _, _, err = c.initiateConsensus(selfTransferConsensusReq, selfTransferContractBlock, nil)
-	if err != nil {
-		errMsg := fmt.Sprintf("Consensus failed for  self transfer, err: %v", err)
-		c.log.Error(errMsg)
-		resp.Message = errMsg
-		return resp
+		// initiate consensus for self transfer
+		_, _, _, err = c.initiateConsensus(selfTransferConsensusReq, selfTransferContractBlock, nil)
+		if err != nil {
+			errMsg := fmt.Sprintf("Consensus failed for  self transfer, err: %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
 	}
 
 	return resp
@@ -1592,9 +1651,9 @@ func (c *Core) UpdateTransferredTokensInfo(tokenList []wallet.Token, newTokenSta
 	return nil
 }
 
-// If latest block is of spendableRBTTransferredType, that means it is a cvr-1 block, will be removed from the chain. 
+// If latest block is of spendableRBTTransferredType, that means it is a cvr-1 block, will be removed from the chain.
 // Thus share the previous block of the cvr-1 block
-func (c *Core) GetLastCVR2Block(tokenId string, tokenType int) (*block.Block, error){
+func (c *Core) GetLastCVR2Block(tokenId string, tokenType int) (*block.Block, error) {
 	latestBlock := c.w.GetLatestTokenBlock(tokenId, tokenType)
 	if latestBlock == nil {
 		errMsg := fmt.Sprintf("latest block is nil, invalid token chain : %v", tokenId)
@@ -1640,15 +1699,15 @@ func (c *Core) RemoveSpendableRBTTransferredBlock(tokenID string, tokenType int)
 	}
 	if latestBlock.GetTransType() == block.SpendableRBTTransferredType {
 		//TODO: delete the temp block(cvr-1) before adding cvr-2 block
-			removeRequest := &model.TCRemoveRequest{
-				Token:  tokenID,
-				Latest: true,
-			}
-			removeResp := c.RemoveTokenChainBlock(removeRequest)
-			if !removeResp.Status {
-				errMsg := fmt.Sprintf("error while removing the cvr-1 block for the token %v, error : %v", tokenID, removeResp.Message)
-				return fmt.Errorf(errMsg)
-			}
+		removeRequest := &model.TCRemoveRequest{
+			Token:  tokenID,
+			Latest: true,
+		}
+		removeResp := c.RemoveTokenChainBlock(removeRequest)
+		if !removeResp.Status {
+			errMsg := fmt.Sprintf("error while removing the cvr-1 block for the token %v, error : %v", tokenID, removeResp.Message)
+			return fmt.Errorf(errMsg)
+		}
 	}
 	return nil
 }

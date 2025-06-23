@@ -66,6 +66,11 @@ type PrePledgeRequest struct {
 	ReqID               string `json:"request_id"`
 }
 
+type CvrAPIRequest struct {
+	DID        string `json:"did"`
+	QuorumType int    `json:"quorum_type"`
+}
+
 type Token struct {
 	TokenID        string  `gorm:"column:token_id;primaryKey"`
 	ParentTokenID  string  `gorm:"column:parent_token_id"`
@@ -1219,6 +1224,6 @@ func (w *Wallet) GetTokensByTxnID(txnId string) ([]Token, error) {
 }
 
 func (w *Wallet) RemoveLatestBlockByKey(key string, token string) error {
-	
+
 	return nil
 }

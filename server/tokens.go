@@ -422,7 +422,7 @@ func (s *Server) TxnReqFromWallet(txnReq *model.RBTTransferRequest, req *ensweb.
 // initiates pre pledging of all free tokens
 func (s *Server) APIPrePledge(req *ensweb.Request) *ensweb.Result {
 
-	var prePledgeReq *wallet.PrePledgeRequest
+	var prePledgeReq *wallet.CvrAPIRequest
 	err := s.ParseJSON(req, &prePledgeReq)
 	if err != nil {
 		return s.BasicResponse(req, false, "Invalid input to pre-pledge request", nil)

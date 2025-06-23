@@ -498,6 +498,7 @@ func (b *Block) UpdateSignature(dc didmodule.DIDCrypto) error {
 	return b.blkEncode()
 }
 
+// ReplaceSignature adds each quorums' signature to the block with the key "99"
 func (b *Block) ReplaceSignature(did string, sig string) error {
 	ksmi, ok := b.bm[TCSignatureKey]
 	if !ok {
