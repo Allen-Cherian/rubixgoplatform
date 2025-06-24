@@ -313,7 +313,11 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	//TODO: handle the error in Pin func
 	for i := range tokensForTxn {
-		c.w.Pin(tokensForTxn[i].TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.Sender, req.Receiver, tokensForTxn[i].TokenValue)
+		_, err := c.w.Pin(tokensForTxn[i].TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.Sender, req.Receiver, tokensForTxn[i].TokenValue)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to pin the token: %v, error: %v", tokensForTxn[i].TokenID, err)
+			c.log.Error(errMsg)
+		}
 	}
 
 	// Get the receiver & do sanity check
@@ -375,8 +379,9 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		tt := c.TokenType(tts)
 		blk := c.w.GetLatestTokenBlock(tokensForTxn[i].TokenID, tt)
 		if blk == nil {
-			c.log.Error("failed to get latest block, invalid token chain")
-			resp.Message = "failed to get latest block, invalid token chain"
+			errMsg := fmt.Sprintf("failed to get latest block for the token: %v", tokensForTxn[i].TokenID)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
 			return resp
 		}
 		//sender verifies whether the previous block is a cvr stage-2 block or not
@@ -512,6 +517,10 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	selfTransferTokensList := make([]contract.TokenInfo, 0)
 	for selfTransferToken := range selfTransferTokensMap {
 		selftransferToken, err := c.w.GetToken(selfTransferToken, wallet.TokenIsFree)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to update the token status, token: %v, error: %v", selfTransferToken, err)
+			c.log.Error(errMsg)
+		}
 
 		tts := "rbt"
 		if selftransferToken.TokenValue != 1 {
