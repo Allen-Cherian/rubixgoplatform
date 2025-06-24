@@ -297,6 +297,8 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	crep.PrivSig = quorumSignature
 	crep.Hash = txnBlockHash
 
+	c.log.Debug(" ^^^^^^ checking if trans block is empty : ", transTknBlock.GetBlock() == nil)
+
 	// quorum pledge finality in case of pre-pledging
 	if cr.Mode == SpendableRBTTransferMode {
 		c.log.Debug("********** proceeding for pledge finality")
@@ -314,17 +316,20 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		pledgeFinalityReq := UpdatePledgeRequest{
 			Mode:                        cr.Mode,
 			PledgedTokens:               pledgeTokensMap.PledgedTokens[did],
-			TokenChainBlock:             cr.TransTokenBlock,
+			TokenChainBlock:             transTknBlock.GetBlock(),
 			TransferredTokenStateHashes: txnTokenHashes,
 			TransactionID:               cr.TransactionID,
 			TransactionEpoch:            cr.TransactionEpoch,
 		}
 
+		c.log.Debug("###33pledgefinality req : is trans block empty ? ", pledgeFinalityReq.TokenChainBlock == nil)
 		// pledge finality
 		response := c.UpdatePledgeToken(pledgeFinalityReq, did)
 		if !response.Status {
-			c.log.Error("failed to update pledge tokens, err ", response.Message)
-			// TODO : throw error
+			errMsg := fmt.Sprintf("failed to update pledge tokens, err : %v", response.Message)
+			c.log.Error(errMsg)
+			crep.Message = errMsg
+			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
 
 		c.log.Debug("********** pledge finality response : ", response)
@@ -975,7 +980,7 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 	crep := model.BasicResponse{
 		Status: false,
 	}
-	c.log.Debug("**********Request for pledge, crReqId : ", pr.ConensusRequestID)
+	c.log.Debug("**********Request for pledge, crReqId : ", pr.ConensusRequestID, "pledge amount ", pr.TokensRequired)
 	if err != nil {
 		c.log.Error("Failed to parse json request", "err", err)
 		crep.Message = "Failed to parse json request"
@@ -1597,7 +1602,8 @@ func (c *Core) updatePledgeToken(req *ensweb.Request) *ensweb.Result {
 }
 
 func (c *Core) UpdatePledgeToken(pledgeFinalityReq UpdatePledgeRequest, quorumDID string) model.BasicResponse {
-	c.log.Debug("********************pledge finality req: ", pledgeFinalityReq, "quorumDID ", quorumDID)
+	c.log.Debug("********************pledge finality req, txn id : ", pledgeFinalityReq.TransactionID, "quorumDID ", quorumDID)
+	c.log.Debug("^^^^^^^^ is trans-token block empty : ", pledgeFinalityReq.TokenChainBlock == nil)
 	crep := model.BasicResponse{
 		Status: false,
 	}
@@ -1608,7 +1614,20 @@ func (c *Core) UpdatePledgeToken(pledgeFinalityReq UpdatePledgeRequest, quorumDI
 		crep.Message = "Failed to setup quorum crypto"
 		return crep
 	}
-	b := block.InitBlock(pledgeFinalityReq.TokenChainBlock, nil)
+
+	if pledgeFinalityReq.TokenChainBlock == nil {
+		errMsg := fmt.Sprintf("tokenchain block bytes are empty, quorum : %v", quorumDID)
+		c.log.Error(errMsg)
+		crep.Message = errMsg
+		return crep
+	}
+	b := block.InitBlock(pledgeFinalityReq.TokenChainBlock, nil, block.NoSignature())
+	if b == nil {
+		errMsg := fmt.Sprintf("tokenchain block is empty, quorum: %v", quorumDID)
+		c.log.Error(errMsg)
+		crep.Message = errMsg
+		return crep
+	}
 	tks := b.GetTransTokens()
 
 	refID := ""
@@ -2066,26 +2085,26 @@ func (c *Core) notifyUnusedQuorumsResponse(req *ensweb.Request) *ensweb.Result {
 	c.log.Debug("notification to unlock locked tokens to pledge")
 	if err != nil {
 		c.log.Error("Failed to parse json request", "err", err)
-		return c.l.RenderJSON(req, nil, http.StatusOK)
+		return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
 	}
 
 	// fetch locked tokens details and unlock
 	pd, ok := c.pd[consensusRequestID]
 	if !ok {
 		c.log.Error("invalid pledge tokens details")
-		return c.l.RenderJSON(req, nil, http.StatusOK)
+		return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
 	}
 	// unlock all the locked tokens to pledge for the given consensus request ID
 	for did, lockedTokens := range pd.PledgedTokens {
 		err = c.w.UnlockLockedTokens(did, lockedTokens)
 		if err != nil {
 			c.log.Error("Failed to update token status", "err", err)
-			return c.l.RenderJSON(req, nil, http.StatusOK)
+			return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
 		}
 	}
 
 	// delete the map from core struct
 	delete(c.pd, consensusRequestID)
 
-	return c.l.RenderJSON(req, nil, http.StatusOK)
+	return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
 }

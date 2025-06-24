@@ -143,6 +143,7 @@ func InitBlock(bb []byte, bm map[string]interface{}, opts ...BlockOption) *Block
 		op: false,
 	}
 	if b.bb == nil && b.bm == nil {
+		fmt.Println("getting empty map and bytes")
 		return nil
 	}
 	for _, opt := range opts {
@@ -152,12 +153,14 @@ func InitBlock(bb []byte, bm map[string]interface{}, opts ...BlockOption) *Block
 	if b.bb == nil {
 		err = b.blkEncode()
 		if err != nil {
+			fmt.Println("getting empty map and bytes 1, err ", err)
 			return nil
 		}
 	}
 	if b.bm == nil {
 		err = b.blkDecode()
 		if err != nil {
+			fmt.Println("getting empty map and bytes 2, err ", err)
 			return nil
 		}
 	}

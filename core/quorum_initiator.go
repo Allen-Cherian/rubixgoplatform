@@ -437,8 +437,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		// Close the p2p before exit
 		defer p.Close()
-		ipfsPortQrm[qrmAddr] = p
+		_, qrmdid, ok := util.ParseAddress(qrmAddr)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("invalid address: %v", qrmAddr)
+		}
+		ipfsPortQrm[qrmdid] = p
 	}
+
+	c.log.Debug("********** Quorum ipfs obj list", ipfsPortQrm)
+
 	// //wait group for first round of go routine that fetches pledge-tokens details from quorums
 	// var wg sync.WaitGroup
 	// for _, p := range ipfsPortQrm {
@@ -472,25 +479,36 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	// Collect first 5 quorums with sufficient balance
 	selectedQuorums := make(map[string]*ipfsport.Peer)
-	rejectedQuorums := make(map[string]struct{})
-	for _, qrmAddr := range cr.QuorumList {
-		rejectedQuorums[qrmAddr] = struct{}{}
-	}
+	rejectedQuorums := make(map[string]*ipfsport.Peer)
+	// for qrmAddr, ipfsObj := range ipfsPortQrm {
+	// 	rejectedQuorums[qrmAddr] = ipfsObj
+	// }
+
+	c.log.Debug("************** initial rejected quorums map : ", rejectedQuorums)
 
 	// TODO : handle the case where quorums are not responding for a long time, use select-case functionality
-	for i := 0; i < QuorumRequired && len(selectedQuorums) < MinQuorumRequired; i++ {
+	for i := 0; i < QuorumRequired; i++ {
 		resp := <-responseCh
 		c.log.Debug("********** response of quorum : ", resp)
-		if resp.Message == "" && resp.PledgingAmount >= (floatPrecision(reqPledgeTokens, MaxDecimalPlaces))/5 {
-			qrmIPFSObj, exists := ipfsPortQrm[resp.DID]
-			if exists {
-				selectedQuorums[resp.DID] = qrmIPFSObj
-				delete(rejectedQuorums, resp.DID)
-			}
+
+		if len(selectedQuorums) >= MinQuorumRequired {
+			rejectedQuorums[resp.DID] = ipfsPortQrm[resp.DID]
+			continue
+		}
+		if resp.Message == "" && resp.PledgingAmount >= (floatPrecision(reqPledgeTokens/5, MaxDecimalPlaces)) {
+			c.log.Debug("********* selected quorum : ", resp.DID)
+			// qrmIPFSObj, _ := ipfsPortQrm[resp.DID]
+			// if exists {
+			selectedQuorums[resp.DID] = ipfsPortQrm[resp.DID]
+			// delete(rejectedQuorums, resp.DID)
+			// c.log.Debug("*************** updated rejected quorum map ", rejectedQuorums)
+			// }
 
 		} else if resp.Message == "Quorum is not setup" {
 			c.log.Error("Quorums are not setup, please setup quorums and retry, msg ", resp.Message)
 			return nil, nil, nil, fmt.Errorf(resp.Message)
+		} else {
+			rejectedQuorums[resp.DID] = ipfsPortQrm[resp.DID]
 		}
 		// if len(selectedQuorums) == MinQuorumRequired {
 		// 	// Signal to stop pending connections
@@ -512,11 +530,11 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	c.log.Debug("*********** rejected quorums : ", rejectedQuorums)
 
 	// Notify remaining servers in the background without error handling
-	for quorumAddr := range rejectedQuorums {
-		qrmIPFSObj, exists := ipfsPortQrm[quorumAddr]
-		if exists {
-			go c.notifyUnusedQuorums(qrmIPFSObj, cr.ReqID)
-		}
+	for _, qrmIPFSObj := range rejectedQuorums {
+		// qrmIPFSObj := ipfsPortQrm[quorumDID]
+		// if exists {
+		go c.notifyUnusedQuorums(qrmIPFSObj, cr.ReqID)
+		// }
 	}
 
 	// // Wait for initial connections to complete
@@ -543,10 +561,14 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	// wait group for 2nd round of concurrent quorum-connection for consensus
 	var wgConsensus sync.WaitGroup
-	for _, p := range selectedQuorums {
+	for _, qrmIPFSObj := range selectedQuorums {
+		// qrmIPFSObj := ipfsPortQrm[quorumDID]
 		wgConsensus.Add(1)
 		//connecting with quorums requesting consensus
-		go c.connectQuorum(cr, p, sc)
+		go func(qrm *ipfsport.Peer) {
+			defer wgConsensus.Done()
+			c.connectQuorum(cr, qrm, sc)
+		}(qrmIPFSObj)
 	}
 	// loop := true
 	// // var err error
@@ -2627,6 +2649,8 @@ func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer) (Quo
 		return quorumSelection, err
 	}
 	pledgeTokensPerQuorum := pd.TransferAmount / float64(MinQuorumRequired)
+
+	c.log.Debug("******* pledge amout per quorum ", CeilfloatPrecision(pledgeTokensPerQuorum, MaxDecimalPlaces))
 
 	// Request pledge token
 	if (c.quorumCount - c.noBalanceQuorumCount) < MinConsensusRequired {

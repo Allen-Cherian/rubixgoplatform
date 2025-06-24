@@ -1367,22 +1367,37 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 	go c.syncFullTokenChains(tokenSyncMap)
 
 }
-
 func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
+	br := c.GatherFreeTokensForConsensus(reqID, req)
+	didChannel := c.GetWebReq(reqID)
+	if didChannel == nil {
+		c.log.Error("Failed to get did channels")
+		return
+	}
+	didChannel.OutChan <- br
+}
+
+// this function gathers all the required free tokens for CVR and creates a temp contract block for conensus
+func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIRequest) (*model.BasicResponse){
 
 	c.log.Debug("****** receievd API request for CVR-2 : ", reqID, "request :", req)
 
+	response := &model.BasicResponse{
+		Status: false,
+	}
 	// gather free tokens for cvr and prepare contract block
 	freeTokensList, err := c.w.GetAllFreeToken(req.DID)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to get all free tokens for DID : %v, err : %v", req.DID, err)
 		c.log.Error(errMsg)
-		return
+		response.Message = errMsg
+		return response
 	}
 
 	if len(freeTokensList) == 0 {
 		c.log.Error("No tokens present for cvr")
-		return
+		response.Message = "No tokens present for cvr"
+		return response
 	}
 
 	// release the locked tokens before exit
@@ -1391,8 +1406,10 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 	senderDID := req.DID
 	dc, err := c.SetupDID(reqID, senderDID)
 	if err != nil {
-		c.log.Error("Failed to setup DID, err ", err)
-		return
+		errMsg := fmt.Sprintf("Failed to setup DID, err : %v", err)
+		c.log.Error(errMsg)
+		response.Message = errMsg
+		return response
 	}
 
 	//TODO: handle the error in Pin func
@@ -1412,13 +1429,16 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 		blk := c.w.GetLatestTokenBlock(freeTokensList[i].TokenID, tt)
 		if blk == nil {
 			c.log.Error("failed to get latest block, invalid token chain")
-			return
+			response.Message = "failed to get latest block, invalid token chain"
+			return response
 		}
 
 		bid, err := blk.GetBlockID(freeTokensList[i].TokenID)
 		if err != nil {
-			c.log.Error("failed to get block id", "err", err)
-			return
+			errMsg := fmt.Sprintf("failed to get block id; err: %v", err)
+			c.log.Error(errMsg)
+			response.Message = errMsg
+			return response
 		}
 		ti := contract.TokenInfo{
 			Token:      freeTokensList[i].TokenID,
@@ -1443,8 +1463,10 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 		case block.TokenGeneratedType:
 			continue
 		case block.TokenBurntType:
-			c.log.Error("token is burnt, can't transfer anymore; token:", tokeninfo.Token)
-			return
+			errMsg := fmt.Sprintf("token is burnt, can't transfer anymore; token: %v", tokeninfo.Token)
+			c.log.Error(errMsg)
+			response.Message = errMsg
+			return response
 		case block.TokenTransferredType:
 			//fetch all the pledged quorums, if the transaction involved quorums
 			prevQuorums, _ := b.GetSigner()
@@ -1485,7 +1507,8 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 	err = sc.UpdateSignature(dc)
 	if err != nil {
 		c.log.Error(err.Error())
-		return
+		response.Message = err.Error()
+		return response
 	}
 
 	st := time.Now()
@@ -1494,19 +1517,14 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 	cvrReq := &wallet.PrePledgeRequest{
 		DID:                 req.DID,
 		QuorumType:          req.QuorumType,
-		SCTransferBlock:     sc.GetBlock(),
-		SCSelfTransferBlock: nil,
+		SCSelfTransferBlock: sc.GetBlock(),
+		SCTransferBlock:     nil,
 		ReqID:               reqID,
 		TxnEpoch:            int64(txEpoch),
 	}
 
-	br := c.initiateRBTCVRTwo(cvrReq)
-	didChannel := c.GetWebReq(reqID)
-	if didChannel == nil {
-		c.log.Error("Failed to get did channels")
-		return
-	}
-	didChannel.OutChan <- br
+	response = c.initiateRBTCVRTwo(cvrReq)
+	return  response
 }
 
 func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicResponse {
@@ -1514,8 +1532,8 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		Status: false,
 	}
 
-	c.log.Debug("******** cvr-2 request : ", req)
-	
+	c.log.Debug("******** cvr-2 request received ", req.DID)
+
 	// tokensList, err := c.w.GetTokensByTxnID(req.TxnID)
 	// // TODO : proper error handling needed for db locking and unlocking
 	// if err != nil {
@@ -1601,46 +1619,49 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 	// 			}
 
 	//cvrstage-2  sender to receiver transfer
-	sc := contract.InitContract(req.SCTransferBlock, nil)
-	rpeerid := c.w.GetPeerID(sc.GetReceiverDID())
-	if rpeerid == "" {
-		isReceiverInSameNode := c.IsDIDExist("", sc.GetReceiverDID())
-		if !isReceiverInSameNode {
-			errMsg := fmt.Sprintf("unexpected error, unable to find receiver peer id in CVR-2 even after token has been transferred to receiver : %v", sc.GetReceiverDID())
+	if req.SCTransferBlock != nil {
+		sc := contract.InitContract(req.SCTransferBlock, nil)
+		rpeerid := c.w.GetPeerID(sc.GetReceiverDID())
+		if rpeerid == "" {
+			isReceiverInSameNode := c.IsDIDExist("", sc.GetReceiverDID())
+			if !isReceiverInSameNode {
+				errMsg := fmt.Sprintf("unexpected error, unable to find receiver peer id in CVR-2 even after token has been transferred to receiver : %v", sc.GetReceiverDID())
+				c.log.Error(errMsg)
+				resp.Message = errMsg
+				return resp
+			}
+			rpeerid = c.peerID
+		}
+
+		c.log.Debug("**********receiver peer id is : ", rpeerid)
+
+		cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
+		cr.Mode = SpendableRBTTransferMode
+
+		c.log.Debug("********** consensus request : mode ", cr.Mode, "cr req id", cr.ReqID, "sender peerid", cr.SenderPeerID, "receiver peerid", cr.ReceiverPeerID)
+
+		// initiate consensus for sender to receiver transaction.
+		_, _, _, err := c.initiateConsensus(cr, sc, nil)
+		if err != nil {
+			errMsg := fmt.Sprintf("Consensus failed for  sender to receiver transfer, err: %v", err)
 			c.log.Error(errMsg)
 			resp.Message = errMsg
 			return resp
 		}
-		rpeerid = c.peerID
-	}
-
-	c.log.Debug("**********receiver peer id is : ", rpeerid)
-
-	cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
-	cr.Mode = SpendableRBTTransferMode
-
-	c.log.Debug("********** consensus request : ", cr)
-
-	// initiate consensus for sender to receiver transaction.
-	_, _, _, err := c.initiateConsensus(cr, sc, nil)
-	if err != nil {
-		errMsg := fmt.Sprintf("Consensus failed for  sender to receiver transfer, err: %v", err)
-		c.log.Error(errMsg)
-		resp.Message = errMsg
-		return resp
 	}
 
 	// TODO : add transaction details to DB, if not added alreay in initiate consensus
 
+	//cvrstage-2  for sef transfer
 	if req.SCSelfTransferBlock != nil {
-		//cvrstage-2  for sef transfer
 		selfTransferContractBlock := contract.InitContract(req.SCSelfTransferBlock, nil)
 
 		selfTransferConsensusReq := getConsensusRequest(req.QuorumType, c.peerID, c.peerID, req.SCSelfTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
 		selfTransferConsensusReq.Mode = SpendableRBTTransferMode
 
+		c.log.Debug("********** consensus request : mode ", selfTransferConsensusReq.Mode, "cr req id", selfTransferConsensusReq.ReqID, "sender peerid", selfTransferConsensusReq.SenderPeerID, "receiver peerid", selfTransferConsensusReq.ReceiverPeerID)
 		// initiate consensus for self transfer
-		_, _, _, err = c.initiateConsensus(selfTransferConsensusReq, selfTransferContractBlock, nil)
+		_, _, _, err := c.initiateConsensus(selfTransferConsensusReq, selfTransferContractBlock, nil)
 		if err != nil {
 			errMsg := fmt.Sprintf("Consensus failed for  self transfer, err: %v", err)
 			c.log.Error(errMsg)
