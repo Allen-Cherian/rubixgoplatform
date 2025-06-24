@@ -469,7 +469,9 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		msg := fmt.Sprintf("Transaction is still processing, with transaction id %v ", cr.TransactionID)
 		resp.Message = msg
 		resp.Status = true
-		resp.Result = cr.TransactionID
+		if resp.Result == "" {
+			resp.Result = cr.TransactionID
+		}
 		return resp
 	}
 }

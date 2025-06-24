@@ -550,7 +550,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 			}
 			if strings.Contains(trep.Message, "Sent all blocks") {
 				diffVar := int(blkHeight) - len(trep.TCBlock)
-				if diffVar > 2 {
+				if diffVar > 1 {
 					// Quorum is ahead of sender by more than 1 block — not allowed
 					c.log.Error("Block height discrepancy too large")
 					return fmt.Errorf("sync failed: block height discrepancy too large (diff: %d)", diffVar)
