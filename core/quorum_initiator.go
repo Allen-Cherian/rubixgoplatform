@@ -480,6 +480,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	// TODO : handle the case where quorums are not responding for a long time, use select-case functionality
 	for i := 0; i < QuorumRequired && len(selectedQuorums) < MinQuorumRequired; i++ {
 		resp := <-responseCh
+		c.log.Debug("********** response of quorum : ", resp)
 		if resp.Message == "" && resp.PledgingAmount >= (floatPrecision(reqPledgeTokens, MaxDecimalPlaces))/5 {
 			qrmIPFSObj, exists := ipfsPortQrm[resp.DID]
 			if exists {
@@ -488,7 +489,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 
 		} else if resp.Message == "Quorum is not setup" {
-			c.log.Error("Quorums are not setup, please setup quorums and retry")
+			c.log.Error("Quorums are not setup, please setup quorums and retry, msg ", resp.Message)
 			return nil, nil, nil, fmt.Errorf(resp.Message)
 		}
 		// if len(selectedQuorums) == MinQuorumRequired {
@@ -496,6 +497,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		// 	close(stopCh)
 		// }
 	}
+
+	c.log.Debug("********** selected quorums : ", selectedQuorums)
 
 	if len(selectedQuorums) < MinQuorumRequired {
 		c.log.Error("could not proceed for consensus, not enough quorums available")
@@ -505,6 +508,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		return nil, nil, nil, fmt.Errorf("not enough quorums available")
 	}
+
+	c.log.Debug("*********** rejected quorums : ", rejectedQuorums)
 
 	// Notify remaining servers in the background without error handling
 	for quorumAddr := range rejectedQuorums {
@@ -516,6 +521,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	// // Wait for initial connections to complete
 	// wgSelection.Wait()
+
+	c.log.Debug("********** txn id : ", tid)
 
 	// create new block for trans-tokens
 	nb, err := c.createTransTokenBlock(cr, sc, tid, dc)
@@ -582,7 +589,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}
 
 	blockHash, _ := nb.GetHash()
-	c.log.Debug("block hash before adding quorum signature : %v", blockHash)
+	c.log.Debug("*************** block hash before adding quorum signature : %v", blockHash)
+
 	// request pledge finality in case of transactions other than CVR, and
 	// just add quorums' signature to block in case of CVR
 	if cr.Mode != SpendableRBTTransferMode {
@@ -602,7 +610,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}
 
 	blockHash1, _ := nb.GetHash()
-	c.log.Debug("block hash after adding quorum signature : %v", blockHash1)
+	c.log.Debug("********** block hash after adding quorum signature : %v", blockHash1)
 
 	ti := sc.GetTransTokenInfo()
 	c.qlock.Lock()
@@ -625,6 +633,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	switch cr.Mode {
 	case SpendableRBTTransferMode:
+		c.log.Debug("************ checking prev quorums to unpledge")
+
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and
 		// update about the exhausted token state hashes to quorums for them to unpledge their tokens.
 		for _, tokeninfo := range ti {
@@ -720,8 +730,11 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			quorumInfo = append(quorumInfo, qrmInfo)
 		}
 
+		c.log.Debug("************** quorum info : ", quorumInfo)
+
 		//if sender and receiver are not same, then add the block at receiver side
 		if sc.GetReceiverDID() != sc.GetSenderDID() {
+			c.log.Debug("***************** sending to receiver")
 			rp, err := c.getPeer(cr.ReceiverPeerID + "." + sc.GetReceiverDID())
 			if err != nil {
 				c.log.Error("Receiver not connected", "err", err)
@@ -738,6 +751,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				QuorumInfo:         quorumInfo,
 				// TransTokenSyncInfo: cr.TransTokenSyncInfo,
 			}
+
+			c.log.Debug("*************** sending cvr-2 block to receiver : ", sr)
 
 			var br model.BasicResponse
 			err = rp.SendJSONRequest("POST", APISendReceiverToken, nil, &sr, &br, true)
@@ -783,6 +798,9 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				c.log.Error("Unable to send tokens to receiver", "msg", br.Message)
 				return nil, nil, nil, fmt.Errorf("unable to send tokens to receiver, " + br.Message)
 			}
+
+			c.log.Debug("************ sender addingf cvr-2 block in DBs")
+
 			//sender adds the block to levelDB after getting a confirmation from the receiver
 			err = c.w.TokensTransferred(sc.GetSenderDID(), ti, nb, false, pinningServiceMode)
 			if err != nil {
@@ -790,10 +808,13 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				return nil, nil, nil, err
 			}
 
+			c.log.Debug("********** sender is unpinning")
 			for _, t := range ti {
 				c.w.UnPin(t.Token, wallet.PrevSenderRole, sc.GetSenderDID())
 			}
 		} else {
+
+			c.log.Debug("************* self transfer mode********")
 			// Self update for self transfer tokens
 			_, _, err := c.updateReceiverToken(sc.GetSenderDID(), "", ti, nb.GetBlock(), cr.QuorumList, quorumInfo, wallet.CVRStage2_Sender_to_Receiver, cr.TransactionEpoch, false)
 			if err != nil {
@@ -2143,6 +2164,9 @@ func (c *Core) connectQuorum(consensusRequest *ConensusRequest, p *ipfsport.Peer
 		c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
 		return
 	}
+
+	c.log.Debug("********** received consensus response : ", p.GetPeerDID(), cresp)
+
 	if strings.Contains(cresp.Message, "parent token is not in burnt stage") {
 		ptPrefix := "pt: "
 		issueTypePrefix := "issueType: "
@@ -2573,6 +2597,8 @@ func (c *Core) requestPledgeTokenInfo(cr *ConensusRequest, p *ipfsport.Peer) Quo
 		c.log.Error("Failed to pledge token", "err", err)
 		return pledgeInfo
 	}
+	c.log.Debug("******* received pledge info : ", p.GetPeerDID(), pledgeInfo)
+
 	return pledgeInfo
 }
 

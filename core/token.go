@@ -1369,6 +1369,9 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 }
 
 func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
+
+	c.log.Debug("****** receievd API request for CVR-2 : ", reqID, "request :", req)
+
 	// gather free tokens for cvr and prepare contract block
 	freeTokensList, err := c.w.GetAllFreeToken(req.DID)
 	if err != nil {
@@ -1511,6 +1514,8 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		Status: false,
 	}
 
+	c.log.Debug("******** cvr-2 request : ", req)
+	
 	// tokensList, err := c.w.GetTokensByTxnID(req.TxnID)
 	// // TODO : proper error handling needed for db locking and unlocking
 	// if err != nil {
@@ -1609,8 +1614,12 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		rpeerid = c.peerID
 	}
 
+	c.log.Debug("**********receiver peer id is : ", rpeerid)
+
 	cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
 	cr.Mode = SpendableRBTTransferMode
+
+	c.log.Debug("********** consensus request : ", cr)
 
 	// initiate consensus for sender to receiver transaction.
 	_, _, _, err := c.initiateConsensus(cr, sc, nil)

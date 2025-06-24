@@ -148,6 +148,8 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		Status: false,
 	}
 
+	c.log.Debug("********** conesnsus request id : ", cr.ReqID)
+
 	ok, sc := c.verifyContract(cr, did)
 	if !ok {
 		crep.Message = "failed to verify sender signature"
@@ -297,6 +299,7 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 
 	// quorum pledge finality in case of pre-pledging
 	if cr.Mode == SpendableRBTTransferMode {
+		c.log.Debug("********** proceeding for pledge finality")
 		// updated token state hashes
 		var txnTokenHashes []string = make([]string, 0)
 		for _, info := range ti {
@@ -323,6 +326,8 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 			c.log.Error("failed to update pledge tokens, err ", response.Message)
 			// TODO : throw error
 		}
+
+		c.log.Debug("********** pledge finality response : ", response)
 
 		// delete pledge tokens and consensus request map
 		delete(c.pd, cr.ReqID)
@@ -970,7 +975,7 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 	crep := model.BasicResponse{
 		Status: false,
 	}
-	c.log.Debug("Request for pledge")
+	c.log.Debug("**********Request for pledge, crReqId : ", pr.ConensusRequestID)
 	if err != nil {
 		c.log.Error("Failed to parse json request", "err", err)
 		crep.Message = "Failed to parse json request"
@@ -989,6 +994,9 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 	if err != nil {
 		c.log.Error("Unable to check quorum balance")
 	}
+
+	c.log.Debug("********* available balance : ", availableBalance)
+
 	availableRBT := availableBalance.RBTAmount
 	if availableRBT < pr.TokensRequired {
 		c.log.Error("Quorum don't have enough balance to pledge")
@@ -1056,6 +1064,8 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 		NumPledgedTokens: totalLockedTokens,
 	}
 
+	c.log.Debug("********* pledge tokens map : ", c.pd[pr.ConensusRequestID])
+
 	return c.l.RenderJSON(req, &presp, http.StatusOK)
 }
 
@@ -1094,6 +1104,9 @@ func (c *Core) updateReceiverToken(
 	}
 
 	if receiverAddress != "" && CVRStage == wallet.CVRStage1_Sender_to_Receiver {
+
+		c.log.Debug("*********** updating tokens in cvr-1")
+
 		var err error
 		senderPeer, err = c.getPeer(senderAddress)
 		if err != nil {
@@ -1138,6 +1151,8 @@ func (c *Core) updateReceiverToken(
 				return nil, senderPeer, fmt.Errorf("Token " + t + " is a pledged Token")
 			}
 
+			c.log.Debug("************ updating token type, adding 50 to the current type")
+
 			// updating token type as per cvr stage
 			// if CVRStage == wallet.CVRStage1_Sender_to_Receiver {
 			b, ok = b.UpdateTokenType(t, token.CVR_RBTTokenType+ti.TokenType)
@@ -1153,6 +1168,8 @@ func (c *Core) updateReceiverToken(
 		if err != nil {
 			return nil, senderPeer, fmt.Errorf("failed to update token status, error: %v", err)
 		}
+
+		c.log.Debug("*********** updated tokemn state hahses : ", updatedTokenStateHashes)
 
 		sc := contract.InitContract(b.GetSmartContract(), nil)
 		if sc == nil {
@@ -1184,6 +1201,9 @@ func (c *Core) updateReceiverToken(
 			if td.Epoch == 0 {
 				td.Epoch = time.Now().Unix()
 			}
+
+			c.log.Debug("************ adding transaction details to DB : ", td)
+
 			c.w.AddTransactionHistory(td)
 		}
 		//updating the token type in cvr stage1
@@ -1192,10 +1212,14 @@ func (c *Core) updateReceiverToken(
 
 	if CVRStage == wallet.CVRStage2_Sender_to_Receiver {
 
+		c.log.Debug("********** updating token in cvr-2")
+
 		results := make([]MultiPinCheckRes, len(tokenInfo))
 		var wg sync.WaitGroup
 		for i, ti := range tokenInfo {
 			t := ti.Token
+
+			c.log.Debug("************* removing cvr-1 block")
 
 			// if latest block is cvr-1 block, remove it before adding cvr-2 block
 			err := c.RemoveSpendableRBTTransferredBlock(t, ti.TokenType)
@@ -1255,6 +1279,8 @@ func (c *Core) updateReceiverToken(
 func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 	did := c.l.GetQuerry(req, "did")
 	var sr SendTokenRequest
+
+	c.log.Debug("********* updatinhg receiver tokens : ", did)
 
 	err := c.l.ParseJSON(req, &sr)
 	crep := model.BasicResponse{
