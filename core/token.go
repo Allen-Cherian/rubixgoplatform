@@ -65,6 +65,8 @@ type TokenSyncInfo struct {
 func (c *Core) SetupToken() {
 	c.l.AddRoute(APISyncTokenChain, "POST", c.syncTokenChain)
 	c.l.AddRoute(APISyncGenesisAndLatestBlock, "POST", c.syncGenesisAndLatestBlock)
+	c.l.AddRoute(APIUpdateStatus, "PUT", c.updateStatus)
+	c.l.AddRoute(APIGetTokenStatus, "GET", c.getTokenStatus)
 }
 
 func (c *Core) GetAllTokens(did string, tt string) (*model.TokenResponse, error) {
@@ -393,6 +395,90 @@ func (c *Core) processRole(role int) string {
 
 	c.log.Warn("Unhandled role encountered", "role", role)
 	return ""
+}
+
+func (c *Core) updateStatus(req *ensweb.Request) *ensweb.Result {
+	var updateReq model.UpdateTokenStatusReq
+
+	// Parse request
+	if err := c.l.ParseJSON(req, &updateReq); err != nil {
+		c.log.Warn("Failed to parse request", "error", err)
+		return c.l.RenderJSON(req, &model.BasicResponse{
+			Status:  false,
+			Message: "Failed to parse request",
+		}, http.StatusBadRequest)
+	}
+	var resp model.BasicResponse
+
+	err := c.w.UpdateTokenStatus(updateReq.DID, updateReq.TokenHash, updateReq.TokenType, updateReq.NewTokenStatus)
+	if err != nil {
+		c.log.Error("Failed to update token status", "err", err)
+		resp.Message = "Failed to update token status"
+		resp.Status = false
+		return c.l.RenderJSON(req, &resp, http.StatusOK)
+	}
+
+	resp.Message = "Updated token status"
+	resp.Status = true
+	return c.l.RenderJSON(req, &resp, http.StatusOK)
+}
+
+func (c *Core) getTokenStatus(req *ensweb.Request) *ensweb.Result {
+	var getStatusReq model.GetTokenStatusReq
+
+	// Parse request
+	if err := c.l.ParseJSON(req, &getStatusReq); err != nil {
+		c.log.Warn("Failed to parse request", "error", err)
+		return c.l.RenderJSON(req, &model.BasicResponse{
+			Status:  false,
+			Message: "Failed to parse request",
+		}, http.StatusBadRequest)
+	}
+	var resp model.TokenStatusResponse
+
+	resp, err := c.w.GetTokenStatus(getStatusReq.DID, getStatusReq.Token, getStatusReq.Type)
+	if err != nil {
+		c.log.Error("Failed to get token status", "err", err)
+		return c.l.RenderJSON(req, &model.BasicResponse{
+			Status:  false,
+			Message: "Failed to parse request",
+		}, http.StatusBadRequest)
+	}
+
+	return c.l.RenderJSON(req, &resp, http.StatusOK)
+}
+
+func (c *Core) UpdateTokenStatus(updateReq *model.UpdateTokenStatusReq) error {
+	p, err := c.getPeer(updateReq.DID)
+	if err != nil {
+		c.log.Error("Failed to get peer", "err", err)
+		return err
+	}
+	defer p.Close()
+	var updateResp model.BasicResponse
+
+	err = p.SendJSONRequest("PUT", APIUpdateStatus, nil, &updateReq, &updateResp, false)
+	if !updateResp.Status {
+		c.log.Error("Failed to update status", "err", err)
+		return fmt.Errorf(updateResp.Message)
+	}
+	return nil
+}
+
+func (c *Core) GetTokenStatus(getTokenStatusReq *model.GetTokenStatusReq) (model.TokenStatusResponse, error) {
+	var resp model.TokenStatusResponse
+	p, err := c.getPeer(getTokenStatusReq.DID)
+	if err != nil {
+		c.log.Error("Failed to get peer", "err", err)
+		return resp, err
+	}
+	defer p.Close()
+	err = p.SendJSONRequest("GET", APIGetTokenStatus, nil, &getTokenStatusReq, &resp, false)
+	if err != nil {
+		c.log.Error("Failed to get status", "err", err)
+		return resp, err
+	}
+	return resp, nil
 }
 
 func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string, tokenType int) error {
