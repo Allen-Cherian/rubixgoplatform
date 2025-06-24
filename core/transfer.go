@@ -293,6 +293,8 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		return resp
 	}
 
+	c.log.Debug("*****Setup DID is done for sender in initiateRBTTransfer function********")
+
 	tokensForTxn, transferMode, err := gatherTokensForTransaction(c, req, dc, isSelfRBTTransfer)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to retrieve tokens, err: %v", err)
@@ -300,6 +302,9 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		resp.Message = errMsg
 		return resp
 	}
+
+	c.log.Debug("***Tokens gathered for transaction****")
+	c.log.Debug("*****Transfer Mode is****", transferMode)
 
 	// In case of self transfer
 	if len(tokensForTxn) == 0 && isSelfRBTTransfer {
@@ -311,7 +316,6 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	// release the locked tokens before exit
 	defer c.w.ReleaseTokens(tokensForTxn)
 
-	//TODO: handle the error in Pin func
 	for i := range tokensForTxn {
 		_, err := c.w.Pin(tokensForTxn[i].TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.Sender, req.Receiver, tokensForTxn[i].TokenValue)
 		if err != nil {
@@ -410,7 +414,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		tokenListForExplorer = append(tokenListForExplorer, Token{TokenHash: ti.Token, TokenValue: ti.TokenValue})
 
 		// gather tokens for self-transfer : check if the transToken exists in the self-transfer map,
-		// if exists delete the toekn from the self-transfer map, if does not exist
+		// if exists delete the token from the self-transfer map, if does not exist
 		// then fetch the list of all tokens from the latest block, and
 		// add all the tokens to the self-transfer map except the trans-token
 		_, exists := selfTransferTokensMap[tokensForTxn[i].TokenID]
@@ -464,11 +468,18 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	// preaparing the block for tokens to be transferred to receiver
 	contractType := getContractType(reqID, req, tis, isSelfRBTTransfer)
+
+	c.log.Debug("***********Contract type for sender to receiver transaction******* ", contractType)
+
+	c.log.Debug("*******creating the contract for sender to receiver transaction*******")
+
 	sc := contract.CreateNewContract(contractType)
 
 	// Starting CVR stage-1
 	// TODO : handle cvr stage-0 : quorum's signature
 	// And handle self-transfer of sender's remaining amount
+
+	c.log.Debug("*****sender signining on the contract block*******")
 
 	err = sc.UpdateSignature(dc)
 	if err != nil {
@@ -479,6 +490,8 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	// create block in cvr stage-1
 	transactionID := util.HexToStr(util.CalculateHash(sc.GetBlock(), "SHA3-256"))
+
+	c.log.Debug("*****sender to receiver transactionID***", transactionID)
 	tks := make([]block.TransTokens, 0)
 	ctcb := make(map[string]*block.Block)
 
@@ -505,7 +518,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		SmartContract:   sc.GetBlock(),
 		Epoch:           txEpoch,
 	}
-
+	c.log.Debug("****creating new transblock for sender to receiver transaction in cvr-1*********")
 	nb := block.CreateNewBlock(ctcb, &tcb)
 	if nb == nil {
 		c.log.Error("Failed to create new token chain block - qrm init")
@@ -552,6 +565,11 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	}
 	//create new contract for self transfer
 	selfTransferContractType := getContractType(reqID, req, selfTransferTokensList, isSelfRBTTransfer)
+
+	c.log.Debug("***********Contract type for self transaction in cvr-1******* ", contractType)
+
+	c.log.Debug("*******creating the contract for self transaction in cvr-1*******")
+
 	selfTransferContract := contract.CreateNewContract(selfTransferContractType)
 
 	err = selfTransferContract.UpdateSignature(dc)
@@ -564,6 +582,9 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	// creating self transfer block in cvr stage-2
 	selfTransactionID := util.HexToStr(util.CalculateHash(selfTransferContract.GetBlock(), "SHA3-256"))
+
+	c.log.Debug("trasactionID for self transaction", selfTransactionID)
+
 	selfTransferTokens := make([]block.TransTokens, 0)
 	latestTokenChainBlock := make(map[string]*block.Block)
 
@@ -590,6 +611,8 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		SmartContract:   selfTransferContract.GetBlock(),
 		Epoch:           txEpoch,
 	}
+
+	c.log.Debug("*******creating a new block for self transaction*****")
 
 	selfTransferBlock := block.CreateNewBlock(latestTokenChainBlock, &seltTransferTCB)
 	if selfTransferBlock == nil {
@@ -737,6 +760,9 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		td.Amount = req.TokenCount
 	}
 	td.TotalTime = float64(dif.Milliseconds())
+
+	c.log.Debug("**adding txnd details to the transactionHistory table*****")
+
 	if err := c.w.AddTransactionHistory(td); err != nil {
 		errMsg := fmt.Sprintf("Error occured while adding transaction details: %v", err)
 		c.log.Error(errMsg)

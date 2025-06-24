@@ -633,7 +633,7 @@ func (w *Wallet) FTTokensTransffered(did string, ti []contract.TokenInfo, b *blo
 	return nil
 }
 func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Block, senderPeerId string, receiverPeerId string, pinningServiceMode bool, ipfsShell *ipfsnode.Shell) ([]string, error) {
-	w.log.Debug("****** inside TokemnsReceived, updating Ldb and sQlite Db")
+	w.log.Debug("****** inside TokensReceived, updating Ldb and sQlite Db")
 
 	w.l.Lock()
 	defer w.l.Unlock()

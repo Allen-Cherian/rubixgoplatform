@@ -1,6 +1,7 @@
 package wallet
 
 import (
+	"fmt"
 	"io"
 	"io/ioutil"
 
