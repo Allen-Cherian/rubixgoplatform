@@ -1467,7 +1467,7 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 
 	rbtTransferreq := &model.RBTTransferRequest{
 		Sender:   senderDID,
-		Receiver: "",
+		Receiver: senderDID,
 		Type:     req.QuorumType,
 	}
 
@@ -1599,11 +1599,16 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 	sc := contract.InitContract(req.SCTransferBlock, nil)
 	rpeerid := c.w.GetPeerID(sc.GetReceiverDID())
 	if rpeerid == "" {
-		errMsg := fmt.Sprintf("unexpected error, unable to find receiver peer id in CVR-2 even after token has been transferred to receiver : %v", sc.GetReceiverDID())
-		c.log.Error(errMsg)
-		resp.Message = errMsg
-		return resp
+		isReceiverInSameNode := c.IsDIDExist("", sc.GetReceiverDID())
+		if !isReceiverInSameNode {
+			errMsg := fmt.Sprintf("unexpected error, unable to find receiver peer id in CVR-2 even after token has been transferred to receiver : %v", sc.GetReceiverDID())
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+		rpeerid = c.peerID
 	}
+
 	cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
 	cr.Mode = SpendableRBTTransferMode
 
