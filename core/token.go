@@ -448,53 +448,6 @@ func (c *Core) getTokenStatus(req *ensweb.Request) *ensweb.Result {
 	return c.l.RenderJSON(req, &resp, http.StatusOK)
 }
 
-/* func (c *Core) handleRoleBasedLogic(token string, req *ensweb.Request) *ensweb.Result {
-	fmt.Println("Handling role-based logic for token:", token)
-	list, err := c.GetDHTddrs(token)
-	if err != nil {
-		c.log.Error("Failed to get DHT addresses", "err", err)
-		return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "Failed to get DHT addresses"}, http.StatusInternalServerError)
-	}
-
-	q := map[string]string{"token": token}
-	var response model.BasicResponse
-
-	for _, peerID := range list {
-		peerConn, err := c.pm.OpenPeerConn(peerID, "", c.getCoreAppName(peerID))
-		if err != nil {
-			c.log.Warn("Failed to open peer connection", "peer", peerID, "err", err)
-			continue
-		}
-
-		if err := peerConn.SendJSONRequest("GET", APICheckPinRole, q, nil, &response, false); err != nil {
-			c.log.Warn("Failed to send JSON request", "peer", peerID, "err", err)
-			continue
-		}
-		fmt.Println("Response from peer:", response)
-		var result model.PinCheckReply
-		resultBytes, ok := response.Result.([]byte)
-		if !ok {
-			resultBytes, err = json.Marshal(response.Result)
-			if err != nil {
-				c.log.Error("Failed to marshal response.Result to JSON", "err", err)
-				continue
-			}
-		}
-
-		if err := json.Unmarshal(resultBytes, &result); err != nil {
-			c.log.Error("Failed to unmarshal response.Result", "err", err)
-			continue
-		}
-
-		message := c.processRole(result.PinDetails.Role)
-		if message != "" {
-			return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: message}, http.StatusNoContent)
-		}
-	}
-
-	return c.l.RenderJSON(req, &TCBSyncReply{Status: false, Message: "Unhandled error during role-based processing"}, http.StatusInternalServerError)
-} */
-
 func (c *Core) UpdateTokenStatus(updateReq *model.UpdateTokenStatusReq) error {
 	p, err := c.getPeer(updateReq.DID)
 	if err != nil {
