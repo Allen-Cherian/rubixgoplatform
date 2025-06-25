@@ -442,6 +442,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 		c.log.Info("Transfer finished successfully", "duration", dif, " trnxid", td.TransactionID)
 		resp.Status = true
+		resp.Result = td.TransactionID
 		msg := fmt.Sprintf("Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
 		resp.Message = msg
 		c.ec.ExplorerRBTTransaction(etrans)
@@ -467,11 +468,13 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		c.log.Debug("transaction still processing with txn id ", cr.TransactionID)
 
 		msg := fmt.Sprintf("Transaction is still processing, with transaction id %v ", cr.TransactionID)
-		resp.Message = msg
-		resp.Status = true
+		fmt.Println("---resp.Result is ", resp.Result)
 		if resp.Result == "" {
 			resp.Result = cr.TransactionID
 		}
+		resp.Message = msg
+		resp.Status = true
+		fmt.Printf("---0resp is %+v\n", resp)
 		return resp
 	}
 }
