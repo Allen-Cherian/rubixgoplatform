@@ -1158,6 +1158,8 @@ func (c *Core) updateReceiverToken(
 
 			c.log.Debug("************ updating token type, adding 50 to the current type")
 
+			c.log.Debug("block after updating token type : ", b)
+
 			// updating token type as per cvr stage
 			// if CVRStage == wallet.CVRStage1_Sender_to_Receiver {
 			b, ok = b.UpdateTokenType(t, token.CVR_RBTTokenType+ti.TokenType)
@@ -1165,6 +1167,7 @@ func (c *Core) updateReceiverToken(
 				c.log.Error("failed to update token cvr type")
 				return nil, senderPeer, fmt.Errorf("failed to update tokenType of  Token " + t)
 			}
+			c.log.Debug("block after updating token type : ", b)
 
 			// }
 		}

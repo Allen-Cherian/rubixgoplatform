@@ -526,17 +526,19 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		return resp
 	}
 
-	// get all self-transfer tokens, 
+	// get all self-transfer tokens,
 	// the final self-transfer token list is : selfTransferTokensList
+	var selfTransactionID string
+	var selfTransferBlock *block.Block
 	selfTransferTokensList := make([]contract.TokenInfo, 0)
 	lockedTokensForSelfTransfer := make([]string, 0)
 	for selfTransferToken := range selfTransferTokensMap {
 
-		// check if the token is spendable, if not then do not include in self-transfer 
+		// check if the token is spendable, if not then do not include in self-transfer
 		selftransferTokenInfo, err := c.w.GetToken(selfTransferToken, wallet.TokenIsSpendable)
 		if err != nil {
-			errMsg := fmt.Sprintf("failed to get token for self-transfer, token: %v, error: %v", selfTransferToken, err)
-			c.log.Error(errMsg)
+			// errMsg := fmt.Sprintf("failed to get token for self-transfer, token: %v, error: %v", selfTransferToken, err)
+			// c.log.Error(errMsg)
 			continue
 			// c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
 			// resp.Message = errMsg
@@ -573,90 +575,102 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		selfTransferTokensList = append(selfTransferTokensList, selftransferTokeninfo)
 		lockedTokensForSelfTransfer = append(lockedTokensForSelfTransfer, selfTransferToken)
 	}
-	//create new contract for self transfer
-	selfTransferContractType := getContractType(reqID, req, selfTransferTokensList, isSelfRBTTransfer)
 
-	c.log.Debug("***********Contract type for self transaction in cvr-1******* ", contractType)
+	// if there are no available tokens for self-transfer then no need of self-transfer
+	if len(selfTransferTokensList) != 0 {
+		//create new contract for self transfer
+		selfTransferContractType := getContractType(reqID, req, selfTransferTokensList, isSelfRBTTransfer)
 
-	c.log.Debug("*******creating the contract for self transaction in cvr-1*******")
+		c.log.Debug("***********Contract type for self transaction in cvr-1******* ", contractType)
 
-	selfTransferContract := contract.CreateNewContract(selfTransferContractType)
+		c.log.Debug("*******creating the contract for self transaction in cvr-1*******")
 
-	c.log.Debug("******** sender signing on self-transfer txn id")
+		selfTransferContract := contract.CreateNewContract(selfTransferContractType)
 
-	err = selfTransferContract.UpdateSignature(dc)
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to update the signature on the self transfer contract, error: %v", err)
-		c.log.Error(errMsg)
-		resp.Message = errMsg
-		return resp
-	}
+		c.log.Debug("******** sender signing on self-transfer txn id")
 
-	// creating self transfer block in cvr stage-2
-	selfTransactionID := util.HexToStr(util.CalculateHash(selfTransferContract.GetBlock(), "SHA3-256"))
-
-	c.log.Debug("trasactionID for self transaction", selfTransactionID)
-
-	selfTransferTokens := make([]block.TransTokens, 0)
-	latestTokenChainBlock := make(map[string]*block.Block)
-
-	for i := range selfTransferTokensList {
-		tt := block.TransTokens{
-			Token:     selfTransferTokensList[i].Token,
-			TokenType: selfTransferTokensList[i].TokenType,
-		}
-		selfTransferTokens = append(selfTransferTokens, tt)
-		b := c.w.GetLatestTokenBlock(tis[i].Token, tis[i].TokenType)
-		ctcb[tis[i].Token] = b
-	}
-
-	selfTransBlockTransInfo := &block.TransInfo{
-		Comment: selfTransferContract.GetComment(),
-		TID:     selfTransactionID,
-		Tokens:  selfTransferTokens,
-	}
-
-	seltTransferTCB := block.TokenChainBlock{
-		TransactionType: block.SpendableRBTTransferredType,
-		TokenOwner:      selfTransferContract.GetReceiverDID(), //ReceiverDID is same as senderDID because it is self transfer
-		TransInfo:       selfTransBlockTransInfo,
-		SmartContract:   selfTransferContract.GetBlock(),
-		Epoch:           txEpoch,
-	}
-
-	c.log.Debug("*******creating a new block for self transaction*****")
-
-	selfTransferBlock := block.CreateNewBlock(latestTokenChainBlock, &seltTransferTCB)
-	if selfTransferBlock == nil {
-		c.log.Error("Failed to create a selftransfer token chain block - qrm init")
-		resp.Message = "Failed to create a selftransfer token chain block - qrm init"
-		return resp
-	}
-	//update token type
-	var ok bool
-	for _, t := range selfTransferTokensList {
-
-		selfTransferBlock, ok = selfTransferBlock.UpdateTokenType(t.Token, token.CVR_RBTTokenType+t.TokenType)
-		if !ok {
-			errMsg := fmt.Sprintf("failed to update token cvr-1 type for self transfer block, error: %v", err)
+		err = selfTransferContract.UpdateSignature(dc)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to update the signature on the self transfer contract, error: %v", err)
 			c.log.Error(errMsg)
 			resp.Message = errMsg
 			return resp
 		}
 
-	}
+		// creating self transfer block in cvr stage-2
+		selfTransactionID = util.HexToStr(util.CalculateHash(selfTransferContract.GetBlock(), "SHA3-256"))
 
-	//update the levelDB and SqliteDB
-	updatedTokenStateHashesAfterSelfTransfer, err := c.w.TokensReceived(senderDID, selfTransferTokensList, selfTransferBlock, c.peerID, c.peerID, false, c.ipfs)
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to add self-transfer token block and update status, error: %v", err)
-		c.log.Error(errMsg)
-		resp.Message = errMsg
-		return resp
-	}
-	//TODO: Send these updatedTokenStateHashesAfterSelfTransfer to quorums for pinning
-	c.log.Debug(fmt.Sprintf("Updated token state hashes after self transfer are:%v", updatedTokenStateHashesAfterSelfTransfer))
+		c.log.Debug("trasactionID for self transaction", selfTransactionID)
 
+		selfTransferTokens := make([]block.TransTokens, 0)
+		latestTokenChainBlock := make(map[string]*block.Block)
+
+		for i := range selfTransferTokensList {
+			selfTransTokens := block.TransTokens{
+				Token:     selfTransferTokensList[i].Token,
+				TokenType: selfTransferTokensList[i].TokenType,
+			}
+			selfTransferTokens = append(selfTransferTokens, selfTransTokens)
+			latestBlock := c.w.GetLatestTokenBlock(selfTransferTokensList[i].Token, selfTransferTokensList[i].TokenType)
+			latestTokenChainBlock[selfTransferTokensList[i].Token] = latestBlock
+		}
+
+		selfTransBlockTransInfo := &block.TransInfo{
+			Comment: selfTransferContract.GetComment(),
+			TID:     selfTransactionID,
+			Tokens:  selfTransferTokens,
+		}
+
+		selfTransferTCB := block.TokenChainBlock{
+			TransactionType: block.SpendableRBTTransferredType,     // cvr stage-1
+			TokenOwner:      selfTransferContract.GetReceiverDID(), //ReceiverDID is same as senderDID because it is self transfer
+			TransInfo:       selfTransBlockTransInfo,
+			SmartContract:   selfTransferContract.GetBlock(),
+			Epoch:           txEpoch,
+		}
+
+		c.log.Debug("*******creating a new block for self transaction*****")
+		if latestTokenChainBlock == nil {
+			errMsg := fmt.Sprintf("failed to get prev block of tokens for self-transfer")
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+
+		c.log.Debug(fmt.Sprintf("self transfer tcb : %v", selfTransferTCB))
+
+		selfTransferBlock = block.CreateNewBlock(latestTokenChainBlock, &selfTransferTCB)
+		if selfTransferBlock == nil {
+			c.log.Error("Failed to create a selftransfer token chain block - qrm init")
+			resp.Message = "Failed to create a selftransfer token chain block - qrm init"
+			return resp
+		}
+		//update token type
+		var ok bool
+		for _, t := range selfTransferTokensList {
+
+			selfTransferBlock, ok = selfTransferBlock.UpdateTokenType(t.Token, token.CVR_RBTTokenType+t.TokenType)
+			if !ok {
+				errMsg := fmt.Sprintf("failed to update token cvr-1 type for self transfer block, error: %v", err)
+				c.log.Error(errMsg)
+				resp.Message = errMsg
+				return resp
+			}
+
+		}
+
+		//update the levelDB and SqliteDB
+		updatedTokenStateHashesAfterSelfTransfer, err := c.w.TokensReceived(senderDID, selfTransferTokensList, selfTransferBlock, c.peerID, c.peerID, false, c.ipfs)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to add self-transfer token block and update status, error: %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+		//TODO: Send these updatedTokenStateHashesAfterSelfTransfer to quorums for pinning
+		c.log.Debug(fmt.Sprintf("Updated token state hashes after self transfer are:%v", updatedTokenStateHashesAfterSelfTransfer))
+
+	}
 	sr := SendTokenRequest{
 		Address:         c.peerID + "." + sc.GetSenderDID(),
 		TokenInfo:       tis,
@@ -795,22 +809,24 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		Comments:       req.Comment,
 	}
 
+	c.log.Debug("************initiating explorer updation")
 	c.ec.ExplorerRBTTransaction(etrans)
-	c.log.Info("Transfer finished successfully", "duration", dif, " trnxid", td.TransactionID)
-	resp.Status = true
-	msg := fmt.Sprintf("Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
-	resp.Message = msg
+	c.log.Debug("************completed explorer updation")
+
 	//TODO: return and initiate go routine
 	// Starting CVR stage-2
 	cvrRequest := &wallet.PrePledgeRequest{
-		DID:                 senderDID,
-		QuorumType:          req.Type,
-		TxnID:               transactionID,
-		SelftransferTxnID:   selfTransactionID,
-		SCTransferBlock:     sc.GetBlock(),
-		SCSelfTransferBlock: selfTransferBlock.GetBlock(),
-		TxnEpoch:            int64(txEpoch),
-		ReqID:               reqID,
+		DID:               senderDID,
+		QuorumType:        req.Type,
+		TxnID:             transactionID,
+		SelftransferTxnID: selfTransactionID,
+		SCTransferBlock:   sc.GetBlock(),
+		// SCSelfTransferBlock: selfTransferBlock.GetBlock(),
+		TxnEpoch: int64(txEpoch),
+		ReqID:    reqID,
+	}
+	if selfTransferBlock != nil {
+		cvrRequest.SCSelfTransferBlock = selfTransferBlock.GetBlock()
 	}
 	go c.initiateRBTCVRTwo(cvrRequest)
 
@@ -824,6 +840,10 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	// 	return resp
 	// }
 
+	c.log.Info("Transfer finished successfully", "duration", dif, " trnxid", td.TransactionID)
+	resp.Status = true
+	msg := fmt.Sprintf("Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
+	resp.Message = msg
 	return resp
 }
 

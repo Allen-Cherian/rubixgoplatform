@@ -669,16 +669,31 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 	}
 
 	// read the added block to make sure it was added properly
-	checkBlock, err := w.getBlock(ti[0].TokenType, ti[0].Token, blockId)
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to read added block, block id : %v, err : %v", blockId, err)
-		w.log.Error(errMsg)
-		return nil, fmt.Errorf(errMsg)
-	}
-	if checkBlock == nil {
-		errMsg := fmt.Sprintf("invalid block, failed create token block, block id : %v", blockId)
-		w.log.Error(errMsg)
-		return nil, fmt.Errorf(errMsg)
+	if b.GetTransType() == block.SpendableRBTTransferredType {
+		checkBlock, err := w.getBlock(ti[0].TokenType+50, ti[0].Token, blockId)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to read added block, block id : %v, err : %v", blockId, err)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
+		if checkBlock == nil {
+			errMsg := fmt.Sprintf("invalid block, failed create token block, block id : %v", blockId)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
+	} else {
+
+		checkBlock, err := w.getBlock(ti[0].TokenType, ti[0].Token, blockId)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to read added block, block id : %v, err : %v", blockId, err)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
+		if checkBlock == nil {
+			errMsg := fmt.Sprintf("invalid block, failed create token block, block id : %v", blockId)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
 	}
 
 	//add to ipfs to get latest Token State Hash after receiving the token by receiver. The hashes will be returned to sender, and from there to

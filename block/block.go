@@ -169,6 +169,7 @@ func InitBlock(bb []byte, bm map[string]interface{}, opts ...BlockOption) *Block
 
 func CreateNewBlock(ctcb map[string]*Block, tcb *TokenChainBlock) *Block {
 	if tcb.TransInfo == nil || ctcb == nil {
+		fmt.Println("empty tokens and their latest block")
 		return nil
 	}
 	ntcb := make(map[string]interface{})
@@ -177,11 +178,13 @@ func CreateNewBlock(ctcb map[string]*Block, tcb *TokenChainBlock) *Block {
 	if tcb.GenesisBlock != nil {
 		ntcb[TCGenesisBlockKey] = newGenesisBlock(tcb.GenesisBlock)
 		if ntcb[TCGenesisBlockKey] == nil {
+			fmt.Println("failed to initiate genesis block")
 			return nil
 		}
 	}
 	ntib := newTransInfo(ctcb, tcb.TransInfo)
 	if ntib == nil {
+		fmt.Println("failed to initiate trans-info")
 		return nil
 	}
 	ntcb[TCTransInfoKey] = ntib
@@ -642,10 +645,10 @@ func (b *Block) UpdateTokenType(t string, newTokenType int) (*Block, bool) {
 	}
 	switch tokenTypeMap := ti.(type) {
 	case map[string]interface{}:
-		fmt.Println("***** current token type-1 to be updated :", util.GetIntFromMap(ti, TTTokenTypeKey))
+		fmt.Println("***** 1. current token type to be updated :", util.GetIntFromMap(ti, TTTokenTypeKey))
 		tokenTypeMap[TTTokenTypeKey] = newTokenType
 	case map[interface{}]interface{}:
-		fmt.Println("*****current token type-2 to be updated :", util.GetIntFromMap(ti, TTTokenTypeKey))
+		fmt.Println("***** 2. current token type to be updated :", util.GetIntFromMap(ti, TTTokenTypeKey))
 		tokenTypeMap[TTTokenTypeKey] = newTokenType
 	}
 
