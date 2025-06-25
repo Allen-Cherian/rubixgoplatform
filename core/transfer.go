@@ -641,13 +641,13 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	//update the levelDB and SqliteDB
 	updatedTokenStateHashesAfterSelfTransfer, err := c.w.TokensReceived(senderDID, selfTransferTokensList, selfTransferBlock, c.peerID, c.peerID, false, c.ipfs)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to update token status, error: %v", err)
+		errMsg := fmt.Sprintf("failed to add self-transfer token block and update status, error: %v", err)
 		c.log.Error(errMsg)
 		resp.Message = errMsg
 		return resp
 	}
 	//TODO: Send these updatedTokenStateHashesAfterSelfTransfer to quorums for pinning
-	fmt.Printf("Updated token state hashes after self transfer are:%v", updatedTokenStateHashesAfterSelfTransfer)
+	c.log.Debug(fmt.Sprintf("Updated token state hashes after self transfer are:%v", updatedTokenStateHashesAfterSelfTransfer))
 
 	sr := SendTokenRequest{
 		Address:         c.peerID + "." + sc.GetSenderDID(),

@@ -46,6 +46,7 @@ type TokenStateDetails struct {
 
 func tcsType(tokenType int) string {
 	tt := "wt"
+	tokenType, isCVR := IsCVR(tokenType)
 	switch tokenType {
 	case tkn.RBTTokenType:
 		tt = WholeTokenType
@@ -66,11 +67,16 @@ func tcsType(tokenType int) string {
 	case tkn.FTTokenType:
 		tt = FTTokenType
 	}
+
+	if isCVR {
+		tt = CVRTokenType + "_" + tt
+	}
 	return tt + "-"
 }
 
 func tcsPrefix(tokenType int, t string) string {
 	tt := "wt"
+	tokenType, isCVR := IsCVR(tokenType)
 	switch tokenType {
 	case tkn.RBTTokenType:
 		tt = WholeTokenType
@@ -90,6 +96,9 @@ func tcsPrefix(tokenType int, t string) string {
 		tt = SmartContractTokenType
 	case tkn.FTTokenType:
 		tt = FTTokenType
+	}
+	if isCVR {
+		tt = CVRTokenType + "_" + tt
 	}
 	return tt + "-" + t + "-"
 }
@@ -187,6 +196,7 @@ func tcsBlockID(token string, key string) string {
 
 func (w *Wallet) getChainDB(tt int) *ChainDB {
 	var db *ChainDB
+	tt, _ = IsCVR(tt)
 	switch tt {
 	case tkn.RBTTokenType:
 		db = w.tcs
