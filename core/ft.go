@@ -81,7 +81,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		return err
 	}
 	//TODO: Need to test and verify whether tokens are getiing unlocked if there is an error in creating FT.
-	defer c.w.ReleaseTokens(wholeTokens)
+	defer c.w.ReleaseTokens(wholeTokens,c.testNet)
 	fractionalValue, err := c.GetPresiceFractionalValue(int(numWholeTokens), numFTs)
 	if err != nil {
 		c.log.Error("Failed to calculate FT token value", err)

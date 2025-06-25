@@ -529,7 +529,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 	c.log.Debug("*********** rejected quorums : ", rejectedQuorums)
 
-	// Notify remaining servers in the background without error handling
+	// Notify remaining quorums in the background without error handling
 	for _, qrmIPFSObj := range rejectedQuorums {
 		// qrmIPFSObj := ipfsPortQrm[quorumDID]
 		// if exists {
@@ -559,51 +559,54 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	// 	}
 	// }
 
-	// wait group for 2nd round of concurrent quorum-connection for consensus
-	var wgConsensus sync.WaitGroup
+	// // wait group for 2nd round of concurrent quorum-connection for consensus
+	// var wgConsensus sync.WaitGroup
 	for _, qrmIPFSObj := range selectedQuorums {
-		// qrmIPFSObj := ipfsPortQrm[quorumDID]
-		wgConsensus.Add(1)
-		//connecting with quorums requesting consensus
-		go func(qrm *ipfsport.Peer) {
-			defer wgConsensus.Done()
-			c.connectQuorum(cr, qrm, sc)
-		}(qrmIPFSObj)
+		// wgConsensus.Add(1)
+		// //connecting with quorums requesting consensus
+		// go func(qrm *ipfsport.Peer) {
+		// 	defer wgConsensus.Done()
+		// 	c.connectQuorum(cr, qrm, sc)
+		// }(qrmIPFSObj)
+		go c.connectQuorum(cr, qrmIPFSObj, sc)
 	}
-	// loop := true
-	// // var err error
-	// err = nil
-	// for {
-	// 	time.Sleep(time.Second)
-	// 	c.qlock.Lock()
-	// 	cs, ok := c.quorumRequest[cr.ReqID]
-	// 	if !ok {
-	// 		loop = false
-	// 		err = fmt.Errorf("invalid request")
-	// 	} else {
-	// 		if cs.Result.SuccessCount >= MinConsensusRequired {
-	// 			loop = false
-	// 		} else if cs.Result.RunningCount == 0 {
-	// 			loop = false
-	// 			err = fmt.Errorf("consensus failed, retry transaction after sometimes")
-	// 			c.log.Error("Consensus failed, retry transaction after sometimes")
-	// 		}
-	// 	}
-	// 	c.qlock.Unlock()
-	// 	if !loop {
-	// 		break
-	// 	}
-	// }
-	// if err != nil {
-	// 	unlockErr := c.checkLockedTokens(cr, ql)
-	// 	if unlockErr != nil {
-	// 		c.log.Error(unlockErr.Error() + "Locked tokens could not be unlocked")
-	// 	}
-	// 	return nil, nil, nil, err
-	// }
+	loop := true
+	// var err error
+	err = nil
+	for {
+		time.Sleep(time.Second)
+		c.qlock.Lock()
+		cs, ok := c.quorumRequest[cr.ReqID]
+		if !ok {
+			loop = false
+			err = fmt.Errorf("invalid request")
+		} else {
+			if cs.Result.SuccessCount >= MinConsensusRequired {
+				loop = false
+			} else if cs.Result.RunningCount == 0 {
+				loop = false
+				err = fmt.Errorf("consensus failed, retry transaction after sometimes")
+				c.log.Error("Consensus failed, retry transaction after sometimes")
+			}
+		}
+		c.qlock.Unlock()
+		if !loop {
+			break
+		}
+	}
+	if err != nil {
+		for _, qrmIPFSObj := range selectedQuorums {
+			go c.notifyUnusedQuorums(qrmIPFSObj, cr.ReqID)
+		}
+		// 	unlockErr := c.checkLockedTokens(cr, ql)
+		// 	if unlockErr != nil {
+		// 		c.log.Error(unlockErr.Error() + "Locked tokens could not be unlocked")
+		// 	}
+		return nil, nil, nil, err
+	}
 
-	// wait for quorums' consensus
-	wgConsensus.Wait()
+	// // wait for quorums' consensus
+	// wgConsensus.Wait()
 
 	if c.noBalanceQuorumCount > (QuorumRequired - MinConsensusRequired) {
 		c.log.Error("Consensus failed due to insufficient balance in Quorum(s), Retry transaction after sometime")
@@ -616,18 +619,34 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	// request pledge finality in case of transactions other than CVR, and
 	// just add quorums' signature to block in case of CVR
 	if cr.Mode != SpendableRBTTransferMode {
+		c.log.Debug("*********** requesting pledge finality")
 		nb, err = c.requestPledgeQuorumSignature(nb, cr)
 		if err != nil {
 			c.log.Error("Failed to pledge token", "err", err)
 			return nil, nil, nil, err
 		}
 	} else {
+		c.log.Debug("######### adding quorums' signature to block")
+		c.log.Debug("****** new block before adding signature is ", nb)
 		//update the block with quorum signatures on it.
 		nb, err = c.addQuorumSignatureToBlock(nb, cr)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to add quorum signature on trans block, error: %v", err)
 			c.log.Error(errMsg)
-			return nil, nil, nil, fmt.Errorf(errMsg)
+			return nil, nil, nil, fmt.Errorf("%v", errMsg)
+		}
+
+		c.log.Debug("****** new block after adding signature is ", nb)
+
+		// ********** checking if quorum signature was added to block
+		signer, err := nb.GetSigner()
+		if err != nil {
+			c.log.Error("failed to get signer")
+			return nil, nil, nil, err
+		}
+		if signer == nil {
+			c.log.Error("failed to add quorums sig to block")
+			return nil, nil, nil, fmt.Errorf("failed to add quorums sig to block")
 		}
 	}
 
@@ -2465,6 +2484,17 @@ func (c *Core) createTransTokenBlock(cr *ConensusRequest, sc *contract.Contract,
 			SmartContract:   sc.GetBlock(),
 			PledgeDetails:   ptds,
 		}
+	} else if cr.Mode == SpendableRBTTransferMode {
+		bti.SenderDID = sc.GetSenderDID()
+		bti.ReceiverDID = sc.GetReceiverDID()
+		tcb = block.TokenChainBlock{
+			TransactionType: block.OwnershipTransferredType,
+			TokenOwner:      sc.GetReceiverDID(),
+			TransInfo:       bti,
+			SmartContract:   sc.GetBlock(),
+			PledgeDetails:   ptds,
+			Epoch:           cr.TransactionEpoch,
+		}
 	} else {
 		bti.SenderDID = sc.GetSenderDID()
 		bti.ReceiverDID = sc.GetReceiverDID()
@@ -2604,6 +2634,9 @@ func (c *Core) addQuorumSignatureToBlock(transBlock *block.Block, cr *ConensusRe
 			return nil, fmt.Errorf(errMsg)
 
 		}
+
+		// re-initiating block with updated block-map
+		transBlock = block.InitBlock(nil, transBlock.GetBlockMap())
 	}
 	return transBlock, nil
 }

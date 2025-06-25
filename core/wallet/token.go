@@ -9,6 +9,7 @@ import (
 	ipfsnode "github.com/ipfs/go-ipfs-api"
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/contract"
+	"github.com/rubixchain/rubixgoplatform/token"
 	"github.com/rubixchain/rubixgoplatform/util"
 )
 
@@ -471,7 +472,7 @@ func (w *Wallet) LockToken(wt *Token) error {
 	return w.s.Update(TokenStorage, wt, "did=? AND token_id=?", wt.DID, wt.TokenID)
 }
 
-func (w *Wallet) ReleaseTokens(wt []Token) error {
+func (w *Wallet) ReleaseTokens(wt []Token, isTestNet bool) error {
 	w.l.Lock()
 	defer w.l.Unlock()
 	for i := range wt {
@@ -482,7 +483,29 @@ func (w *Wallet) ReleaseTokens(wt []Token) error {
 			return err
 		}
 		if t.TokenStatus == TokenIsLocked {
-			t.TokenStatus = TokenIsFree
+			// check the latest block type and update to it's previous state
+			tokenType := 0
+			if t.TokenValue == 1 {
+				if isTestNet {
+					tokenType = token.TestTokenType
+				} else {
+					tokenType = token.RBTTokenType
+				}
+
+			} else {
+				if isTestNet {
+					tokenType = token.TestPartTokenType
+				} else {
+					tokenType = token.PartTokenType
+				}
+			}
+
+			latestBlock := w.GetLatestTokenBlock(wt[i].TokenID, tokenType)
+			if latestBlock.GetTransType() == block.OwnershipTransferredType {
+				t.TokenStatus = TokenIsSpendable
+			} else {
+				t.TokenStatus = TokenIsFree
+			}
 			err = w.s.Update(TokenStorage, &t, "token_id=?", t.TokenID)
 			if err != nil {
 				w.log.Error("Failed to update token", "err", err)
@@ -638,11 +661,24 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 	w.l.Lock()
 	defer w.l.Unlock()
 	// TODO :: Needs to be address
+	blockId, _ := b.GetBlockID(ti[0].Token)
 	err := w.CreateTokenBlock(b)
 	if err != nil {
-		blockId, _ := b.GetBlockID(ti[0].Token)
 		fmt.Println("failed to create token block, block Id", blockId)
 		return nil, err
+	}
+
+	// read the added block to make sure it was added properly
+	checkBlock, err := w.getBlock(ti[0].TokenType, ti[0].Token, blockId)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to read added block, block id : %v, err : %v", blockId, err)
+		w.log.Error(errMsg)
+		return nil, fmt.Errorf(errMsg)
+	}
+	if checkBlock == nil {
+		errMsg := fmt.Sprintf("invalid block, failed create token block, block id : %v", blockId)
+		w.log.Error(errMsg)
+		return nil, fmt.Errorf(errMsg)
 	}
 
 	//add to ipfs to get latest Token State Hash after receiving the token by receiver. The hashes will be returned to sender, and from there to
@@ -704,6 +740,12 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 		}
 		// Update token status and pin tokens
 		tokenStatus := TokenIsFree
+
+		// token status should be updated to spendable (17), only if the block is cvr-2 block (OwnershipTransferredType = 15)
+		// token status should be free (0) for receiver in case of cvr-1 block
+		if b.GetTransType() == block.OwnershipTransferredType {
+			tokenStatus = TokenIsSpendable
+		}
 		role := OwnerRole
 		ownerdid := did
 		if pinningServiceMode {
@@ -971,7 +1013,7 @@ func (w *Wallet) ReleaseAllLockedTokens() error {
 	return nil
 }
 
-func (w *Wallet) UnlockLockedTokens(did string, tokenList []string) error {
+func (w *Wallet) UnlockLockedTokens(did string, tokenList []string, isTestNet bool) error {
 	for _, tid := range tokenList {
 		var t Token
 		err := w.s.Read(TokenStorage, &t, "did=? AND token_id=?", did, tid)
@@ -979,11 +1021,35 @@ func (w *Wallet) UnlockLockedTokens(did string, tokenList []string) error {
 			w.log.Error("Failed to update token status", "err", err)
 			return err
 		}
-		t.TokenStatus = TokenIsFree
-		err = w.s.Update(TokenStorage, &t, "did=? AND token_id=?", did, tid)
-		if err != nil {
-			w.log.Error("Failed to update token status", "err", err)
-			return err
+		if t.TokenStatus == TokenIsLocked {
+			// check the latest block type and update to it's previous state
+			tokenType := 0
+			if t.TokenValue == 1 {
+				if isTestNet {
+					tokenType = token.TestTokenType
+				} else {
+					tokenType = token.RBTTokenType
+				}
+
+			} else {
+				if isTestNet {
+					tokenType = token.TestPartTokenType
+				} else {
+					tokenType = token.PartTokenType
+				}
+			}
+
+			latestBlock := w.GetLatestTokenBlock(tid, tokenType)
+			if latestBlock.GetTransType() == block.OwnershipTransferredType {
+				t.TokenStatus = TokenIsSpendable
+			} else {
+				t.TokenStatus = TokenIsFree
+			}
+			err = w.s.Update(TokenStorage, &t, "did=? AND token_id=?", did, tid)
+			if err != nil {
+				w.log.Error("Failed to update token status", "err", err)
+				return err
+			}
 		}
 	}
 	return nil
