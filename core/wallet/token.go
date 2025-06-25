@@ -442,7 +442,7 @@ func (w *Wallet) ReadFTToken(token string) (*FTToken, error) {
 	var t FTToken
 	err := w.s.Read(FTTokenStorage, &t, "token_id=?", token)
 	if err != nil {
-		w.log.Error(fmt.Sprintf("failed to get FT Token %v from FTTokenStorage", token))
+		w.log.Error(fmt.Sprintf("failed to get FT Token %v from FTTokenStorage, err: %v", token, err))
 		return nil, err
 	}
 	return &t, nil

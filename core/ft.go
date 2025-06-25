@@ -275,8 +275,8 @@ func (c *Core) GetFTInfoByDID(did string) ([]model.FTInfo, error) {
 	}
 	FT, err := c.w.GetFTsAndCount(did)
 	if err != nil && err.Error() != "no records found" {
-		c.log.Error("Failed to get tokens", "err", err)
-		return []model.FTInfo{}, fmt.Errorf("failed to get tokens")
+		c.log.Error("Failed to get tokens FTs and Count", "err", err)
+		return []model.FTInfo{}, fmt.Errorf("Failed to get tokens FTs and Count")
 	}
 	ftInfoMap := make(map[string]map[string]int)
 
@@ -448,6 +448,13 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 	}
 	TokenInfo := make([]contract.TokenInfo, 0)
 	for i := range FTsForTxn {
+		FTsForTxn[i].TokenStatus = wallet.TokenIsLocked
+		lockFTErr := c.s.Update(wallet.FTTokenStorage, FTsForTxn, "ft_name=?", FTsForTxn[i].FTName)
+		if lockFTErr != nil {
+			c.log.Error("Failed to update FT token status", "err", lockFTErr)
+			resp.Message = "Failed to update FT token status"
+			return resp
+		}
 		tt := c.TokenType(FTString)
 		blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
 		if blk == nil {
@@ -598,7 +605,9 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		c.log.Debug("FT transaction still processing with txn id ", cr.TransactionID)
 
 		msg := fmt.Sprintf("FT Transaction is still processing, with transaction id %v ", cr.TransactionID)
-		resp.Result = cr.TransactionID
+		if resp.Result == "" {
+			resp.Result = cr.TransactionID
+		}
 		resp.Message = msg
 		resp.Status = true
 		return resp
