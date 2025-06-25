@@ -702,7 +702,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 		//serach for the required whole amount
 		wholeTokens, remWhole, err := c.w.GetWholeTokens(did, wholeValue, txnMode)
 		if err != nil && err.Error() != "no records found" {
-			c.w.ReleaseTokens(wholeTokens)
+			c.w.ReleaseTokens(wholeTokens, c.testNet)
 			c.log.Error("failed to search for whole tokens", "err", err)
 			return nil, 0.0, err
 		}
@@ -731,7 +731,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 				if strings.Contains(err.Error(), "no records found") {
 					return requiredTokens, reqAmt, nil
 				}
-				c.w.ReleaseTokens(wholeTokens)
+				c.w.ReleaseTokens(wholeTokens, c.testNet)
 				c.log.Error("failed to lock part tokens", "err", err)
 				return nil, 0.0, err
 			}
@@ -741,14 +741,14 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 				sum = floatPrecision(sum, MaxDecimalPlaces)
 			}
 			if sum < reqAmt {
-				c.w.ReleaseTokens(wholeTokens)
+				c.w.ReleaseTokens(wholeTokens, c.testNet)
 				c.log.Error("There are no Whole tokens and the exisitng decimal balance is not sufficient for the transfer, please use smaller amount")
 				return nil, 0.0, fmt.Errorf("there are no whole tokens and the exisitng decimal balance is not sufficient for the transfer, please use smaller amount")
 			}
 			// Create a slice to store the indices of elements to be removed
 			var indicesToRemove []int
 			// Iterate through allPartTokens
-			defer c.w.ReleaseTokens(allPartTokens)
+			defer c.w.ReleaseTokens(allPartTokens, c.testNet)
 			for i, partToken := range allPartTokens {
 				// Subtract the partToken value from the txnAmount
 				// If the transaction amount is less than the partToken.TokenValue, skip
@@ -771,7 +771,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 				copy(allPartTokens[idx-i:], allPartTokens[idx-i+1:])
 			}
 			allPartTokens = allPartTokens[:len(allPartTokens)-len(indicesToRemove)]
-			c.w.ReleaseTokens(allPartTokens)
+			c.w.ReleaseTokens(allPartTokens, c.testNet)
 
 			if reqAmt > 0 {
 				// Add the remaining amount to the remainingAmount variable
@@ -804,7 +804,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 			// Create a slice to store the indices of elements to be removed
 			var indicesToRemove []int
 			// Iterate through allPartTokens
-			defer c.w.ReleaseTokens(allPartTokens)
+			defer c.w.ReleaseTokens(allPartTokens, c.testNet)
 			for i, partToken := range allPartTokens {
 				// Subtract the partToken value from the txnAmount
 				// If the transaction amount is less than the partToken.TokenValue, skip
@@ -827,7 +827,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 				copy(allPartTokens[idx-i:], allPartTokens[idx-i+1:])
 			}
 			allPartTokens = allPartTokens[:len(allPartTokens)-len(indicesToRemove)]
-			c.w.ReleaseTokens(allPartTokens)
+			c.w.ReleaseTokens(allPartTokens, c.testNet)
 			if txnAmount > 0 {
 				// Add the remaining amount to the remainingAmount variable
 				remainingAmount += txnAmount
@@ -838,7 +838,7 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 	} else {
 		return make([]wallet.Token, 0), reqAmt, nil
 	}
-	defer c.w.ReleaseTokens(requiredTokens)
+	defer c.w.ReleaseTokens(requiredTokens, c.testNet)
 	remainingAmount = floatPrecision(remainingAmount, MaxDecimalPlaces)
 	return requiredTokens, remainingAmount, nil
 }
@@ -1374,11 +1374,12 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 		c.log.Error("Failed to get did channels")
 		return
 	}
+	c.log.Debug("!!!!!!!!!!!!!!!!!!! final response from cvr ", br)
 	didChannel.OutChan <- br
 }
 
 // this function gathers all the required free tokens for CVR and creates a temp contract block for conensus
-func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIRequest) (*model.BasicResponse){
+func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIRequest) *model.BasicResponse {
 
 	c.log.Debug("****** receievd API request for CVR-2 : ", reqID, "request :", req)
 
@@ -1401,7 +1402,7 @@ func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIReque
 	}
 
 	// release the locked tokens before exit
-	defer c.w.ReleaseTokens(freeTokensList)
+	defer c.w.ReleaseTokens(freeTokensList, c.testNet)
 
 	senderDID := req.DID
 	dc, err := c.SetupDID(reqID, senderDID)
@@ -1524,7 +1525,7 @@ func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIReque
 	}
 
 	response = c.initiateRBTCVRTwo(cvrReq)
-	return  response
+	return response
 }
 
 func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicResponse {
@@ -1670,6 +1671,8 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		}
 	}
 
+	resp.Status = true
+	resp.Message = "consensus completed"
 	return resp
 }
 

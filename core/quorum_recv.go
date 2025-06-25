@@ -1097,7 +1097,7 @@ func (c *Core) updateReceiverToken(
 
 	var updatedTokenStateHashes []string
 
-	b := block.InitBlock(tokenChainBlock, nil)
+	b := block.InitBlock(tokenChainBlock, nil, block.NoSignature())
 	if b == nil {
 		return nil, nil, fmt.Errorf("invalid token chain block")
 	}
@@ -2053,7 +2053,7 @@ func (c *Core) unlockTokens(req *ensweb.Request) *ensweb.Result {
 		crep.Message = "Failed to parse json request"
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
-	err = c.w.UnlockLockedTokens(tokenList.DID, tokenList.Tokens)
+	err = c.w.UnlockLockedTokens(tokenList.DID, tokenList.Tokens, c.testNet)
 	if err != nil {
 		c.log.Error("Failed to update token status", "err", err)
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
@@ -2096,7 +2096,7 @@ func (c *Core) notifyUnusedQuorumsResponse(req *ensweb.Request) *ensweb.Result {
 	}
 	// unlock all the locked tokens to pledge for the given consensus request ID
 	for did, lockedTokens := range pd.PledgedTokens {
-		err = c.w.UnlockLockedTokens(did, lockedTokens)
+		err = c.w.UnlockLockedTokens(did, lockedTokens, c.testNet)
 		if err != nil {
 			c.log.Error("Failed to update token status", "err", err)
 			return c.l.RenderJSON(req, struct{}{}, http.StatusOK)

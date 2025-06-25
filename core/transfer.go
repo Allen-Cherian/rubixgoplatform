@@ -96,7 +96,7 @@ func gatherTokensForTransaction(c *Core, req *model.RBTTransferRequest, dc did.D
 		// Use SpendableRBTTransferMode (already set as default)
 		reqTokens, remainingAmount, err := c.GetRequiredTokens(senderDID, req.TokenCount, transferMode)
 		if err != nil {
-			c.w.ReleaseTokens(reqTokens)
+			c.w.ReleaseTokens(reqTokens, c.testNet)
 			return nil, transferMode, fmt.Errorf("failed to get spendable tokens: %v", err.Error())
 		}
 
@@ -107,7 +107,7 @@ func gatherTokensForTransaction(c *Core, req *model.RBTTransferRequest, dc did.D
 		if remainingAmount > 0 {
 			wt, err := c.GetTokens(dc, senderDID, remainingAmount, SpendableRBTTransferMode)
 			if err != nil {
-				c.w.ReleaseTokens(tokensForTransfer)
+				c.w.ReleaseTokens(tokensForTransfer, c.testNet)
 				return nil, transferMode, fmt.Errorf("failed to get additional spendable tokens: %v", err.Error())
 			}
 			if len(wt) != 0 {
@@ -122,7 +122,7 @@ func gatherTokensForTransaction(c *Core, req *model.RBTTransferRequest, dc did.D
 		}
 
 		if sumOfTokensForTxn != req.TokenCount {
-			c.w.ReleaseTokens(tokensForTransfer)
+			c.w.ReleaseTokens(tokensForTransfer, c.testNet)
 			return nil, transferMode, fmt.Errorf("sum of selected tokens %v does not equal transaction value %v", sumOfTokensForTxn, req.TokenCount)
 		}
 
@@ -314,7 +314,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	}
 
 	// release the locked tokens before exit
-	defer c.w.ReleaseTokens(tokensForTxn)
+	defer c.w.ReleaseTokens(tokensForTxn, c.testNet)
 
 	for i := range tokensForTxn {
 		_, err := c.w.Pin(tokensForTxn[i].TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.Sender, req.Receiver, tokensForTxn[i].TokenValue)
@@ -528,15 +528,19 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	// get all self-transfer tokens
 	selfTransferTokensList := make([]contract.TokenInfo, 0)
+	lockedTokensForSelfTransfer := make([]string, 0)
 	for selfTransferToken := range selfTransferTokensMap {
-		selftransferToken, err := c.w.GetToken(selfTransferToken, wallet.TokenIsFree)
+		selftransferTokenInfo, err := c.w.GetToken(selfTransferToken, wallet.TokenIsSpendable)
 		if err != nil {
-			errMsg := fmt.Sprintf("failed to update the token status, token: %v, error: %v", selfTransferToken, err)
+			errMsg := fmt.Sprintf("failed to get token for self-transfer, token: %v, error: %v", selfTransferToken, err)
 			c.log.Error(errMsg)
+			c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
+			resp.Message = errMsg
+			return resp
 		}
 
 		tts := "rbt"
-		if selftransferToken.TokenValue != 1 {
+		if selftransferTokenInfo.TokenValue != 1 {
 			tts = "part"
 		}
 		tt := c.TokenType(tts)
@@ -556,12 +560,12 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		selftransferTokeninfo := contract.TokenInfo{
 			Token:      selfTransferToken,
 			TokenType:  tt,
-			TokenValue: selftransferToken.TokenValue,
+			TokenValue: selftransferTokenInfo.TokenValue,
 			OwnerDID:   sc.GetSenderDID(),
 			BlockID:    bid,
 		}
 		selfTransferTokensList = append(selfTransferTokensList, selftransferTokeninfo)
-
+		lockedTokensForSelfTransfer = append(lockedTokensForSelfTransfer, selfTransferToken)
 	}
 	//create new contract for self transfer
 	selfTransferContractType := getContractType(reqID, req, selfTransferTokensList, isSelfRBTTransfer)
@@ -855,7 +859,7 @@ func (c *Core) initiatePinRBT(reqID string, req *model.RBTPinRequest) *model.Bas
 	if req.TokenCount == 0 {
 		reqTokens, err := c.w.GetAllFreeToken(did)
 		if err != nil {
-			c.w.ReleaseTokens(reqTokens)
+			c.w.ReleaseTokens(reqTokens, c.testNet)
 			c.log.Error("Failed to get tokens", "err", err)
 			resp.Message = "Insufficient tokens or tokens are locked or " + err.Error()
 			return resp
@@ -898,7 +902,7 @@ func (c *Core) initiatePinRBT(reqID string, req *model.RBTPinRequest) *model.Bas
 
 	reqTokens, remainingAmount, err := c.GetRequiredTokens(did, req.TokenCount, PinningServiceMode)
 	if err != nil {
-		c.w.ReleaseTokens(reqTokens)
+		c.w.ReleaseTokens(reqTokens, c.testNet)
 		c.log.Error("Failed to get tokens", "err", err)
 		resp.Message = "Insufficient tokens or tokens are locked or " + err.Error()
 		return resp
@@ -929,7 +933,7 @@ func (c *Core) completePinning(st time.Time, reqID string, req *model.RBTPinRequ
 		sumOfTokensForTxn = floatPrecision(sumOfTokensForTxn, MaxDecimalPlaces)
 	}
 	// release the locked tokens before exit
-	defer c.w.ReleaseTokens(tokensForTxn)
+	defer c.w.ReleaseTokens(tokensForTxn, c.testNet)
 
 	for i := range tokensForTxn {
 		c.w.Pin(tokensForTxn[i].TokenID, wallet.PinningRole, did, "TID-Not Generated", req.Sender, req.PinningNode, tokensForTxn[i].TokenValue)
