@@ -526,17 +526,21 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		return resp
 	}
 
-	// get all self-transfer tokens
+	// get all self-transfer tokens, 
+	// the final self-transfer token list is : selfTransferTokensList
 	selfTransferTokensList := make([]contract.TokenInfo, 0)
 	lockedTokensForSelfTransfer := make([]string, 0)
 	for selfTransferToken := range selfTransferTokensMap {
+
+		// check if the token is spendable, if not then do not include in self-transfer 
 		selftransferTokenInfo, err := c.w.GetToken(selfTransferToken, wallet.TokenIsSpendable)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to get token for self-transfer, token: %v, error: %v", selfTransferToken, err)
 			c.log.Error(errMsg)
-			c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
-			resp.Message = errMsg
-			return resp
+			continue
+			// c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
+			// resp.Message = errMsg
+			// return resp
 		}
 
 		tts := "rbt"
@@ -548,12 +552,14 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		if blk == nil {
 			c.log.Error("failed to get latest block, invalid token chain")
 			resp.Message = "failed to get latest block, invalid token chain"
+			c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
 			return resp
 		}
 		bid, err := blk.GetBlockID(selfTransferToken)
 		if err != nil {
 			c.log.Error("failed to get block id", "err", err)
 			resp.Message = "failed to get block id, " + err.Error()
+			c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
 			return resp
 		}
 
@@ -575,6 +581,8 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	c.log.Debug("*******creating the contract for self transaction in cvr-1*******")
 
 	selfTransferContract := contract.CreateNewContract(selfTransferContractType)
+
+	c.log.Debug("******** sender signing on self-transfer txn id")
 
 	err = selfTransferContract.UpdateSignature(dc)
 	if err != nil {
