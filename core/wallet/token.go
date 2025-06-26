@@ -581,8 +581,8 @@ func (w *Wallet) TokensTransferred(did string, ti []contract.TokenInfo, b *block
 		var tokenStatus int
 		if pinningServiceMode {
 			tokenStatus = TokenIsPinnedAsService
-		} else if b.GetTransType() == block.OwnershipTransferredType {
-			tokenStatus = TokenIsSpendable
+			// } else if b.GetTransType() == block.OwnershipTransferredType {
+			// 	tokenStatus = TokenIsSpendable
 		} else {
 			tokenStatus = TokenIsTransferred
 		}

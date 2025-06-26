@@ -179,7 +179,7 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 				c.log.Error("failed to update parent token sync status as incomplete, token ", pt)
 			}
 		}
-		
+
 	}
 	if ptb.GetTransType() != block.TokenBurntType {
 		issueType = ParentTokenNotBurned // parent token is not in burnt stage
@@ -210,11 +210,24 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			continue
 		}
 	}
+
+	// var p *ipfsport.Peer
+	// var err error
+	// // if sender did and receiver did is different and cr.mode is spendableRbtMode,
+	// // then the current owner of the tokens must be the receiver, so connect with the receiver
+	// if cr.Mode == SpendableRBTTransferMode && sc.GetSenderDID() != sc.GetReceiverDID() {
+	// 	p, err = c.getPeer(receiverAddress)
+	// 	if err != nil {
+	// 		c.log.Error("Failed to get peer", "err", err)
+	// 		return false, err
+	// 	}
+	// } else {
 	p, err := c.getPeer(address)
 	if err != nil {
 		c.log.Error("Failed to get peer", "err", err)
 		return false, err
 	}
+	// }
 	defer p.Close()
 	tokensSyncInfo := make([]TokenSyncInfo, 0)
 	for i := range ti {

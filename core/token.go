@@ -636,7 +636,7 @@ func (c *Core) syncGenesisAndLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRe
 
 	// add genesis block
 	if trep.GenesisBlock != nil {
-		fmt.Println("adding genesis block")
+		c.log.Debug("adding genesis block")
 		genesisBlock := block.InitBlock(trep.GenesisBlock, nil)
 		if genesisBlock == nil {
 			c.log.Error("Failed to initiate genesis block, invalid block, sync failed", "err", err)
@@ -650,7 +650,7 @@ func (c *Core) syncGenesisAndLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRe
 	}
 	// add latest block
 	if trep.LatestBlock != nil {
-		fmt.Println("adding latest block")
+		c.log.Debug("adding latest block")
 		latestBlock := block.InitBlock(trep.LatestBlock, nil)
 		if latestBlock == nil {
 			c.log.Error("Failed to initiate latest block, invalid block, sync failed", "err", err)

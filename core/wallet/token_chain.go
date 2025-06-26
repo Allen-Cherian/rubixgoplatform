@@ -412,7 +412,7 @@ func (w *Wallet) getLatestBlock(tt int, token string) *block.Block {
 				return nil
 			}
 		}
-		b := block.InitBlock(blk, nil)
+		b := block.InitBlock(blk, nil, block.NoSignature())
 		return b
 	}
 	return nil

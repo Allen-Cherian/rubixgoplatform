@@ -110,6 +110,7 @@ type UpdatePledgeRequest struct {
 	TransferredTokenStateHashes []string `json:"token_state_hash_info"`
 	TransactionID               string   `json:"transaction_id"`
 	TransactionEpoch            int      `json:"transaction_epoch"`
+	ConsensusReqId              string   `json:"consensus_req_id"`
 }
 
 type SendTokenRequest struct {
@@ -445,6 +446,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}
 
 	c.log.Debug("********** Quorum ipfs obj list", ipfsPortQrm)
+	c.log.Debug("********** trans-tokens ", sc.GetTransTokenInfo())
 
 	// //wait group for first round of go routine that fetches pledge-tokens details from quorums
 	// var wg sync.WaitGroup
@@ -596,12 +598,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}
 	if err != nil {
 		for _, qrmIPFSObj := range selectedQuorums {
-			go c.notifyUnusedQuorums(qrmIPFSObj, cr.ReqID)
+			err := c.notifyUnusedQuorums(qrmIPFSObj, cr.ReqID)
+			if err != nil {
+				c.log.Error("locked tokens of quorums could not be ulnocked, err: ", err)
+			}
 		}
-		// 	unlockErr := c.checkLockedTokens(cr, ql)
-		// 	if unlockErr != nil {
-		// 		c.log.Error(unlockErr.Error() + "Locked tokens could not be unlocked")
-		// 	}
+		// unlockErr := c.checkLockedTokens(cr, ql)
+		// if unlockErr != nil {
+		// 	c.log.Error(unlockErr.Error() + "Locked tokens could not be unlocked")
+		// }
 		return nil, nil, nil, err
 	}
 
@@ -616,39 +621,40 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	blockHash, _ := nb.GetHash()
 	c.log.Debug("*************** block hash before adding quorum signature : %v", blockHash)
 
-	// request pledge finality in case of transactions other than CVR, and
-	// just add quorums' signature to block in case of CVR
-	if cr.Mode != SpendableRBTTransferMode {
-		c.log.Debug("*********** requesting pledge finality")
-		nb, err = c.requestPledgeQuorumSignature(nb, cr)
-		if err != nil {
-			c.log.Error("Failed to pledge token", "err", err)
-			return nil, nil, nil, err
-		}
-	} else {
-		c.log.Debug("######### adding quorums' signature to block")
-		c.log.Debug("****** new block before adding signature is ", nb)
-		//update the block with quorum signatures on it.
-		nb, err = c.addQuorumSignatureToBlock(nb, cr)
-		if err != nil {
-			errMsg := fmt.Sprintf("failed to add quorum signature on trans block, error: %v", err)
-			c.log.Error(errMsg)
-			return nil, nil, nil, fmt.Errorf("%v", errMsg)
-		}
-
-		c.log.Debug("****** new block after adding signature is ", nb)
-
-		// ********** checking if quorum signature was added to block
-		signer, err := nb.GetSigner()
-		if err != nil {
-			c.log.Error("failed to get signer")
-			return nil, nil, nil, err
-		}
-		if signer == nil {
-			c.log.Error("failed to add quorums sig to block")
-			return nil, nil, nil, fmt.Errorf("failed to add quorums sig to block")
-		}
+	//update the block with quorum signatures on it.
+	c.log.Debug("######### adding quorums' signature to block")
+	// c.log.Debug("****** new block before adding signature is ", nb)
+	nb, err = c.addQuorumSignatureToBlock(nb, cr)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to add quorum signature on trans block, error: %v", err)
+		c.log.Error(errMsg)
+		return nil, nil, nil, fmt.Errorf("%v", errMsg)
 	}
+
+	// c.log.Debug("****** new block after adding signature is ", nb)
+
+	// ********** checking if quorum signature was added to block
+	signer, err := nb.GetSigner()
+	if err != nil {
+		c.log.Error("failed to get signer")
+		return nil, nil, nil, err
+	}
+	if signer == nil {
+		c.log.Error("failed to add quorums sig to block")
+		return nil, nil, nil, fmt.Errorf("failed to add quorums sig to block")
+	}
+
+	// request pledge finality, and
+	// if cr.Mode != SpendableRBTTransferMode {
+	c.log.Debug("*********** requesting pledge finality")
+	nb, err = c.requestPledgeQuorumSignature(nb, cr)
+	if err != nil {
+		c.log.Error("Failed to pledge token", "err", err)
+		return nil, nil, nil, err
+	}
+	// } else {
+
+	// }
 
 	blockHash1, _ := nb.GetHash()
 	c.log.Debug("********** block hash after adding quorum signature : %v", blockHash1)
@@ -2112,6 +2118,7 @@ func (c *Core) quorumPledgeFinality(cr *ConensusRequest, newBlock *block.Block, 
 			TransactionID:               transactionId,
 			TransferredTokenStateHashes: nil,
 			TransactionEpoch:            cr.TransactionEpoch,
+			ConsensusReqId:              cr.ReqID,
 		}
 
 		if newTokenStateHashes != nil {
@@ -2722,10 +2729,16 @@ func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer) (Quo
 					pd.PledgedTokenChainBlock[t] = prs.TokenChainBlock[i]
 					pd.PledgedTokens[did] = append(pd.PledgedTokens[did], t)
 					pd.TokenList = append(pd.TokenList, Token{TokenHash: prs.Tokens[i], TokenValue: prs.TokenValue[i]})
-					pledgingAmount += prs.TokenValue[i]
 				}
 			}
-			quorumSelection.PledgingAmount = pledgingAmount
+			// calculate sum of pledge tokens
+			for _, pledgeTokenValue := range prs.TokenValue {
+				pledgingAmount += floatPrecision(pledgingAmount + pledgeTokenValue, MaxDecimalPlaces) 
+				c.log.Debug("****** token values: ", prs.TokenValue, "updated pledging amt :", pledgingAmount)
+			}
+
+			quorumSelection.PledgingAmount = floatPrecision(pledgingAmount, MaxDecimalPlaces)
+			c.log.Debug("pledge amout :", pledgingAmount, "quorum : ", did)
 			c.qlock.Lock()
 			c.pd[cr.ReqID] = pd
 			c.qlock.Unlock()
@@ -2922,11 +2935,19 @@ func (c *Core) checkLockedTokens(cr *ConensusRequest, quorumList []string) error
 	return nil
 }
 
-func (c *Core) notifyUnusedQuorums(qrmIPFSObj *ipfsport.Peer, consensusRequestID string) {
+func (c *Core) notifyUnusedQuorums(qrmIPFSObj *ipfsport.Peer, consensusRequestID string) error {
+	var br model.BasicResponse
 	// call API to inform quorums that they can unlock their pledge tokens : /api/notify-unused-quorums
-	err := qrmIPFSObj.SendJSONRequest("POST", APINotifyUnusedQuorums, nil, &consensusRequestID, nil, true)
+	err := qrmIPFSObj.SendJSONRequest("POST", APINotifyUnusedQuorums, nil, &consensusRequestID, &br, true)
 	if err != nil {
 		c.log.Error("Invalid response from unused quorums, ", "err ", err)
-		return
+		return err
 	}
+	if !br.Status {
+		errMsg := fmt.Sprintf("failed to unlock quorum : %v pledge tokens, err : %v", qrmIPFSObj.GetPeerDID(), br.Message)
+		c.log.Error(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+	c.log.Info(br.Message)
+	return nil
 }

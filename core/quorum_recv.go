@@ -182,7 +182,11 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	}
 	for i := range ti {
 		wg.Add(1)
-		go c.pinCheck(ti[i].Token, i, cr.SenderPeerID, cr.ReceiverPeerID, results, &wg)
+		if cr.Mode == SpendableRBTTransferMode {
+			go c.pinCheck(ti[i].Token, i, cr.ReceiverPeerID, "", results, &wg)
+		} else {
+			go c.pinCheck(ti[i].Token, i, cr.SenderPeerID, cr.ReceiverPeerID, results, &wg)
+		}
 	}
 	wg.Wait()
 	for i := range results {
@@ -299,45 +303,45 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 
 	c.log.Debug(" ^^^^^^ checking if trans block is empty : ", transTknBlock.GetBlock() == nil)
 
-	// quorum pledge finality in case of pre-pledging
-	if cr.Mode == SpendableRBTTransferMode {
-		c.log.Debug("********** proceeding for pledge finality")
-		// updated token state hashes
-		var txnTokenHashes []string = make([]string, 0)
-		for _, info := range ti {
-			t := info.Token
-			blockId, _ := transTknBlock.GetBlockID(t)
-			tokenIDTokenStateData := t + blockId
-			tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
-			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
-			txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
-		}
-		pledgeTokensMap := c.pd[cr.ReqID]
-		pledgeFinalityReq := UpdatePledgeRequest{
-			Mode:                        cr.Mode,
-			PledgedTokens:               pledgeTokensMap.PledgedTokens[did],
-			TokenChainBlock:             transTknBlock.GetBlock(),
-			TransferredTokenStateHashes: txnTokenHashes,
-			TransactionID:               cr.TransactionID,
-			TransactionEpoch:            cr.TransactionEpoch,
-		}
+	// // quorum pledge finality in case of pre-pledging
+	// if cr.Mode == SpendableRBTTransferMode {
+	// 	c.log.Debug("********** proceeding for pledge finality")
+	// 	// updated token state hashes
+	// 	var txnTokenHashes []string = make([]string, 0)
+	// 	for _, info := range ti {
+	// 		t := info.Token
+	// 		blockId, _ := transTknBlock.GetBlockID(t)
+	// 		tokenIDTokenStateData := t + blockId
+	// 		tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
+	// 		tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+	// 		txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
+	// 	}
+	// 	pledgeTokensMap := c.pd[cr.ReqID]
+	// 	pledgeFinalityReq := UpdatePledgeRequest{
+	// 		Mode:                        cr.Mode,
+	// 		PledgedTokens:               pledgeTokensMap.PledgedTokens[did],
+	// 		TokenChainBlock:             transTknBlock.GetBlock(),
+	// 		TransferredTokenStateHashes: txnTokenHashes,
+	// 		TransactionID:               cr.TransactionID,
+	// 		TransactionEpoch:            cr.TransactionEpoch,
+	// 	}
 
-		c.log.Debug("###33pledgefinality req : is trans block empty ? ", pledgeFinalityReq.TokenChainBlock == nil)
-		// pledge finality
-		response := c.UpdatePledgeToken(pledgeFinalityReq, did)
-		if !response.Status {
-			errMsg := fmt.Sprintf("failed to update pledge tokens, err : %v", response.Message)
-			c.log.Error(errMsg)
-			crep.Message = errMsg
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
-		}
+	// 	c.log.Debug("###33pledgefinality req : is trans block empty ? ", pledgeFinalityReq.TokenChainBlock == nil)
+	// 	// pledge finality
+	// response := c.UpdatePledgeToken(pledgeFinalityReq, did)
+	// 	if !response.Status {
+	// 		errMsg := fmt.Sprintf("failed to update pledge tokens, err : %v", response.Message)
+	// 		c.log.Error(errMsg)
+	// 		crep.Message = errMsg
+	// 		return c.l.RenderJSON(req, &crep, http.StatusOK)
+	// 	}
 
-		c.log.Debug("********** pledge finality response : ", response)
+	// 	c.log.Debug("********** pledge finality response : ", response)
 
-		// delete pledge tokens and consensus request map
-		delete(c.pd, cr.ReqID)
+	// 	// delete pledge tokens and consensus request map
+	// 	delete(c.pd, cr.ReqID)
 
-	}
+	// }
 
 	return c.l.RenderJSON(req, &crep, http.StatusOK)
 }
@@ -1045,9 +1049,12 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 		TokenChainBlock: make([][]byte, 0),
 	}
 
+	var totalPledgeAmt float64 = 0
+
 	for i := 0; i < totalLockedTokens; i++ {
 		presp.Tokens = append(presp.Tokens, wt[i].TokenID)
 		presp.TokenValue = append(presp.TokenValue, wt[i].TokenValue)
+		totalPledgeAmt = floatPrecision(totalPledgeAmt, MaxDecimalPlaces) + wt[i].TokenValue
 		ts := RBTString
 		if wt[i].TokenValue != 1.0 {
 			ts = PartString
@@ -1060,6 +1067,9 @@ func (c *Core) reqPledgeToken(req *ensweb.Request) *ensweb.Result {
 		}
 		presp.TokenChainBlock = append(presp.TokenChainBlock, tc.GetBlock())
 	}
+
+	c.log.Debug("****** pledge reply :", presp.TokenValue)
+	c.log.Debug("********* total pledge amt ", floatPrecision(totalPledgeAmt, MaxDecimalPlaces))
 
 	// maintain pledge tokens map with conensus request ID in core struct for future reference
 	consensusPledgeTknMap := make(map[string][]string)
@@ -1158,8 +1168,6 @@ func (c *Core) updateReceiverToken(
 
 			c.log.Debug("************ updating token type, adding 50 to the current type")
 
-			c.log.Debug("block after updating token type : ", b)
-
 			// updating token type as per cvr stage
 			// if CVRStage == wallet.CVRStage1_Sender_to_Receiver {
 			b, ok = b.UpdateTokenType(t, token.CVR_RBTTokenType+ti.TokenType)
@@ -1167,7 +1175,6 @@ func (c *Core) updateReceiverToken(
 				c.log.Error("failed to update token cvr type")
 				return nil, senderPeer, fmt.Errorf("failed to update tokenType of  Token " + t)
 			}
-			c.log.Debug("block after updating token type : ", b)
 
 			// }
 		}
@@ -1600,6 +1607,7 @@ func (c *Core) updatePledgeToken(req *ensweb.Request) *ensweb.Result {
 	}
 
 	crep = c.UpdatePledgeToken(ur, did)
+	delete(c.pd, ur.ConsensusReqId)
 
 	return c.l.RenderJSON(req, &crep, http.StatusOK)
 }
@@ -2083,31 +2091,44 @@ func (c *Core) updateTokenHashDetails(req *ensweb.Request) *ensweb.Result {
 
 func (c *Core) notifyUnusedQuorumsResponse(req *ensweb.Request) *ensweb.Result {
 	// unused quorums are notified to unlock pledge tokens by API : /api/notify-unused-quorums
+	resp := &model.BasicResponse{
+		Status: false,
+	}
 	var consensusRequestID string
 	err := c.l.ParseJSON(req, &consensusRequestID)
 	c.log.Debug("notification to unlock locked tokens to pledge")
 	if err != nil {
-		c.log.Error("Failed to parse json request", "err", err)
-		return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
+		errMsg := fmt.Sprintf("Failed to parse json request, err : %v", err)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return c.l.RenderJSON(req, resp, http.StatusOK)
 	}
 
 	// fetch locked tokens details and unlock
 	pd, ok := c.pd[consensusRequestID]
-	if !ok {
-		c.log.Error("invalid pledge tokens details")
-		return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
-	}
-	// unlock all the locked tokens to pledge for the given consensus request ID
-	for did, lockedTokens := range pd.PledgedTokens {
-		err = c.w.UnlockLockedTokens(did, lockedTokens, c.testNet)
-		if err != nil {
-			c.log.Error("Failed to update token status", "err", err)
-			return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
+	// if !ok {
+	// 	errMsg := fmt.Sprintf("invalid pledge tokens details for consensus req id : %v", consensusRequestID)
+	// 	c.log.Error(errMsg)
+	// 	resp.Message = errMsg
+	// 	return c.l.RenderJSON(req, resp, http.StatusOK)
+	// }
+	if ok {
+		// unlock all the locked tokens to pledge for the given consensus request ID
+		for did, lockedTokens := range pd.PledgedTokens {
+			err = c.w.UnlockLockedTokens(did, lockedTokens, c.testNet)
+			if err != nil {
+				errMsg := fmt.Sprintf("Failed to update token status, err : %v", err)
+				c.log.Error(errMsg)
+				resp.Message = errMsg
+				return c.l.RenderJSON(req, resp, http.StatusOK)
+			}
 		}
+
+		// delete the map from core struct
+		delete(c.pd, consensusRequestID)
 	}
 
-	// delete the map from core struct
-	delete(c.pd, consensusRequestID)
-
-	return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
+	resp.Status = true
+	resp.Message = "unlocked pledge tokens successfully"
+	return c.l.RenderJSON(req, resp, http.StatusOK)
 }

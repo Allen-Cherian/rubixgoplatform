@@ -366,14 +366,16 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			}
 		}
 	}
-	wta := make([]string, 0)
-	for i := range tokensForTxn {
-		wta = append(wta, tokensForTxn[i].TokenID)
-	}
+	// wta := make([]string, 0)
+	// for i := range tokensForTxn {
+	// 	wta = append(wta, tokensForTxn[i].TokenID)
+	// }
 
 	tis := make([]contract.TokenInfo, 0)
 	tokenListForExplorer := []Token{}
 	selfTransferTokensMap := make(map[string]struct{})
+
+	c.log.Debug("tokens for transaction : ", tokensForTxn)
 
 	for i := range tokensForTxn {
 		tts := "rbt"
@@ -417,11 +419,16 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		// if exists delete the token from the self-transfer map, if does not exist
 		// then fetch the list of all tokens from the latest block, and
 		// add all the tokens to the self-transfer map except the trans-token
+		c.log.Debug("*********dealing with trans-token :", tokensForTxn[i].TokenID)
+
 		_, exists := selfTransferTokensMap[tokensForTxn[i].TokenID]
 		if exists {
+			c.log.Debug("&&&&&trans-token in self-trans map before deleting : ", selfTransferTokensMap[tokensForTxn[i].TokenID])
 			delete(selfTransferTokensMap, tokensForTxn[i].TokenID)
+			c.log.Debug("&&&&&&&trans-token in self-trans map after deleting : ", selfTransferTokensMap[tokensForTxn[i].TokenID])
 		} else {
 			transTokensInBlock := blk.GetTransTokens()
+			c.log.Debug("***********trans tokens in last block :", transTokensInBlock)
 			for _, token := range transTokensInBlock {
 				if token != tokensForTxn[i].TokenID {
 					selfTransferTokensMap[token] = struct{}{}
@@ -469,7 +476,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	// preaparing the block for tokens to be transferred to receiver
 	contractType := getContractType(reqID, req, tis, isSelfRBTTransfer)
 
-	c.log.Debug("***********Contract type for sender to receiver transaction******* ", contractType)
+	// c.log.Debug("***********Contract type for sender to receiver transaction******* ", contractType)
 
 	c.log.Debug("*******creating the contract for sender to receiver transaction*******")
 
@@ -578,6 +585,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	// if there are no available tokens for self-transfer then no need of self-transfer
 	if len(selfTransferTokensList) != 0 {
+		c.log.Debug("********** self transfer tokens : ", selfTransferTokensList)
 		//create new contract for self transfer
 		selfTransferContractType := getContractType(reqID, req, selfTransferTokensList, isSelfRBTTransfer)
 
@@ -744,6 +752,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	// 1. sender receiver on different ports
 	// 2. sender receiver on same port
 	if rpeerid != c.peerID {
+		c.log.Debug("*********** updating token status for sender's transferred token")
 		err = c.UpdateTransferredTokensInfo(tokensForTxn, wallet.TokenIsTransferred, transactionID)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to update trans tokens in DB, err : %v", err)
@@ -795,23 +804,25 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		resp.Message = errMsg
 		return resp
 	}
-	etrans := &ExplorerRBTTrans{
-		TokenHashes:   wta,
-		TransactionID: td.TransactionID,
-		BlockHash:     strings.Split(td.BlockID, "-")[1],
-		Network:       req.Type,
-		SenderDID:     senderDID,
-		ReceiverDID:   receiverDID,
-		Amount:        req.TokenCount,
-		// QuorumList:     extractQuorumDID(cr.QuorumList),
-		// PledgeInfo:     PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
-		TransTokenList: tokenListForExplorer,
-		Comments:       req.Comment,
-	}
 
-	c.log.Debug("************initiating explorer updation")
-	c.ec.ExplorerRBTTransaction(etrans)
-	c.log.Debug("************completed explorer updation")
+	// if c.testNet {
+	// etrans := &ExplorerRBTTrans{
+	// 	TokenHashes:   wta,
+	// 	TransactionID: td.TransactionID,
+	// 	BlockHash:     strings.Split(td.BlockID, "-")[1],
+	// 	Network:       req.Type,
+	// 	SenderDID:     senderDID,
+	// 	ReceiverDID:   receiverDID,
+	// 	Amount:        req.TokenCount,
+	// 	// QuorumList:     extractQuorumDID(cr.QuorumList),
+	// 	// PledgeInfo:     PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
+	// 	TransTokenList: tokenListForExplorer,
+	// 	Comments:       req.Comment,
+	// }
+	// 	c.log.Debug("************initiating explorer updation")
+	// 	c.ec.ExplorerRBTTransaction(etrans)
+	// 	c.log.Debug("************completed explorer updation")
+	// }
 
 	//TODO: return and initiate go routine
 	// Starting CVR stage-2
