@@ -575,6 +575,11 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		msg := fmt.Sprintf("FT Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
 		resp.Status = true
 		resp.Message = msg
+		if strings.Contains(resp.Message, "with transaction id") {
+			if txID := extractTransactionIDFromMessage(resp.Message); txID != "" {
+				resp.Result = txID
+			}
+		}
 
 		updateFTTableErr := c.updateFTTable()
 		if updateFTTableErr != nil {
@@ -605,13 +610,20 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		c.log.Debug("FT transaction still processing with txn id ", cr.TransactionID)
 
 		msg := fmt.Sprintf("FT Transaction is still processing, with transaction id %v ", cr.TransactionID)
-		if resp.Result == "" {
-			resp.Result = cr.TransactionID
-		}
 		resp.Message = msg
+		if strings.Contains(resp.Message, "with transaction id") {
+			if txID := extractTransactionIDFromMessage(resp.Message); txID != "" {
+				resp.Result = txID
+			}
+		}
 		resp.Status = true
 		return resp
 	}
+}
+
+func extractTransactionIDFromMessage(msg string) string {
+	re := regexp.MustCompile(`[a-fA-F0-9]{64}`)
+	return re.FindString(msg)
 }
 
 func (c *Core) GetPresiceFractionalValue(a, b int) (float64, error) {
