@@ -444,6 +444,11 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		resp.Status = true
 		msg := fmt.Sprintf("Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
 		resp.Message = msg
+		if strings.Contains(resp.Message, "with transaction id") {
+			if txID := extractTransactionIDFromMessage(resp.Message); txID != "" {
+				resp.Result = txID
+			}
+		}
 		c.ec.ExplorerRBTTransaction(etrans)
 
 		// Send final transaction completion response if not already timed out
@@ -468,10 +473,12 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 		msg := fmt.Sprintf("Transaction is still processing, with transaction id %v ", cr.TransactionID)
 		resp.Message = msg
-		resp.Status = true
-		if resp.Result == "" {
-			resp.Result = cr.TransactionID
+		if strings.Contains(resp.Message, "with transaction id") {
+			if txID := extractTransactionIDFromMessage(resp.Message); txID != "" {
+				resp.Result = txID
+			}
 		}
+		resp.Status = true
 		return resp
 	}
 }
