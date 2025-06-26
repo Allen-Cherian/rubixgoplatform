@@ -472,7 +472,6 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		c.log.Debug("transaction still processing with txn id ", cr.TransactionID)
 
 		msg := fmt.Sprintf("Transaction is still processing, with transaction id %v ", cr.TransactionID)
-		fmt.Println("---resp.Result is ", resp.Result)
 		resp.Message = msg
 		if strings.Contains(resp.Message, "with transaction id") {
 			if txID := extractTransactionIDFromMessage(resp.Message); txID != "" {
@@ -480,7 +479,6 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			}
 		}
 		resp.Status = true
-		fmt.Printf("---0resp is %+v\n", resp)
 		return resp
 	}
 }
