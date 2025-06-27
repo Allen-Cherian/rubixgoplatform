@@ -1120,7 +1120,7 @@ func (c *Core) updateReceiverToken(
 
 	if receiverAddress != "" && CVRStage == wallet.CVRStage1_Sender_to_Receiver {
 
-		c.log.Debug("*********** updating tokens in cvr-1")
+		c.log.Debug("*********** updating tokens in cvr-1************")
 
 		var err error
 		senderPeer, err = c.getPeer(senderAddress)
@@ -1227,14 +1227,14 @@ func (c *Core) updateReceiverToken(
 
 	if CVRStage == wallet.CVRStage2_Sender_to_Receiver {
 
-		c.log.Debug("********** updating token in cvr-2")
+		c.log.Debug("********** updating token in cvr-2 *****************")
 
 		results := make([]MultiPinCheckRes, len(tokenInfo))
 		var wg sync.WaitGroup
 		for i, ti := range tokenInfo {
 			t := ti.Token
 
-			c.log.Debug("************* removing cvr-1 block")
+			c.log.Debug("************* removing cvr-1 block, token : ", t, " token type ", ti.TokenType)
 
 			// if latest block is cvr-1 block, remove it before adding cvr-2 block
 			err := c.RemoveSpendableRBTTransferredBlock(t, ti.TokenType)
@@ -1276,6 +1276,7 @@ func (c *Core) updateReceiverToken(
 				return nil, senderPeer, fmt.Errorf("token state has been exhausted, Token being Double spent: %v, msg: %v", tokenStateCheckResult[i].Token, tokenStateCheckResult[i].Message)
 			}
 			c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
+			c.log.Debug("************* token type is :", tokenInfo[i].TokenType)
 		}
 		var err error
 		updatedTokenStateHashes, err = c.w.TokensReceived(receiverDID, tokenInfo, b, senderPeerId, receiverPeerId, pinningServiceMode, c.ipfs)
@@ -1295,7 +1296,7 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 	did := c.l.GetQuerry(req, "did")
 	var sr SendTokenRequest
 
-	c.log.Debug("********* updatinhg receiver tokens : ", did)
+	c.log.Debug("********* updatinhg receiver tokens, receiver : ", did, "tokens : ", sr.TokenInfo, " cvr stage ", sr.CVRStage)
 
 	err := c.l.ParseJSON(req, &sr)
 	crep := model.BasicResponse{
@@ -1329,45 +1330,47 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 	}
 
 	if sr.CVRStage == wallet.CVRStage1_Sender_to_Receiver {
-		// receiver fetches tokens to be synced
-		tokensSyncInfo := make([]TokenSyncInfo, 0)
-		for _, token := range sr.TokenInfo {
-			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: token.Token, TokenType: token.TokenType})
-			if token.TokenType == c.TokenType(PartString) {
-				tokenInfo, err := c.w.ReadToken(token.Token)
-				if err != nil {
-					c.log.Error("failed to fetch parent token info, err ", err)
-					//TODO : handle the situation when not able to fetch parent tokenId to sync parent token chain
-					continue
-				}
-				// parentTokenId := tokenInfo.ParentTokenID
-				parentTokenInfo, err := c.w.ReadToken(tokenInfo.ParentTokenID)
-				if err != nil {
-					c.log.Error("failed to fetch parent token value, err ", err)
-					// update token sync status
-					c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID, wallet.SyncIncomplete)
-					continue
-				}
-				if parentTokenInfo.TokenValue != 1.0 {
-					tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(PartString)})
-				} else {
-					tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(RBTString)})
-				}
-			}
-		}
-		tokenSyncMap := make(map[string][]TokenSyncInfo)
-		tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
+		// // receiver fetches tokens to be synced
+		// tokensSyncInfo := make([]TokenSyncInfo, 0)
+		// for _, token := range sr.TokenInfo {
+		// 	tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: token.Token, TokenType: token.TokenType})
+		// 	if token.TokenType == c.TokenType(PartString) {
+		// 		tokenInfo, err := c.w.ReadToken(token.Token)
+		// 		if err != nil {
+		// 			c.log.Error("failed to fetch parent token info, err ", err)
+		// 			//TODO : handle the situation when not able to fetch parent tokenId to sync parent token chain
+		// 			continue
+		// 		}
+		// 		// parentTokenId := tokenInfo.ParentTokenID
+		// 		parentTokenInfo, err := c.w.ReadToken(tokenInfo.ParentTokenID)
+		// 		if err != nil {
+		// 			c.log.Error("failed to fetch parent token value, err ", err)
+		// 			// update token sync status
+		// 			c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID, wallet.SyncIncomplete)
+		// 			continue
+		// 		}
+		// 		if parentTokenInfo.TokenValue != 1.0 {
+		// 			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(PartString)})
+		// 		} else {
+		// 			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(RBTString)})
+		// 		}
+		// 	}
+		// }
+		// tokenSyncMap := make(map[string][]TokenSyncInfo)
+		// tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
 
-		// syncing starts in the background
-		go c.syncFullTokenChains(tokenSyncMap)
+		// // syncing starts in the background
+		// go c.syncFullTokenChains(tokenSyncMap)
 
 		crep.Status = true
 		crep.Message = "Token received successfully"
+		c.log.Debug("cvr-1 completed, ", crep.Message)
 		crep.Result = updatedtokenhashes
 
 	} else {
 		crep.Status = true
 		crep.Message = "CVR status updated to 2"
+		c.log.Debug("cvr-2 completed, ", crep.Message)
 		crep.Result = updatedtokenhashes
 	}
 

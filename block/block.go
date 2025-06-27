@@ -330,6 +330,10 @@ func (b *Block) blkEncode() error {
 }
 
 func (b *Block) getTokensMap(t string) interface{} {
+	if b.bm == nil {
+		fmt.Println("b.bm is empty")
+		return nil
+	}
 	tim := util.GetFromMap(b.bm, TCTransInfoKey)
 	if tim == nil {
 		return nil

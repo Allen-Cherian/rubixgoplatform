@@ -247,6 +247,7 @@ func (w *Wallet) getChainDB(tt int) *ChainDB {
 func (w *Wallet) getRawBlock(db *ChainDB, key []byte) ([]byte, error) {
 	v, err := db.Get(key, nil)
 	if err != nil {
+		w.log.Debug("error is ", err)
 		return nil, err
 	}
 	blk := make([]byte, len(v))
@@ -264,6 +265,7 @@ func (w *Wallet) getBlock(tt int, t string, blockID string) ([]byte, error) {
 	if db == nil {
 		return nil, fmt.Errorf("failed get block, invalid token type")
 	}
+	w.log.Debug("tt", tt)
 	w.log.Debug("tcs key while reading the block :", blockID, "token ", t, "tcs key : ", tcsKey(tt, t, blockID))
 	return w.getRawBlock(db, []byte(tcsKey(tt, t, blockID)))
 }

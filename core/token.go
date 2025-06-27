@@ -404,7 +404,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 	// }
 	// defer p.Close()
 	var err error
-	var blkHeight uint64
+	// var blkHeight uint64
 	blk := c.w.GetLatestTokenBlock(token, tokenType)
 	blkID := ""
 	if blk != nil {
@@ -416,7 +416,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		if blkID == pblkID {
 			return nil
 		}
-		blkHeight, err = blk.GetBlockNumber(token)
+		// blkHeight, err = blk.GetBlockNumber(token)
 		if err != nil {
 			c.log.Error("invalid block, failed to get block number")
 			return err
@@ -428,53 +428,53 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		BlockID:   blkID,
 	}
 
-	if tokenType == c.TokenType(RBTString) || tokenType == c.TokenType(PartString) {
-		syncReq.BlockHeight = blkHeight
-		// sync only latest blcok of the token chain for the transaction
-		err = c.syncGenesisAndLatestBlockFrom(p, syncReq)
+	// if tokenType == c.TokenType(RBTString) || tokenType == c.TokenType(PartString) {
+	// 	syncReq.BlockHeight = blkHeight
+	// 	// sync only latest blcok of the token chain for the transaction
+	// 	err = c.syncGenesisAndLatestBlockFrom(p, syncReq)
+	// 	if err != nil {
+	// 		c.log.Error("failed to sync latest block, err ", err)
+	// 		return err
+	// 	}
+	// 	// update sync status to incomplete
+	// 	err = c.w.UpdateTokenSyncStatus(syncReq.Token, wallet.SyncIncomplete)
+	// 	if err != nil {
+	// 		if !strings.Contains(err.Error(), "no records found") {
+	// 			c.log.Error("failed to update token sync status as incomplete, token ", token)
+	// 		}
+	// 	}
+	// } else {
+	// in case of FTs, and NFTs
+	for {
+		var trep TCBSyncReply
+		err = p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
 		if err != nil {
-			c.log.Error("failed to sync latest block, err ", err)
+			c.log.Error("Failed to sync token chain block", "err", err)
 			return err
 		}
-		// update sync status to incomplete
-		err = c.w.UpdateTokenSyncStatus(syncReq.Token, wallet.SyncIncomplete)
-		if err != nil {
-			if !strings.Contains(err.Error(), "no records found") {
-				c.log.Error("failed to update token sync status as incomplete, token ", token)
-			}
+		if !trep.Status {
+			c.log.Error("Failed to sync token chain block", "msg", trep.Message)
+			return fmt.Errorf(trep.Message)
 		}
-	} else {
-		// in case of FTs, and NFTs
-		for {
-			var trep TCBSyncReply
-			err = p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
+		for _, bb := range trep.TCBlock {
+			blk := block.InitBlock(bb, nil)
+			if blk == nil {
+				c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
+				return fmt.Errorf("failed to add token chain block, invalid block, sync failed")
+			}
+			err = c.w.AddTokenBlock(token, blk)
 			if err != nil {
-				c.log.Error("Failed to sync token chain block", "err", err)
+				c.log.Error("Failed to add token chain block, syncing failed", "err", err)
 				return err
 			}
-			if !trep.Status {
-				c.log.Error("Failed to sync token chain block", "msg", trep.Message)
-				return fmt.Errorf(trep.Message)
-			}
-			for _, bb := range trep.TCBlock {
-				blk := block.InitBlock(bb, nil)
-				if blk == nil {
-					c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
-					return fmt.Errorf("failed to add token chain block, invalid block, sync failed")
-				}
-				err = c.w.AddTokenBlock(token, blk)
-				if err != nil {
-					c.log.Error("Failed to add token chain block, syncing failed", "err", err)
-					return err
-				}
-			}
-			if trep.NextBlockID == "" {
-				break
-			}
-			syncReq.BlockID = trep.NextBlockID
-
 		}
+		if trep.NextBlockID == "" {
+			break
+		}
+		syncReq.BlockID = trep.NextBlockID
+
 	}
+	// }
 	return nil
 }
 
@@ -1621,6 +1621,7 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 
 	//cvrstage-2  sender to receiver transfer
 	if req.SCTransferBlock != nil {
+		c.log.Debug("********* sender to receiver transfer consensus starting***************")
 		sc := contract.InitContract(req.SCTransferBlock, nil)
 		rpeerid := c.w.GetPeerID(sc.GetReceiverDID())
 		if rpeerid == "" {
@@ -1655,7 +1656,13 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 
 	//cvrstage-2  for sef transfer
 	if req.SCSelfTransferBlock != nil {
+		c.log.Debug("********* self transfer consensus starting***************")
 		selfTransferContractBlock := contract.InitContract(req.SCSelfTransferBlock, nil)
+		if selfTransferContractBlock == nil {
+			c.log.Error(" empty contract block, failked to self-transfer consensus")
+			resp.Message = " empty contract block, failked to self-transfer consensus"
+			return resp
+		}
 
 		selfTransferConsensusReq := getConsensusRequest(req.QuorumType, c.peerID, c.peerID, req.SCSelfTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
 		selfTransferConsensusReq.Mode = SpendableRBTTransferMode
@@ -1669,7 +1676,9 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 			resp.Message = errMsg
 			return resp
 		}
+		c.log.Debug("********* self transfer cvr-2 completed***************")
 	}
+	c.log.Debug("*********cvr-2 completed*********")
 
 	resp.Status = true
 	resp.Message = "consensus completed"
@@ -1678,6 +1687,8 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 
 func (c *Core) UpdateTransferredTokensInfo(tokenList []wallet.Token, newTokenStatus int, txnID string) error {
 	for _, tokenInfo := range tokenList {
+		tokenInfo.TokenStatus = newTokenStatus
+		tokenInfo.TransactionID = txnID
 		err := c.w.UpdateToken(&tokenInfo)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to update token : %v from Tokentable, err : %v", tokenInfo.TokenID, err)

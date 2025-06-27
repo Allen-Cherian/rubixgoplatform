@@ -796,6 +796,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				TransactionEpoch:   cr.TransactionEpoch,
 				PinningServiceMode: false,
 				QuorumInfo:         quorumInfo,
+				CVRStage:           wallet.CVRStage2_Sender_to_Receiver,
 				// TransTokenSyncInfo: cr.TransTokenSyncInfo,
 			}
 
@@ -2733,7 +2734,7 @@ func (c *Core) initPledgeQuorumToken(cr *ConensusRequest, p *ipfsport.Peer) (Quo
 			}
 			// calculate sum of pledge tokens
 			for _, pledgeTokenValue := range prs.TokenValue {
-				pledgingAmount += floatPrecision(pledgingAmount + pledgeTokenValue, MaxDecimalPlaces) 
+				pledgingAmount += floatPrecision(pledgingAmount+pledgeTokenValue, MaxDecimalPlaces)
 				c.log.Debug("****** token values: ", prs.TokenValue, "updated pledging amt :", pledgingAmount)
 			}
 

@@ -537,6 +537,8 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	// the final self-transfer token list is : selfTransferTokensList
 	var selfTransactionID string
 	var selfTransferBlock *block.Block
+	var selfTransferContract *contract.Contract
+	var selfTransferTokenCount float64
 	selfTransferTokensList := make([]contract.TokenInfo, 0)
 	lockedTokensForSelfTransfer := make([]string, 0)
 	for selfTransferToken := range selfTransferTokensMap {
@@ -581,19 +583,36 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		}
 		selfTransferTokensList = append(selfTransferTokensList, selftransferTokeninfo)
 		lockedTokensForSelfTransfer = append(lockedTokensForSelfTransfer, selfTransferToken)
+		selfTransferTokenCount = floatPrecision(selfTransferTokenCount+selftransferTokenInfo.TokenValue, MaxDecimalPlaces)
+
+		// pinning self-transfer tokens
+		_, err = c.w.Pin(selftransferTokenInfo.TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.Sender, req.Sender, selftransferTokenInfo.TokenValue)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to pin the token: %v, error: %v", selftransferTokenInfo.TokenID, err)
+			c.log.Error(errMsg)
+		}
 	}
+
+	c.log.Debug("************ self transfer token count : ", selfTransferTokenCount)
 
 	// if there are no available tokens for self-transfer then no need of self-transfer
 	if len(selfTransferTokensList) != 0 {
 		c.log.Debug("********** self transfer tokens : ", selfTransferTokensList)
 		//create new contract for self transfer
-		selfTransferContractType := getContractType(reqID, req, selfTransferTokensList, isSelfRBTTransfer)
+		selfTransferReq := &model.RBTTransferRequest{
+			Sender:     req.Sender,
+			Receiver:   req.Sender,
+			TokenCount: selfTransferTokenCount,
+			Type:       req.Type,
+			Password:   req.Password,
+		}
+		selfTransferContractType := getContractType(reqID, selfTransferReq, selfTransferTokensList, isSelfRBTTransfer)
 
 		c.log.Debug("***********Contract type for self transaction in cvr-1******* ", contractType)
 
 		c.log.Debug("*******creating the contract for self transaction in cvr-1*******")
 
-		selfTransferContract := contract.CreateNewContract(selfTransferContractType)
+		selfTransferContract = contract.CreateNewContract(selfTransferContractType)
 
 		c.log.Debug("******** sender signing on self-transfer txn id")
 
@@ -760,6 +779,8 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			resp.Message = errMsg
 			return resp
 		}
+	} else {
+		c.log.Debug("sender peer is and receiver's is same")
 	}
 
 	nbid, err := nb.GetBlockID(tis[0].Token)
@@ -836,10 +857,15 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		TxnEpoch: int64(txEpoch),
 		ReqID:    reqID,
 	}
-	if selfTransferBlock != nil {
-		cvrRequest.SCSelfTransferBlock = selfTransferBlock.GetBlock()
+	if selfTransferContract != nil {
+		cvrRequest.SCSelfTransferBlock = selfTransferContract.GetBlock()
 	}
-	go c.initiateRBTCVRTwo(cvrRequest)
+	go func(cvrReq *wallet.PrePledgeRequest) {
+		resp := c.initiateRBTCVRTwo(cvrReq)
+		c.log.Debug("response from CVR-2 : ", resp)
+	}(cvrRequest)
+
+	// go c.initiateRBTCVRTwo(cvrRequest)
 
 	// //pre-pledging related api will get call here
 	// cr := getConsensusRequest(req.Type, c.peerID, rpeerid, sc.GetBlock(), txEpoch, isSelfRBTTransfer)

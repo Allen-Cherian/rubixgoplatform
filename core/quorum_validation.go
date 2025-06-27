@@ -229,7 +229,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 	}
 	// }
 	defer p.Close()
-	tokensSyncInfo := make([]TokenSyncInfo, 0)
+	// tokensSyncInfo := make([]TokenSyncInfo, 0)
 	for i := range ti {
 		err := c.syncTokenChainFrom(p, ti[i].BlockID, ti[i].Token, ti[i].TokenType)
 		if err != nil {
@@ -271,13 +271,13 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 				c.log.Error("failed to fetch parent token detials", "err", err, "token", ti[i].Token)
 				return false, err
 			}
-			parentTokenType, err := c.syncParentToken(p, parentToken)
-			if err != nil {
-				// p.Close()
-				c.log.Error("failed to sync parent token chain", "token", parentToken)
-				return false, err
-			}
-			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: parentToken, TokenType: parentTokenType})
+			// parentTokenType, err := c.syncParentToken(p, parentToken)
+			// if err != nil {
+			// 	// p.Close()
+			// 	c.log.Error("failed to sync parent token chain", "token", parentToken)
+			// 	return false, err
+			// }
+			// tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: parentToken, TokenType: parentTokenType})
 
 			// // add parent blocks
 			// parentGenesisBlock := block.InitBlock(blocksToSync.ParentGenesisBlock, nil)
@@ -392,7 +392,7 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		tokenInfo.TransactionID = b.GetTid()
 
 		// t.TokenStateHash = tokenHashMap[ti[i].Token]
-		tokenInfo.SyncStatus = wallet.SyncIncomplete
+		tokenInfo.SyncStatus = wallet.SyncUnrequired
 
 		err = c.w.UpdateToken(tokenInfo)
 		if err != nil {
@@ -400,14 +400,14 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			return false, err
 		}
 
-		// quorum fetches tokens to be synced
-		tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: ti[i].Token, TokenType: ti[i].TokenType})
+		// // quorum fetches tokens to be synced
+		// tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: ti[i].Token, TokenType: ti[i].TokenType})
 	}
 
-	// sync full token chain of all the tokens in syncing Queue
-	tokenSyncMap := make(map[string][]TokenSyncInfo)
-	tokenSyncMap[p.GetPeerID()+"."+p.GetPeerDID()] = tokensSyncInfo
-	go c.syncFullTokenChains(tokenSyncMap)
+	// // sync full token chain of all the tokens in syncing Queue
+	// tokenSyncMap := make(map[string][]TokenSyncInfo)
+	// tokenSyncMap[p.GetPeerID()+"."+p.GetPeerDID()] = tokensSyncInfo
+	// go c.syncFullTokenChains(tokenSyncMap)
 
 	// for i := range wt {
 	// 	c.log.Debug("Requesting Token status")

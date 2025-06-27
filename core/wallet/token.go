@@ -664,33 +664,35 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 	blockId, _ := b.GetBlockID(ti[0].Token)
 	err := w.CreateTokenBlock(b)
 	if err != nil {
-		fmt.Println("failed to create token block, block Id", blockId)
+		w.log.Error("failed to create token block, block Id", blockId, " err ", err)
 		return nil, err
 	}
 
 	// read the added block to make sure it was added properly
 	if b.GetTransType() == block.SpendableRBTTransferredType {
+		w.log.Debug("************ reading cvr-1 block *********")
 		checkBlock, err := w.getBlock(ti[0].TokenType+50, ti[0].Token, blockId)
 		if err != nil {
-			errMsg := fmt.Sprintf("failed to read added block, block id : %v, err : %v", blockId, err)
+			errMsg := fmt.Sprintf("failed to read added block in cvr-1, block id : %v, err : %v", blockId, err)
 			w.log.Error(errMsg)
 			return nil, fmt.Errorf(errMsg)
 		}
 		if checkBlock == nil {
-			errMsg := fmt.Sprintf("invalid block, failed create token block, block id : %v", blockId)
+			errMsg := fmt.Sprintf("invalid cvr-1 block, failed create token block, block id : %v", blockId)
 			w.log.Error(errMsg)
 			return nil, fmt.Errorf(errMsg)
 		}
 	} else {
-
+		w.log.Debug("************ reading cvr-2 block *********")
+		w.log.Debug("reading added block in cvr-2 , token : ", ti[0].Token, "token type", ti[0].TokenType, "block id ", blockId)
 		checkBlock, err := w.getBlock(ti[0].TokenType, ti[0].Token, blockId)
 		if err != nil {
-			errMsg := fmt.Sprintf("failed to read added block, block id : %v, err : %v", blockId, err)
+			errMsg := fmt.Sprintf("failed to read added block in cvr-2, block id : %v, err : %v", blockId, err)
 			w.log.Error(errMsg)
 			return nil, fmt.Errorf(errMsg)
 		}
 		if checkBlock == nil {
-			errMsg := fmt.Sprintf("invalid block, failed create token block, block id : %v", blockId)
+			errMsg := fmt.Sprintf("invalid cvr-2 block, failed create token block, block id : %v", blockId)
 			w.log.Error(errMsg)
 			return nil, fmt.Errorf(errMsg)
 		}
@@ -775,14 +777,16 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 		t.TransactionID = b.GetTid()
 		t.TokenStateHash = tokenHashMap[tokenInfo.Token]
 
-		// if sender peer id and receiver peer id is same, then they both are sharing the same level DB,
-		// and thus do not need to sync the token chain again.
-		// Also in case of cvr stage-2 we don't need to sync the token chain as it is already synced in cvr stage-1
-		if senderPeerId == receiverPeerId {
-			t.SyncStatus = SyncCompleted
-		} else {
-			t.SyncStatus = SyncIncomplete
-		}
+		// // if sender peer id and receiver peer id is same, then they both are sharing the same level DB,
+		// // and thus do not need to sync the token chain again.
+		// // Also in case of cvr stage-2 we don't need to sync the token chain as it is already synced in cvr stage-1
+		// if senderPeerId == receiverPeerId {
+		// 	t.SyncStatus = SyncCompleted
+		// } else {
+		// 	t.SyncStatus = SyncIncomplete
+		// }
+
+		w.log.Debug("******** receiver is upating token in db : ", tokenInfo)
 
 		err = w.s.Update(TokenStorage, &t, "token_id=?", tokenInfo.Token)
 		if err != nil {
