@@ -80,6 +80,7 @@ type Token struct {
 }
 
 func (w *Wallet) CreateToken(t *Token) error {
+	w.log.Debug("******token status just before writing onto the sqlite DB**", t.TokenStatus, "token: ", t.TokenID)
 	return w.s.Write(TokenStorage, t)
 }
 func (w *Wallet) CreateFT(ft *FTToken) error {
@@ -298,14 +299,24 @@ func (w *Wallet) GetAllPledgedTokens() ([]Token, error) {
 	return t, nil
 }
 
-func (w *Wallet) GetCloserToken(did string, rem float64) (*Token, error) {
+func (w *Wallet) GetCloserToken(did string, rem float64, txnMode int) (*Token, error) {
 	if rem > 1.0 {
 		return nil, fmt.Errorf("token value not less than whole token")
 	}
 	var tks []Token
-	err := w.s.Read(TokenStorage, &tks, "did=? AND token_status=? AND token_value>=? AND token_value <?", did, TokenIsFree, rem, 1.0)
+	var err error
+	if txnMode == 0 {
+		err = w.s.Read(TokenStorage, &tks, "did=? AND token_status=? AND token_value>=? AND token_value <?", did, TokenIsFree, rem, 1.0)
+	} else {
+		err = w.s.Read(TokenStorage, &tks, "did=? AND token_status=? AND token_value>=? AND token_value <?", did, TokenIsSpendable, rem, 1.0)
+	}
 	if err != nil || len(tks) == 0 {
-		err := w.s.Read(TokenStorage, &tks, "did=? AND token_status=? AND token_value=?", did, TokenIsFree, 1.0)
+		var err error
+		if txnMode == 0 {
+			err = w.s.Read(TokenStorage, &tks, "did=? AND token_status=? AND token_value=?", did, TokenIsFree, 1.0)
+		} else {
+			err = w.s.Read(TokenStorage, &tks, "did=? AND token_status=? AND token_value=?", did, TokenIsSpendable, 1.0)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -328,7 +339,7 @@ func (w *Wallet) GetWholeTokens(did string, num int, trnxMode int) ([]Token, int
 			return nil, num, err
 		}
 	} else {
-		err := w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value=?", did, TokenIsSpendable, 1.0) //TODO: should have a discussion about this, whether we use Free tokens for any other transactions or not
+		err := w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value=?", did, TokenIsSpendable, 1.0)
 		if err != nil {
 			return nil, num, err
 		}
@@ -353,11 +364,16 @@ func (w *Wallet) GetWholeTokens(did string, num int, trnxMode int) ([]Token, int
 	return wt, (num - tl), nil
 }
 
-func (w *Wallet) GetTokensByLimit(did string, limit float64) ([]Token, error) {
+func (w *Wallet) GetTokensByLimit(did string, limit float64, txnMode int) ([]Token, error) {
 	w.l.Lock()
 	defer w.l.Unlock()
 	var t []Token
-	err := w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value<=?", did, TokenIsFree, limit)
+	var err error
+	if txnMode == 0 {
+		err = w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value<=?", did, TokenIsFree, limit)
+	} else {
+		err = w.s.Read(TokenStorage, &t, "did=? AND token_status=? AND token_value<=?", did, TokenIsSpendable, limit)
+	}
 	if err != nil {
 		w.log.Error("Failed to get tokens", "err", err)
 		return nil, err
@@ -1305,7 +1321,15 @@ func (w *Wallet) GetTokensByTxnID(txnId string) ([]Token, error) {
 	return tokensList, nil
 }
 
-func (w *Wallet) RemoveLatestBlockByKey(key string, token string) error {
+func (w *Wallet) GetTokenValueByTokenID(token string, did string) (float64, error) {
+	w.l.Lock()
+	defer w.l.Unlock()
+	var t Token
+	err := w.s.Read(TokenStorage, &t, "did=? AND token_id=?", did, token)
+	if err != nil {
+		w.log.Error("Failed to get token", "token", token, "err", err)
+		return 0, err
+	}
+	return t.TokenValue, nil
 
-	return nil
 }
