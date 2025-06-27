@@ -678,7 +678,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		c.log.Debug("******sender peer and receiver's is same")
 	}
 
-	selfTransferResponse := c.CreateSelfTransferContract(selfTransferTokensMap, dc, req, txEpoch)
+	selfTransferResponse := c.CreateSelfTransferRBTContract(selfTransferTokensMap, dc, req, txEpoch)
 	if !selfTransferResponse.Status {
 		errMsg := fmt.Sprintf("self transfer contract creation failed, err : %v", selfTransferResponse.Message)
 		c.log.Error(errMsg)
@@ -790,8 +790,8 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	return resp
 }
 
-// prepare self-transfer tokens and create self-transfer contract block
-func (c *Core) CreateSelfTransferContract(selfTransferTokensMap map[string]struct{}, dc did.DIDCrypto, req *model.RBTTransferRequest, txnEpoch int) (*model.BasicResponse) {
+// prepare self-transfer RBTs and create self-transfer contract block
+func (c *Core) CreateSelfTransferRBTContract(selfTransferTokensMap map[string]struct{}, dc did.DIDCrypto, req *model.RBTTransferRequest, txnEpoch int) (*model.BasicResponse) {
 	resp := &model.BasicResponse{
 		Status: false,
 	}
@@ -816,6 +816,9 @@ func (c *Core) CreateSelfTransferContract(selfTransferTokensMap map[string]struc
 			// c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
 			// resp.Message = errMsg
 			// return resp
+		}
+		if selftransferTokenInfo.DID != req.Sender {
+			continue
 		}
 
 		tts := "rbt"

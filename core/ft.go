@@ -13,9 +13,12 @@ import (
 
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/contract"
+	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
+	"github.com/rubixchain/rubixgoplatform/did"
 	"github.com/rubixchain/rubixgoplatform/rac"
+	"github.com/rubixchain/rubixgoplatform/token"
 	"github.com/rubixchain/rubixgoplatform/util"
 	"github.com/rubixchain/rubixgoplatform/wrapper/uuid"
 )
@@ -81,7 +84,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		return err
 	}
 	//TODO: Need to test and verify whether tokens are getiing unlocked if there is an error in creating FT.
-	defer c.w.ReleaseTokens(wholeTokens,c.testNet)
+	defer c.w.ReleaseTokens(wholeTokens, c.testNet)
 	fractionalValue, err := c.GetPresiceFractionalValue(int(numWholeTokens), numFTs)
 	if err != nil {
 		c.log.Error("Failed to calculate FT token value", err)
@@ -301,7 +304,7 @@ func (c *Core) GetFTInfoByDID(did string) ([]model.FTInfo, error) {
 }
 
 func (c *Core) InitiateFTTransfer(reqID string, req *model.TransferFTReq) {
-	br := c.initiateFTTransfer(reqID, req)
+	br := c.ftTransfer(reqID, req)
 	dc := c.GetWebReq(reqID)
 	if dc == nil {
 		c.log.Error("Failed to get did channels")
@@ -577,6 +580,646 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 	msg := fmt.Sprintf("FT Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
 	resp.Status = true
 	resp.Message = msg
+	return resp
+}
+
+// FT transfer with CVR
+func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicResponse {
+	st := time.Now()
+	txEpoch := int(st.Unix())
+	resp := &model.BasicResponse{
+		Status: false,
+	}
+	if req.Sender == req.Receiver {
+		c.log.Error("Sender and receiver cannot same")
+		resp.Message = "Sender and receiver cannot be same"
+		return resp
+	}
+	if req.Sender == "" || req.Receiver == "" {
+		c.log.Error("Sender and receiver cannot be empty")
+		resp.Message = "Sender and receiver cannot be empty"
+		return resp
+	}
+	isAlphanumericSender := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(req.Sender)
+	isAlphanumericReceiver := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(req.Receiver)
+	if !isAlphanumericSender || !isAlphanumericReceiver {
+		c.log.Error("Invalid sender or receiver address. Please provide valid DID")
+		resp.Message = "Invalid sender or receiver address. Please provide valid DID"
+		return resp
+	}
+	if !strings.HasPrefix(req.Sender, "bafybmi") || len(req.Sender) != 59 || !strings.HasPrefix(req.Receiver, "bafybmi") || len(req.Receiver) != 59 {
+		c.log.Error("Invalid sender or receiver DID")
+		resp.Message = "Invalid sender or receiver DID"
+		return resp
+	}
+	_, did, ok := util.ParseAddress(req.Sender)
+	if !ok {
+		c.log.Error("Failed to parse sender DID")
+		resp.Message = "Invalid sender DID"
+		return resp
+	}
+
+	_, rdid, ok := util.ParseAddress(req.Receiver)
+	if !ok {
+		c.log.Error("Failed to parse receiver DID")
+		resp.Message = "Invalid receiver DID"
+		return resp
+	}
+	if req.FTCount <= 0 {
+		c.log.Error("Input transaction amount is less than minimum FT transaction amount")
+		resp.Message = "Invalid FT count"
+		return resp
+	}
+	if req.FTName == "" {
+		c.log.Error("FT name cannot be empty")
+		resp.Message = "FT name is required"
+		return resp
+	}
+	dc, err := c.SetupDID(reqID, did)
+	if err != nil {
+		c.log.Error("Failed to setup DID")
+		resp.Message = "Failed to setup DID, " + err.Error()
+		return resp
+	}
+	// var creatorDID string
+	if req.CreatorDID == "" {
+		// Checking for same FTs with different creators
+		info, err := c.GetFTInfoByDID(did)
+		if err != nil || info == nil {
+			c.log.Error("Failed to get FT info for transfer", "err", err)
+			resp.Message = "Failed to get FT info for transfer"
+			return resp
+		}
+		ftNameToCreators := make(map[string][]string)
+		for _, ft := range info {
+			ftNameToCreators[ft.FTName] = append(ftNameToCreators[ft.FTName], ft.CreatorDID)
+		}
+		for ftName, creators := range ftNameToCreators {
+			if len(creators) > 1 {
+				c.log.Error(fmt.Sprintf("There are same FTs '%s' with different creators.", ftName))
+				for i, creator := range creators {
+					c.log.Error(fmt.Sprintf("Creator DID %d: %s", i+1, creator))
+				}
+				c.log.Info("Use -creatorDID flag to specify the creator DID and can proceed for transfer")
+				resp.Message = "There are same FTs with different creators, use -creatorDID flag to specify creatorDID"
+				return resp
+			}
+		}
+		// creatorDID = info[0].CreatorDID
+	}
+	var AllFTs []wallet.FTToken
+	if req.CreatorDID != "" {
+		AllFTs, err = c.w.GetFreeFTsByNameAndCreatorDID(req.FTName, did, req.CreatorDID)
+		// creatorDID = req.CreatorDID
+	} else {
+		AllFTs, err = c.w.GetFreeFTsByNameAndDID(req.FTName, did)
+	}
+	AvailableFTCount := len(AllFTs)
+	if err != nil {
+		c.log.Error("Failed to get FTs", "err", err)
+		resp.Message = "Insufficient FTs or FTs are locked or " + err.Error()
+		return resp
+	} else {
+		if req.FTCount > AvailableFTCount {
+			c.log.Error(fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount))
+			resp.Message = fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount)
+			return resp
+		}
+	}
+	FTsForTxn := AllFTs[:req.FTCount]
+	//TODO: Pinning of tokens
+
+	// Fetching peer's peer id
+	peerInfo, err := c.GetPeerDIDInfo(req.Receiver)
+	if err != nil {
+		if peerInfo == nil {
+			c.log.Error("could not get peerId of receiver ", req.Receiver, "error", err)
+			resp.Message = fmt.Sprintf("could not get peerId of receiver : %v, error: %v", req.Receiver, err)
+			return resp
+		}
+		if strings.Contains(err.Error(), "retry") {
+			c.AddPeerDetails(*peerInfo)
+		}
+	}
+	if peerInfo.PeerID == "" {
+		c.log.Error("failed to get peerId of receiver ", req.Receiver, "error", err)
+		resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
+		return resp
+	}
+
+	receiverPeerID, err := c.getPeer(req.Receiver)
+	if err != nil {
+		resp.Message = "Failed to get receiver peer, " + err.Error()
+		return resp
+	}
+	defer receiverPeerID.Close()
+
+	FTTokenIDs := make([]string, 0)
+	for i := range FTsForTxn {
+		FTTokenIDs = append(FTTokenIDs, FTsForTxn[i].TokenID)
+	}
+	TokenInfo := make([]contract.TokenInfo, 0)
+	selfTransferFTMap := make(map[string]struct{})
+
+	for i := range FTsForTxn {
+		tt := c.TokenType(FTString)
+		blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
+		if blk == nil {
+			c.log.Error("failed to get latest block, invalid token chain")
+			resp.Message = "failed to get latest block, invalid token chain"
+			return resp
+		}
+		bid, err := blk.GetBlockID(FTsForTxn[i].TokenID)
+		if err != nil {
+			c.log.Error("failed to get block id", "err", err)
+			resp.Message = "failed to get block id, " + err.Error()
+			return resp
+		}
+		ti := contract.TokenInfo{
+			Token:      FTsForTxn[i].TokenID,
+			TokenType:  tt,
+			TokenValue: FTsForTxn[i].TokenValue,
+			OwnerDID:   did,
+			BlockID:    bid,
+		}
+		TokenInfo = append(TokenInfo, ti)
+
+		// gather tokens for self-transfer : check if the transToken exists in the self-transfer map,
+		// if exists delete the token from the self-transfer map, if does not exist
+		// then fetch the list of all tokens from the latest block, and
+		// add all the tokens to the self-transfer map except the trans-token
+		c.log.Debug("*********dealing with trans-token :", FTsForTxn[i].TokenID)
+
+		_, exists := selfTransferFTMap[FTsForTxn[i].TokenID]
+		if exists {
+			c.log.Debug("&&&&& self-trans map before deleting : ", selfTransferFTMap)
+			delete(selfTransferFTMap, FTsForTxn[i].TokenID)
+			c.log.Debug("&&&&&&& self-trans map after deleting : ", selfTransferFTMap)
+		} else {
+			transTokensInBlock := blk.GetTransTokens()
+			c.log.Debug("***********trans tokens in last block :", transTokensInBlock)
+			for _, token := range transTokensInBlock {
+				if token != FTsForTxn[i].TokenID {
+					selfTransferFTMap[token] = struct{}{}
+				}
+			}
+		}
+	}
+	sct := &contract.ContractType{
+		Type:       contract.SCFTType,
+		PledgeMode: contract.PeriodicPledgeMode,
+		TransInfo: &contract.TransInfo{
+			SenderDID:   did,
+			ReceiverDID: rdid,
+			Comment:     req.Comment,
+			TransTokens: TokenInfo,
+		},
+		ReqID: reqID,
+	}
+	// FTData := model.FTInfo{
+	// 	FTName:  req.FTName,
+	// 	FTCount: req.FTCount,
+	// }
+	sc := contract.CreateNewContract(sct)
+	err = sc.UpdateSignature(dc)
+	if err != nil {
+		c.log.Error(err.Error())
+		resp.Message = err.Error()
+		return resp
+	}
+
+	// create new cvr-1 block and send to receiver
+	cvr1Resp := c.SendFTsToReceiver(sc, TokenInfo, txEpoch, receiverPeerID)
+	if !cvr1Resp.Status {
+		errMsg := fmt.Sprintf("failed to send tokens to receiver, err : %v", cvr1Resp.Message)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return resp
+	}
+
+	td := cvr1Resp.Result.(*model.TransactionDetails)
+
+	// self transfer in cvr-1
+	selfTransferResponse := c.CreateSelfTransferFTContract(selfTransferFTMap, dc, req, txEpoch)
+	if !selfTransferResponse.Status {
+		errMsg := fmt.Sprintf("self transfer contract creation failed, err : %v", selfTransferResponse.Message)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return resp
+	}
+
+	et := time.Now()
+	dif := et.Sub(st)
+	td.Amount = float64(req.FTCount)
+	td.TotalTime = float64(dif.Milliseconds())
+	c.w.AddTransactionHistory(td)
+
+	//TODO :  Extra details regarding the FT need to added in the explorer
+	// etrans := &ExplorerTrans{
+	// 	TID:         td.TransactionID,
+	// 	SenderDID:   did,
+	// 	ReceiverDID: rdid,
+	// 	Amount:      float64(req.FTCount),
+	// 	TrasnType:   req.QuorumType,
+	// 	TokenIDs:    FTTokenIDs,
+	// 	QuorumList:  cr.QuorumList,
+	// 	TokenTime:   float64(dif.Milliseconds()),
+	// }
+	// explorerErr := c.ec.ExplorerTransaction(etrans)
+	// if explorerErr != nil {
+	// 	c.log.Error("Failed to send FT transaction to explorer ", "err", explorerErr)
+	// }
+
+	// AllTokens := make([]AllToken, len(FTsForTxn))
+	// for i := range FTsForTxn {
+	// 	tokenDetail := AllToken{}
+	// 	tokenDetail.TokenHash = FTsForTxn[i].TokenID
+	// 	tt := c.TokenType(FTString)
+	// 	blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
+	// 	bid, _ := blk.GetBlockID(FTsForTxn[i].TokenID)
+	// 	blockNoPart := strings.Split(bid, "-")[0]
+	// 	// Convert the string part to an int
+	// 	blockNoInt, err := strconv.Atoi(blockNoPart)
+	// 	if err != nil {
+	// 		log.Printf("Error getting BlockID: %v", err)
+	// 		continue
+	// 	}
+	// 	tokenDetail.BlockNumber = blockNoInt
+	// 	tokenDetail.BlockHash = strings.Split(bid, "-")[1]
+	// 	AllTokens[i] = tokenDetail
+	// }
+
+	// eTrans := &ExplorerFTTrans{
+	// 	FTBlockHash:     AllTokens,
+	// 	CreatorDID:      creatorDID,
+	// 	SenderDID:       did,
+	// 	ReceiverDID:     rdid,
+	// 	FTName:          req.FTName,
+	// 	FTTransferCount: req.FTCount,
+	// 	Network:         req.QuorumType,
+	// 	FTSymbol:        "N/A",
+	// 	Comments:        req.Comment,
+	// 	TransactionID:   td.TransactionID,
+	// 	PledgeInfo:      PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
+	// 	QuorumList:      extractQuorumDID(cr.QuorumList),
+	// 	Amount:          FTsForTxn[0].TokenValue * float64(req.FTCount),
+	// 	FTTokenList:     FTTokenIDs,
+	// }
+
+	updateFTTableErr := c.updateFTTable()
+	if updateFTTableErr != nil {
+		c.log.Error("Failed to update FT table after transfer ", "err", updateFTTableErr)
+		resp.Message = "Failed to update FT table after transfer"
+		return resp
+	}
+	// explorerErr := c.ec.ExplorerFTTransaction(eTrans)
+	// if explorerErr != nil {
+	// 	c.log.Error("Failed to send FT transaction to explorer ", "err", explorerErr)
+	// }
+	c.log.Info("FT Transfer finished successfully", "duration", dif, " trnxid", td.TransactionID)
+	msg := fmt.Sprintf("FT Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
+	resp.Status = true
+	resp.Message = msg
+	return resp
+}
+
+// TODO : update received / transferred tokens
+// create cvr-1 block and send FTs to receiver
+func (c *Core) SendFTsToReceiver(sc *contract.Contract, tokenInfo []contract.TokenInfo, txEpoch int, receiverPeerID *ipfsport.Peer) *model.BasicResponse {
+	resp := &model.BasicResponse{
+		Status: false,
+	}
+	rpeerid := receiverPeerID.GetPeerID()
+	// create block in cvr stage-1
+	transactionID := util.HexToStr(util.CalculateHash(sc.GetBlock(), "SHA3-256"))
+
+	c.log.Debug("*****sender to receiver transactionID***", transactionID)
+	tks := make([]block.TransTokens, 0)
+	ctcb := make(map[string]*block.Block)
+
+	for i := range tokenInfo {
+		tt := block.TransTokens{
+			Token:     tokenInfo[i].Token,
+			TokenType: tokenInfo[i].TokenType,
+		}
+		tks = append(tks, tt)
+		b := c.w.GetLatestTokenBlock(tokenInfo[i].Token, tokenInfo[i].TokenType)
+		ctcb[tokenInfo[i].Token] = b
+	}
+
+	bti := &block.TransInfo{
+		Comment: sc.GetComment(),
+		TID:     transactionID,
+		Tokens:  tks,
+	}
+
+	tcb := block.TokenChainBlock{
+		TransactionType: block.SpendableRBTTransferredType,
+		TokenOwner:      sc.GetReceiverDID(),
+		TransInfo:       bti,
+		SmartContract:   sc.GetBlock(),
+		Epoch:           txEpoch,
+	}
+	c.log.Debug("****creating new transblock for sender to receiver transaction in cvr-1*********")
+	nb := block.CreateNewBlock(ctcb, &tcb)
+	if nb == nil {
+		c.log.Error("Failed to create new token chain block - qrm init")
+		resp.Message = "failed to create new token chain block - qrm init"
+		return resp
+	}
+
+	sr := SendTokenRequest{
+		Address:         c.peerID + "." + sc.GetSenderDID(),
+		TokenInfo:       tokenInfo,
+		TokenChainBlock: nb.GetBlock(),
+		// QuorumList:         cr.QuorumList,
+		TransactionEpoch:   txEpoch,
+		PinningServiceMode: false,
+		CVRStage:           wallet.CVRStage1_Sender_to_Receiver,
+		// TransTokenSyncInfo: cr.TransTokenSyncInfo,
+	}
+	rp, err := c.getPeer(rpeerid + "." + sc.GetReceiverDID())
+	if err != nil {
+		c.log.Error("Receiver not connected", "err", err)
+		resp.Message = "Receiver not connected" + err.Error()
+		return resp
+	}
+	defer rp.Close()
+
+	var br model.BasicResponse
+	err = rp.SendJSONRequest("POST", APISendReceiverToken, nil, &sr, &br, true)
+	if err != nil {
+
+		c.log.Error("Unable to send tokens to receiver", "err", err)
+		resp.Message = "Unable to send tokens to receiver: " + err.Error()
+		return resp
+
+	}
+	if !br.Status {
+		if strings.Contains(br.Message, "failed to sync tokenchain") {
+			tokenPrefix := "Token: "
+			issueTypePrefix := "issueType: "
+
+			// Find the starting indexes of pt and issueType values
+			ptStart := strings.Index(br.Message, tokenPrefix) + len(tokenPrefix)
+			issueTypeStart := strings.Index(br.Message, issueTypePrefix) + len(issueTypePrefix)
+
+			// Extracting the substrings from the message
+			token := br.Message[ptStart : strings.Index(br.Message[ptStart:], ",")+ptStart]
+			issueType := br.Message[issueTypeStart:]
+
+			c.log.Debug("String: token is ", token, " issuetype is ", issueType)
+			issueTypeInt, err1 := strconv.Atoi(issueType)
+			if err1 != nil {
+				errMsg := fmt.Sprintf("transfer failed due to token chain sync issue, issueType string conversion, err %v", err1)
+				c.log.Error(errMsg)
+				resp.Message = errMsg
+				return resp
+			}
+			c.log.Debug("issue type in int is ", issueTypeInt)
+			syncIssueTokenDetails, err2 := c.w.ReadToken(token)
+			if err2 != nil {
+				errMsg := fmt.Sprintf("transfer failed due to tokenchain sync issue, err %v", err2)
+				c.log.Error(errMsg)
+				resp.Message = errMsg
+				return resp
+			}
+			c.log.Debug("sync issue token details ", syncIssueTokenDetails)
+			if issueTypeInt == TokenChainNotSynced {
+				syncIssueTokenDetails.TokenStatus = wallet.TokenChainSyncIssue
+				c.log.Debug("sync issue token details status updated", syncIssueTokenDetails)
+				c.w.UpdateToken(syncIssueTokenDetails)
+				resp.Message = "Receiver failed to sync token chain"
+				return resp
+			}
+		}
+		c.log.Error("Unable to send tokens to receiver", "msg", br.Message)
+		return resp
+	}
+
+	// update token status based on the situations:
+	// 1. sender receiver on different ports
+	// 2. sender receiver on same port
+	if rpeerid != c.peerID {
+		c.log.Debug("*********** updating token status for sender's transferred token")
+		// err = c.UpdateTransferredTokensInfo(tokensForTxn, wallet.TokenIsTransferred, transactionID)
+		// if err != nil {
+		// 	errMsg := fmt.Sprintf("failed to update trans tokens in DB, err : %v", err)
+		// 	c.log.Error(errMsg)
+		// 	resp.Message = errMsg
+		// 	return resp
+		// }
+	} else {
+		c.log.Debug("******sender peer and receiver's is same")
+	}
+
+	nbid, err := nb.GetBlockID(tokenInfo[0].Token)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to get block id of the new block, token : %v; err : %v", tokenInfo[0].Token, err)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return resp
+	}
+
+	txnDetails := &model.TransactionDetails{
+		TransactionID:   transactionID,
+		TransactionType: nb.GetTransType(),
+		BlockID:         nbid,
+		Mode:            wallet.FTTransferMode,
+		SenderDID:       sc.GetSenderDID(),
+		ReceiverDID:     sc.GetReceiverDID(),
+		Comment:         sc.GetComment(),
+		DateTime:        time.Now(),
+		Status:          true,
+		Epoch:           int64(txEpoch),
+	}
+
+	resp.Result = txnDetails
+
+	resp.Status = true
+	resp.Message = "FT transferred successfully"
+	return resp
+}
+
+// prepare self-transfer RBTs and create self-transfer contract block
+func (c *Core) CreateSelfTransferFTContract(selfTransferTokensMap map[string]struct{}, dc did.DIDCrypto, req *model.TransferFTReq, txnEpoch int) *model.BasicResponse {
+	resp := &model.BasicResponse{
+		Status: false,
+	}
+
+	// get all self-transfer tokens,
+	// the final self-transfer token list is : selfTransferTokensList
+	var selfTransactionID string
+	var selfTransferBlock *block.Block
+	var selfTransferContract *contract.Contract
+	var selfTransferTokenCount float64
+	selfTransferTokensList := make([]contract.TokenInfo, 0)
+	lockedTokensForSelfTransfer := make([]string, 0)
+
+	for selfTransferToken := range selfTransferTokensMap {
+
+		// check if the token is spendable, if not then do not include in self-transfer
+		selftransferTokenInfo, err := c.w.GetFTByDIDandStatus(selfTransferToken, req.Sender, wallet.TokenIsSpendable)
+		if err != nil {
+			// errMsg := fmt.Sprintf("failed to get token for self-transfer, token: %v, error: %v", selfTransferToken, err)
+			// c.log.Error(errMsg)
+			continue
+			// c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
+			// resp.Message = errMsg
+			// return resp
+		}
+
+		tts := "rbt"
+		if selftransferTokenInfo.TokenValue != 1 {
+			tts = "part"
+		}
+		tt := c.TokenType(tts)
+		blk := c.w.GetLatestTokenBlock(selfTransferToken, tt)
+		if blk == nil {
+			c.log.Error("failed to get latest block, invalid token chain")
+			resp.Message = "failed to get latest block, invalid token chain"
+			c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
+			return resp
+		}
+		bid, err := blk.GetBlockID(selfTransferToken)
+		if err != nil {
+			c.log.Error("failed to get block id", "err", err)
+			resp.Message = "failed to get block id, " + err.Error()
+			c.w.UnlockLockedTokens(req.Sender, lockedTokensForSelfTransfer, c.testNet)
+			return resp
+		}
+
+		selftransferTokeninfo := contract.TokenInfo{
+			Token:      selfTransferToken,
+			TokenType:  tt,
+			TokenValue: selftransferTokenInfo.TokenValue,
+			OwnerDID:   req.Sender,
+			BlockID:    bid,
+		}
+		selfTransferTokensList = append(selfTransferTokensList, selftransferTokeninfo)
+		lockedTokensForSelfTransfer = append(lockedTokensForSelfTransfer, selfTransferToken)
+		selfTransferTokenCount = selfTransferTokenCount + selftransferTokenInfo.TokenValue
+
+		// pinning self-transfer tokens
+		_, err = c.w.Pin(selftransferTokenInfo.TokenID, wallet.OwnerRole, req.Sender, "TID-Not Generated", req.Sender, req.Sender, selftransferTokenInfo.TokenValue)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to pin the token: %v, error: %v", selftransferTokenInfo.TokenID, err)
+			c.log.Error(errMsg)
+		}
+	}
+
+	c.log.Debug("************ self transfer token count : ", selfTransferTokenCount)
+
+	// if there are no available tokens for self-transfer then no need of self-transfer
+	if len(selfTransferTokensList) != 0 {
+		c.log.Debug("********** self transfer tokens : ", selfTransferTokensList)
+		//create new contract for self transfer
+		selfTransferContractType := &contract.ContractType{
+			Type:       contract.SCFTType,
+			PledgeMode: contract.PeriodicPledgeMode,
+			TransInfo: &contract.TransInfo{
+				SenderDID:   req.Sender,
+				ReceiverDID: req.Sender,
+				// Comment:     req.Comment,
+				TransTokens: selfTransferTokensList,
+			},
+			ReqID: reqID,
+		}
+		// c.log.Debug("***********Contract type for self transaction in cvr-1******* ", selfTransferContractType)
+
+		c.log.Debug("*******creating the contract for self transaction in cvr-1*******")
+
+		selfTransferContract = contract.CreateNewContract(selfTransferContractType)
+
+		c.log.Debug("******** sender signing on self-transfer txn id")
+
+		err := selfTransferContract.UpdateSignature(dc)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to update the signature on the self transfer contract, error: %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+
+		// creating self transfer block in cvr stage-2
+		selfTransactionID = util.HexToStr(util.CalculateHash(selfTransferContract.GetBlock(), "SHA3-256"))
+
+		c.log.Debug("trasactionID for self transaction", selfTransactionID)
+
+		selfTransferTokens := make([]block.TransTokens, 0)
+		latestTokenChainBlock := make(map[string]*block.Block)
+
+		for i := range selfTransferTokensList {
+			selfTransTokens := block.TransTokens{
+				Token:     selfTransferTokensList[i].Token,
+				TokenType: selfTransferTokensList[i].TokenType,
+			}
+			selfTransferTokens = append(selfTransferTokens, selfTransTokens)
+			latestBlock := c.w.GetLatestTokenBlock(selfTransferTokensList[i].Token, selfTransferTokensList[i].TokenType)
+			latestTokenChainBlock[selfTransferTokensList[i].Token] = latestBlock
+		}
+
+		selfTransBlockTransInfo := &block.TransInfo{
+			Comment: selfTransferContract.GetComment(),
+			TID:     selfTransactionID,
+			Tokens:  selfTransferTokens,
+		}
+
+		selfTransferTCB := block.TokenChainBlock{
+			TransactionType: block.SpendableRBTTransferredType,     // cvr stage-1
+			TokenOwner:      selfTransferContract.GetReceiverDID(), //ReceiverDID is same as req.Sender because it is self transfer
+			TransInfo:       selfTransBlockTransInfo,
+			SmartContract:   selfTransferContract.GetBlock(),
+			Epoch:           txnEpoch,
+		}
+
+		c.log.Debug("*******creating a new block for self transaction*****")
+		if latestTokenChainBlock == nil {
+			errMsg := fmt.Sprintf("failed to get prev block of tokens for self-transfer")
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+
+		c.log.Debug(fmt.Sprintf("self transfer tcb : %v", selfTransferTCB))
+
+		selfTransferBlock = block.CreateNewBlock(latestTokenChainBlock, &selfTransferTCB)
+		if selfTransferBlock == nil {
+			c.log.Error("Failed to create a selftransfer token chain block - qrm init")
+			resp.Message = "Failed to create a selftransfer token chain block - qrm init"
+			return resp
+		}
+		//update token type
+		var ok bool
+		for _, t := range selfTransferTokensList {
+
+			selfTransferBlock, ok = selfTransferBlock.UpdateTokenType(t.Token, token.CVR_RBTTokenType+t.TokenType)
+			if !ok {
+				errMsg := fmt.Sprintf("failed to update token cvr-1 type for self transfer block, error: %v", err)
+				c.log.Error(errMsg)
+				resp.Message = errMsg
+				return resp
+			}
+
+		}
+
+		//update the levelDB and SqliteDB
+		updatedTokenStateHashesAfterSelfTransfer, err := c.w.TokensReceived(req.Sender, selfTransferTokensList, selfTransferBlock, c.peerID, c.peerID, false, c.ipfs)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to add self-transfer token block and update status, error: %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+		//TODO: Send these updatedTokenStateHashesAfterSelfTransfer to quorums for pinning
+		c.log.Debug(fmt.Sprintf("Updated token state hashes after self transfer are:%v", updatedTokenStateHashesAfterSelfTransfer))
+
+	}
+
+	resp.Result = selfTransferContract
+
+	resp.Status = true
+	resp.Message = "self-ytransfer contract created"
 	return resp
 }
 

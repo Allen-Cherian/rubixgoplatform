@@ -57,8 +57,8 @@ const (
 )
 
 type PrePledgeRequest struct {
-	DID                 string `json:"did"`
-	QuorumType          int    `json:"quorum_type"`
+	DID        string `json:"did"`
+	QuorumType int    `json:"quorum_type"`
 	// TxnID               string `json:"txn_id"`
 	// SelftransferTxnID   string `json:"self_txn_id"`
 	SCTransferBlock     []byte `json:"sc_transfer_block"`
@@ -479,6 +479,48 @@ func (w *Wallet) ReadFTToken(token string) (*FTToken, error) {
 		return nil, err
 	}
 	return &t, nil
+}
+
+func (w *Wallet) GetFTByDIDandStatus(ftId string, did string, tokenStatus int) (*FTToken, error) {
+	var ftInfo *FTToken
+	w.l.Lock()
+	defer w.l.Unlock()
+	err := w.s.Read(FTTokenStorage, &ftInfo, "token_id=? AND did=? AND token_status", ftId, did, tokenStatus)
+	if err != nil {
+		w.log.Error("Failed to get tokens", "err", err)
+		return nil, err
+	}
+	ftInfo.TokenStatus = TokenIsLocked
+	err = w.s.Update(TokenStorage, &ftInfo, "did=? AND token_id=?", did, ftInfo.TokenID)
+	if err != nil {
+		w.log.Error("Failed to update token status", "err", err)
+		return nil, err
+	}
+	return ftInfo, nil
+}
+
+func (w *Wallet) UnlockFT(ftId string, isTestNet bool) error {
+	ftInfo, err := w.ReadFTToken(ftId)
+	if err != nil {
+		w.log.Error("failed to read ft : ", ftId, "err", err)
+	}
+	if ftInfo.TokenStatus == TokenIsLocked {
+		// check the latest block type and update to it's previous state
+		tokenType := 0
+		if isTestNet {
+			tokenType = token.TestNFTTokenType
+		} else {
+			tokenType = token.FTTokenType
+		}
+
+		latestBlock := w.GetLatestTokenBlock(ftId, tokenType)
+		if latestBlock.GetTransType() == block.OwnershipTransferredType {
+			ftInfo.TokenStatus = TokenIsSpendable
+		} else {
+			ftInfo.TokenStatus = TokenIsFree
+		}
+	}
+	return nil
 }
 
 func (w *Wallet) LockToken(wt *Token) error {
