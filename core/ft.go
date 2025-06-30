@@ -1410,6 +1410,8 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 		return response
 	}
 
+	c.log.Debug("************ list of free FTs : ", freeFTsList)
+
 	if len(freeFTsList) == 0 {
 		c.log.Error("No tokens present for cvr")
 		response.Message = "No tokens present for cvr"

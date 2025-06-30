@@ -191,6 +191,7 @@ func (s *Server) RegisterRoutes() {
 	s.AddRoute(setup.APIAddPeerDetailsFromExplorer, "POST", s.AuthHandle(s.APIAddPeerDetailsFromExplorer, false, s.AuthError, true))
 	s.AddRoute(setup.APIGetFTTxnByDID, "GET", s.AuthHandle(s.APIGetFTTxnByDID, true, s.AuthError, false))
 	s.AddRoute(setup.APIPrePledge, "POST", s.AuthHandle(s.APIPrePledge, true, s.AuthError, false))
+	s.AddRoute(setup.APIPrePledgeFT, "POST", s.AuthHandle(s.APIPrePledgeFTs, true, s.AuthError, false))
 }
 
 func (s *Server) ExitFunc() error {

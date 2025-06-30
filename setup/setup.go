@@ -96,7 +96,8 @@ const (
 	APISendJWTFromWallet                string = "/api/send-jwt-from-wallet"
 	APIAddPeerDetailsFromExplorer       string = "/api/add-peer-details-from-explorer"
 	APIGetFTTxnByDID                    string = "/api/get-ft-txn-by-did"
-	APIPrePledge                        string = "/api/prepledge"
+	APIPrePledge                        string = "/api/rbt/prepledge"
+	APIPrePledgeFT                      string = "/api/ft/prepledge"
 )
 
 // jwt.RegisteredClaims
