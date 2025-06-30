@@ -9,6 +9,7 @@ import (
 	ipfsnode "github.com/ipfs/go-ipfs-api"
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/contract"
+	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/token"
 	"github.com/rubixchain/rubixgoplatform/util"
 )
@@ -61,10 +62,12 @@ type PrePledgeRequest struct {
 	QuorumType int    `json:"quorum_type"`
 	// TxnID               string `json:"txn_id"`
 	// SelftransferTxnID   string `json:"self_txn_id"`
-	SCTransferBlock     []byte `json:"sc_transfer_block"`
-	SCSelfTransferBlock []byte `json:"sc_self_transfer_block"`
-	TxnEpoch            int64  `json:"txn_epoch"`
-	ReqID               string `json:"request_id"`
+	FTInfo              model.FTInfo `json:"ft_info"`
+	TransferMode        int          `json:"transfer_mode"`
+	SCTransferBlock     []byte       `json:"sc_transfer_block"`
+	SCSelfTransferBlock []byte       `json:"sc_self_transfer_block"`
+	TxnEpoch            int64        `json:"txn_epoch"`
+	ReqID               string       `json:"request_id"`
 }
 
 type Token struct {
@@ -519,6 +522,36 @@ func (w *Wallet) UnlockFT(ftId string, isTestNet bool) error {
 		} else {
 			ftInfo.TokenStatus = TokenIsFree
 		}
+		err = w.s.Update(FTStorage, &ftInfo, "token_id=?", ftId)
+		if err != nil {
+			w.log.Error("Failed to update ft status", "err", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *Wallet) ReleaseFTs(ftList []FTToken, isTestNet bool) error {
+	w.l.Lock()
+	defer w.l.Unlock()
+	for _, ftInfo := range ftList {
+		err := w.UnlockFT(ftInfo.TokenID, isTestNet)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to unlock ft : %v; err : %v", ftInfo.TokenID, err)
+			w.log.Error(errMsg)
+			return fmt.Errorf(errMsg)
+		}
+	}
+	return nil
+}
+
+func (w *Wallet) UpdateFT(ft *FTToken) error {
+	w.l.Lock()
+	defer w.l.Unlock()
+	err := w.s.Update(FTStorage, ft, "token_id=?", ft.TokenID)
+	if err != nil {
+		w.log.Error("failed to update ft info, err ", err)
+		return err
 	}
 	return nil
 }
@@ -727,7 +760,7 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 	}
 
 	// read the added block to make sure it was added properly
-	if b.GetTransType() == block.SpendableRBTTransferredType {
+	if b.GetTransType() == block.SpendableTokenTransferredType {
 		w.log.Debug("************ reading cvr-1 block *********")
 		checkBlock, err := w.getBlock(ti[0].TokenType+50, ti[0].Token, blockId)
 		if err != nil {
@@ -876,6 +909,37 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 		return nil, err
 	}
 
+	// read the added block to make sure it was added properly
+	blockId, _ := b.GetBlockID(ti[0].Token)
+	if b.GetTransType() == block.SpendableTokenTransferredType {
+		w.log.Debug("************ reading cvr-1 ft block *********")
+		checkBlock, err := w.getBlock(ti[0].TokenType+50, ti[0].Token, blockId)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to read added block in cvr-1, block id : %v, err : %v", blockId, err)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
+		if checkBlock == nil {
+			errMsg := fmt.Sprintf("invalid cvr-1 block, failed create token block, block id : %v", blockId)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
+	} else {
+		w.log.Debug("************ reading cvr-2 ft block *********")
+		w.log.Debug("reading added ft block in cvr-2 , token : ", ti[0].Token, "token type", ti[0].TokenType, "block id ", blockId)
+		checkBlock, err := w.getBlock(ti[0].TokenType, ti[0].Token, blockId)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to read added block in cvr-2, block id : %v, err : %v", blockId, err)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
+		if checkBlock == nil {
+			errMsg := fmt.Sprintf("invalid cvr-2 block, failed create token block, block id : %v", blockId)
+			w.log.Error(errMsg)
+			return nil, fmt.Errorf(errMsg)
+		}
+	}
+
 	//add to ipfs to get latest Token State Hash after receiving the token by receiver. The hashes will be returned to sender, and from there to
 	//quorums using pledgefinality function, to be added to TokenStateHash Table
 	var updatedtokenhashes []string = make([]string, 0)
@@ -931,6 +995,11 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 		}
 		// Update token status and pin tokens
 		tokenStatus := TokenIsFree
+
+		// if block is cvr-2, then the ft can be spent
+		if b.GetTransType() == block.OwnershipTransferredType {
+			tokenStatus = TokenIsSpendable
+		}
 		role := OwnerRole
 		ownerdid := did
 
@@ -940,6 +1009,8 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 		FTInfo.TokenStatus = tokenStatus
 		FTInfo.TransactionID = b.GetTid()
 		FTInfo.TokenStateHash = tokenHashMap[tokenInfo.Token]
+
+		w.log.Debug("******** receiver is upating token in db : ", tokenInfo)
 
 		err = w.s.Update(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
 		if err != nil {
