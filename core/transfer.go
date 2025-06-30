@@ -577,13 +577,29 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 		TID:     transactionID,
 		Tokens:  tks,
 	}
+	signData, senderNLSSShare, senderPrivSign, err := sc.GetHashSig(senderDID)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to fetch sender sign; err: %v", err)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return resp
+	}
+	senderSignType := dc.GetSignType()
+	senderSign := &block.InitiatorSignature{
+		NLSSShare:   senderNLSSShare,
+		PrivateSign: senderPrivSign,
+		DID:         senderDID,
+		Hash:        signData,
+		SignType:    senderSignType,
+	}
 
 	tcb := block.TokenChainBlock{
-		TransactionType: block.SpendableRBTTransferredType,
-		TokenOwner:      sc.GetReceiverDID(),
-		TransInfo:       bti,
-		SmartContract:   sc.GetBlock(),
-		Epoch:           txEpoch,
+		TransactionType:    block.SpendableTokenTransferredType,
+		TokenOwner:         sc.GetReceiverDID(),
+		TransInfo:          bti,
+		SmartContract:      sc.GetBlock(),
+		InitiatorSignature: senderSign,
+		Epoch:              txEpoch,
 	}
 	c.log.Debug("****creating new transblock for sender to receiver transaction in cvr-1*********")
 	nb := block.CreateNewBlock(ctcb, &tcb)
@@ -750,16 +766,16 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	// 	c.log.Debug("************completed explorer updation")
 	// }
 
-	
 	// Starting CVR stage-2
 	cvrRequest := &wallet.PrePledgeRequest{
-		DID:               senderDID,
-		QuorumType:        req.Type,
+		DID:        senderDID,
+		QuorumType: req.Type,
 		// TxnID:             transactionID,
 		// SelftransferTxnID: selfTransactionID,
-		SCTransferBlock:   sc.GetBlock(),
-		TxnEpoch: int64(txEpoch),
-		ReqID:    reqID,
+		TransferMode:    SpendableRBTTransferMode,
+		SCTransferBlock: sc.GetBlock(),
+		TxnEpoch:        int64(txEpoch),
+		ReqID:           reqID,
 	}
 	if selfTransferContract != nil {
 		cvrRequest.SCSelfTransferBlock = selfTransferContract.GetBlock()
@@ -767,7 +783,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	// cvr-2 go-routine
 	go func(cvrReq *wallet.PrePledgeRequest) {
-		resp := c.initiateRBTCVRTwo(cvrReq)
+		resp := c.initiateCVRTwo(cvrReq)
 		c.log.Debug("response from CVR-2 : ", resp)
 	}(cvrRequest)
 
@@ -791,7 +807,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 }
 
 // prepare self-transfer RBTs and create self-transfer contract block
-func (c *Core) CreateSelfTransferRBTContract(selfTransferTokensMap map[string]struct{}, dc did.DIDCrypto, req *model.RBTTransferRequest, txnEpoch int) (*model.BasicResponse) {
+func (c *Core) CreateSelfTransferRBTContract(selfTransferTokensMap map[string]struct{}, dc did.DIDCrypto, req *model.RBTTransferRequest, txnEpoch int) *model.BasicResponse {
 	resp := &model.BasicResponse{
 		Status: false,
 	}
@@ -915,12 +931,30 @@ func (c *Core) CreateSelfTransferRBTContract(selfTransferTokensMap map[string]st
 			Tokens:  selfTransferTokens,
 		}
 
+		// sender signature on txn id
+		signData, senderNLSSShare, senderPrivSign, err := selfTransferContract.GetHashSig(dc.GetDID())
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to fetch sender sign; err: %v", err)
+			c.log.Error(errMsg)
+			resp.Message = errMsg
+			return resp
+		}
+		senderSignType := dc.GetSignType()
+		senderSign := &block.InitiatorSignature{
+			NLSSShare:   senderNLSSShare,
+			PrivateSign: senderPrivSign,
+			DID:         dc.GetDID(),
+			Hash:        signData,
+			SignType:    senderSignType,
+		}
+
 		selfTransferTCB := block.TokenChainBlock{
-			TransactionType: block.SpendableRBTTransferredType,     // cvr stage-1
-			TokenOwner:      selfTransferContract.GetReceiverDID(), //ReceiverDID is same as req.Sender because it is self transfer
-			TransInfo:       selfTransBlockTransInfo,
-			SmartContract:   selfTransferContract.GetBlock(),
-			Epoch:           txnEpoch,
+			TransactionType:    block.SpendableTokenTransferredType,   // cvr stage-1
+			TokenOwner:         selfTransferContract.GetReceiverDID(), //ReceiverDID is same as req.Sender because it is self transfer
+			TransInfo:          selfTransBlockTransInfo,
+			SmartContract:      selfTransferContract.GetBlock(),
+			InitiatorSignature: senderSign,
+			Epoch:              txnEpoch,
 		}
 
 		c.log.Debug("*******creating a new block for self transaction*****")
