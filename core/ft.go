@@ -1366,3 +1366,144 @@ func (c *Core) updateFTTable() error {
 	}
 	return nil
 }
+
+func (c *Core) UpdateTransferredFTsInfo(tokenList []wallet.FTToken, newTokenStatus int, txnID string) error {
+	for _, tokenInfo := range tokenList {
+		tokenInfo.TokenStatus = newTokenStatus
+		tokenInfo.TransactionID = txnID
+		err := c.w.UpdateFT(&tokenInfo)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to update token : %v from Tokentable, err : %v", tokenInfo.TokenID, err)
+			c.log.Error(errMsg)
+			return fmt.Errorf(errMsg)
+		}
+
+	}
+	return nil
+}
+
+func (c *Core) InitiateFTCVRTwo(reqID string, req *model.CvrAPIRequest) {
+	br := c.GatherFreeFTsForConsensus(reqID, req)
+	didChannel := c.GetWebReq(reqID)
+	if didChannel == nil {
+		c.log.Error("Failed to get did channels")
+		return
+	}
+	c.log.Debug("!!!!!!!!!!!!!!!!!!! final response from cvr ", br)
+	didChannel.OutChan <- br
+}
+
+// this function gathers all the required free tokens for CVR and creates a temp contract block for conensus
+func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest) *model.BasicResponse {
+
+	c.log.Debug("****** receievd API request for CVR-2 : ", reqID, "request :", req)
+
+	response := &model.BasicResponse{
+		Status: false,
+	}
+	// gather free tokens for cvr and prepare contract block
+	freeFTsList, err := c.w.GetFreeFTsByDID(req.DID)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to get all free tokens for DID : %v, err : %v", req.DID, err)
+		c.log.Error(errMsg)
+		response.Message = errMsg
+		return response
+	}
+
+	if len(freeFTsList) == 0 {
+		c.log.Error("No tokens present for cvr")
+		response.Message = "No tokens present for cvr"
+		return response
+	}
+
+	// release the locked tokens before exit
+	defer c.w.ReleaseFTs(freeFTsList, c.testNet)
+
+	senderDID := req.DID
+	dc, err := c.SetupDID(reqID, senderDID)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to setup DID, err : %v", err)
+		c.log.Error(errMsg)
+		response.Message = errMsg
+		return response
+	}
+
+	//TODO: handle the error in Pin func
+	for i := range freeFTsList {
+		c.w.Pin(freeFTsList[i].TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.DID, "", freeFTsList[i].TokenValue)
+	}
+
+	tis := make([]contract.TokenInfo, 0)
+	totalValue := 0
+
+	for i := range freeFTsList {
+		tts := FTString
+		tt := c.TokenType(tts)
+		blk := c.w.GetLatestTokenBlock(freeFTsList[i].TokenID, tt)
+		if blk == nil {
+			c.log.Error("failed to get latest block, invalid token chain")
+			response.Message = "failed to get latest block, invalid token chain"
+			return response
+		}
+
+		bid, err := blk.GetBlockID(freeFTsList[i].TokenID)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to get block id; err: %v", err)
+			c.log.Error(errMsg)
+			response.Message = errMsg
+			return response
+		}
+		ti := contract.TokenInfo{
+			Token:      freeFTsList[i].TokenID,
+			TokenType:  tt,
+			TokenValue: floatPrecision(freeFTsList[i].TokenValue, MaxDecimalPlaces),
+			OwnerDID:   freeFTsList[i].DID,
+			BlockID:    bid,
+		}
+		tis = append(tis, ti)
+
+		// calculate all free tokens sum
+		totalValue += int(freeFTsList[i].TokenValue)
+
+	}
+
+	// preaparing the block for tokens to be transferred to receiver
+	contractType := &contract.ContractType{
+		Type:       contract.SCFTType,
+		PledgeMode: contract.PeriodicPledgeMode,
+		TransInfo: &contract.TransInfo{
+			SenderDID:   req.DID,
+			ReceiverDID: req.DID,
+			TransTokens: tis,
+		},
+		ReqID: reqID,
+	}
+	sc := contract.CreateNewContract(contractType)
+
+	// Starting CVR stage-1
+	// TODO : handle cvr stage-0 : quorum's signature
+	// And handle self-transfer of sender's remaining amount
+
+	err = sc.UpdateSignature(dc)
+	if err != nil {
+		c.log.Error(err.Error())
+		response.Message = err.Error()
+		return response
+	}
+
+	st := time.Now()
+	txEpoch := int(st.Unix())
+
+	cvrReq := &wallet.PrePledgeRequest{
+		DID:                 req.DID,
+		QuorumType:          req.QuorumType,
+		TransferMode:        SpendableFTTransferMode,
+		SCSelfTransferBlock: sc.GetBlock(),
+		SCTransferBlock:     nil,
+		ReqID:               reqID,
+		TxnEpoch:            int64(txEpoch),
+	}
+
+	response = c.initiateCVRTwo(cvrReq)
+	return response
+}

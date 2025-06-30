@@ -1368,7 +1368,7 @@ func (c *Core) RestartIncompleteTokenChainSyncs() {
 
 }
 func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
-	br := c.GatherFreeTokensForConsensus(reqID, req)
+	br := c.GatherFreeRBTsForConsensus(reqID, req)
 	didChannel := c.GetWebReq(reqID)
 	if didChannel == nil {
 		c.log.Error("Failed to get did channels")
@@ -1379,7 +1379,7 @@ func (c *Core) InitiateRBTCVRTwo(reqID string, req *model.CvrAPIRequest) {
 }
 
 // this function gathers all the required free tokens for CVR and creates a temp contract block for conensus
-func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIRequest) *model.BasicResponse {
+func (c *Core) GatherFreeRBTsForConsensus(reqID string, req *model.CvrAPIRequest) *model.BasicResponse {
 
 	c.log.Debug("****** receievd API request for CVR-2 : ", reqID, "request :", req)
 
@@ -1419,7 +1419,7 @@ func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIReque
 	}
 
 	tis := make([]contract.TokenInfo, 0)
-	totalValue := 0
+	totalValue := 0.0
 
 	for i := range freeTokensList {
 		tts := "rbt"
@@ -1451,7 +1451,7 @@ func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIReque
 		tis = append(tis, ti)
 
 		// calculate all free tokens sum
-		totalValue += int(freeTokensList[i].TokenValue)
+		totalValue += floatPrecision(freeTokensList[i].TokenValue, MaxDecimalPlaces)
 
 	}
 
@@ -1518,22 +1518,24 @@ func (c *Core) GatherFreeTokensForConsensus(reqID string, req *model.CvrAPIReque
 	cvrReq := &wallet.PrePledgeRequest{
 		DID:                 req.DID,
 		QuorumType:          req.QuorumType,
+		TransferMode:        SpendableRBTTransferMode,
 		SCSelfTransferBlock: sc.GetBlock(),
 		SCTransferBlock:     nil,
 		ReqID:               reqID,
 		TxnEpoch:            int64(txEpoch),
 	}
 
-	response = c.initiateRBTCVRTwo(cvrReq)
+	response = c.initiateCVRTwo(cvrReq)
 	return response
 }
 
-func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicResponse {
+func (c *Core) initiateCVRTwo(req *wallet.PrePledgeRequest) *model.BasicResponse {
 	resp := &model.BasicResponse{
 		Status: false,
 	}
 
 	c.log.Debug("******** cvr-2 request received ", req.DID)
+	isSelfRBTTransfer := false
 
 	// tokensList, err := c.w.GetTokensByTxnID(req.TxnID)
 	// // TODO : proper error handling needed for db locking and unlocking
@@ -1544,7 +1546,6 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 	// }
 
 	// senderDID := req.DID
-	isSelfRBTTransfer := false
 
 	// dc, err := c.SetupDID(reqID, senderDID)
 	// if err != nil {
@@ -1638,7 +1639,10 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		c.log.Debug("**********receiver peer id is : ", rpeerid)
 
 		cr := getConsensusRequest(req.QuorumType, c.peerID, rpeerid, req.SCTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
-		cr.Mode = SpendableRBTTransferMode
+		cr.Mode = req.TransferMode
+		if req.TransferMode == SpendableFTTransferMode {
+			cr.FTinfo = req.FTInfo
+		}
 
 		c.log.Debug("********** consensus request : mode ", cr.Mode, "cr req id", cr.ReqID, "sender peerid", cr.SenderPeerID, "receiver peerid", cr.ReceiverPeerID)
 
@@ -1650,6 +1654,8 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 			resp.Message = errMsg
 			return resp
 		}
+
+		c.log.Debug("******* sender to receiver transfer cvr-2 completed ******")
 	}
 
 	// TODO : add transaction details to DB, if not added alreay in initiate consensus
@@ -1665,7 +1671,12 @@ func (c *Core) initiateRBTCVRTwo(req *wallet.PrePledgeRequest) *model.BasicRespo
 		}
 
 		selfTransferConsensusReq := getConsensusRequest(req.QuorumType, c.peerID, c.peerID, req.SCSelfTransferBlock, int(req.TxnEpoch), isSelfRBTTransfer)
-		selfTransferConsensusReq.Mode = SpendableRBTTransferMode
+		selfTransferConsensusReq.Mode = req.TransferMode
+		if req.TransferMode == SpendableFTTransferMode {
+			ftsList := selfTransferContractBlock.GetTransTokenInfo()
+			req.FTInfo.FTCount = len(ftsList)
+			selfTransferConsensusReq.FTinfo = req.FTInfo
+		}
 
 		c.log.Debug("********** consensus request : mode ", selfTransferConsensusReq.Mode, "cr req id", selfTransferConsensusReq.ReqID, "sender peerid", selfTransferConsensusReq.SenderPeerID, "receiver peerid", selfTransferConsensusReq.ReceiverPeerID)
 		// initiate consensus for self transfer
@@ -1710,7 +1721,7 @@ func (c *Core) GetLastCVR2Block(tokenId string, tokenType int) (*block.Block, er
 		return nil, fmt.Errorf(errMsg)
 	}
 
-	if latestBlock.GetTransType() == block.SpendableRBTTransferredType {
+	if latestBlock.GetTransType() == block.SpendableTokenTransferredType {
 		// get the previous block with cvr-2, block type 15
 		prevBlockID, err := latestBlock.GetPrevBlockID(tokenId)
 		if err != nil {
@@ -1746,7 +1757,7 @@ func (c *Core) RemoveSpendableRBTTransferredBlock(tokenID string, tokenType int)
 		c.log.Error(errMsg)
 		return fmt.Errorf(errMsg)
 	}
-	if latestBlock.GetTransType() == block.SpendableRBTTransferredType {
+	if latestBlock.GetTransType() == block.SpendableTokenTransferredType {
 		//TODO: delete the temp block(cvr-1) before adding cvr-2 block
 		removeRequest := &model.TCRemoveRequest{
 			Token:  tokenID,
