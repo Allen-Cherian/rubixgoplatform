@@ -1421,8 +1421,55 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 	// release the locked tokens before exit
 	defer c.w.ReleaseFTs(freeFTsList, c.testNet)
 
-	senderDID := req.DID
-	dc, err := c.SetupDID(reqID, senderDID)
+	segratedFtList, err := c.SegregateFtWithNameAndCreatorDID(freeFTsList)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to segregate all free tokens for DID : %v, err : %v", req.DID, err)
+		c.log.Error(errMsg)
+		response.Message = errMsg
+		return response
+	}
+
+	cvrSuccessFtList := make([]string, 0)
+	cvrFailureFtList := make([]string, 0)
+	// initiate cvr-2 for each FT name and creator did, sequentially
+	for ftNameAndCreatorDID, ftList := range segratedFtList {
+		c.log.Debug("********** initiating cvr-2 for ft name and creator did : ", ftNameAndCreatorDID)
+		cvrResp := c.CreateFTContractAndInitiateCVrTwo(ftList, req.DID, req.QuorumType)
+		if !cvrResp.Status {
+			cvrFailureFtList = append(cvrFailureFtList, ftNameAndCreatorDID)
+			errMsg := fmt.Sprintf("failed to initiate CVR-2 for ft name and creator did : %v; err : %v ", ftNameAndCreatorDID, cvrResp.Message)
+			c.log.Error(errMsg)
+		} else {
+			cvrSuccessFtList = append(cvrSuccessFtList, ftNameAndCreatorDID)
+		}
+	}
+
+	if len(cvrSuccessFtList) > 0 {
+		response.Status = true
+		msg := fmt.Sprintf("cvr-2 completed for FTs (ftname-creatordid): %v, and failed for FTs (ftname-creatordid) : %v", cvrSuccessFtList, cvrFailureFtList)
+		response.Message = msg
+	} else {
+		response.Message = "cvr-2 failed for all free FTs"
+	}
+	return response
+}
+
+// this function segregates FTs according to FTName and CreatorDID
+func (c *Core) SegregateFtWithNameAndCreatorDID(ftList []wallet.FTToken) (map[string][]wallet.FTToken, error) {
+	segragatedFTMap := make(map[string][]wallet.FTToken)
+	for _, ftInfo := range ftList {
+		ftNameAndCreatorDID := ftInfo.FTName + "-" + ftInfo.CreatorDID // key is "ftname-creatordid"
+		segragatedFTMap[ftNameAndCreatorDID] = append(segragatedFTMap[ftInfo.FTName], ftInfo)
+	}
+	return segragatedFTMap, nil
+}
+
+// this function creates contract block for cvr-2, initiator signs on the txn id, and initiates CVR-2
+func (c *Core) CreateFTContractAndInitiateCVrTwo(ftList []wallet.FTToken, initiatorDID string, quorumType int) *model.BasicResponse {
+	response := &model.BasicResponse{
+		Status: false,
+	}
+	dc, err := c.SetupDID(reqID, initiatorDID)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to setup DID, err : %v", err)
 		c.log.Error(errMsg)
@@ -1431,24 +1478,24 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 	}
 
 	//TODO: handle the error in Pin func
-	for i := range freeFTsList {
-		c.w.Pin(freeFTsList[i].TokenID, wallet.OwnerRole, senderDID, "TID-Not Generated", req.DID, "", freeFTsList[i].TokenValue)
+	for i := range ftList {
+		c.w.Pin(ftList[i].TokenID, wallet.OwnerRole, initiatorDID, "TID-Not Generated", initiatorDID, "", ftList[i].TokenValue)
 	}
 
 	tis := make([]contract.TokenInfo, 0)
 	totalValue := 0
 
-	for i := range freeFTsList {
+	for i := range ftList {
 		tts := FTString
 		tt := c.TokenType(tts)
-		blk := c.w.GetLatestTokenBlock(freeFTsList[i].TokenID, tt)
+		blk := c.w.GetLatestTokenBlock(ftList[i].TokenID, tt)
 		if blk == nil {
 			c.log.Error("failed to get latest block, invalid token chain")
 			response.Message = "failed to get latest block, invalid token chain"
 			return response
 		}
 
-		bid, err := blk.GetBlockID(freeFTsList[i].TokenID)
+		bid, err := blk.GetBlockID(ftList[i].TokenID)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to get block id; err: %v", err)
 			c.log.Error(errMsg)
@@ -1456,16 +1503,16 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 			return response
 		}
 		ti := contract.TokenInfo{
-			Token:      freeFTsList[i].TokenID,
+			Token:      ftList[i].TokenID,
 			TokenType:  tt,
-			TokenValue: floatPrecision(freeFTsList[i].TokenValue, MaxDecimalPlaces),
-			OwnerDID:   freeFTsList[i].DID,
+			TokenValue: floatPrecision(ftList[i].TokenValue, MaxDecimalPlaces),
+			OwnerDID:   ftList[i].DID,
 			BlockID:    bid,
 		}
 		tis = append(tis, ti)
 
 		// calculate all free tokens sum
-		totalValue += int(freeFTsList[i].TokenValue)
+		totalValue += int(ftList[i].TokenValue)
 
 	}
 
@@ -1474,17 +1521,13 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 		Type:       contract.SCFTType,
 		PledgeMode: contract.PeriodicPledgeMode,
 		TransInfo: &contract.TransInfo{
-			SenderDID:   req.DID,
-			ReceiverDID: req.DID,
+			SenderDID:   initiatorDID,
+			ReceiverDID: initiatorDID,
 			TransTokens: tis,
 		},
 		ReqID: reqID,
 	}
 	sc := contract.CreateNewContract(contractType)
-
-	// Starting CVR stage-1
-	// TODO : handle cvr stage-0 : quorum's signature
-	// And handle self-transfer of sender's remaining amount
 
 	err = sc.UpdateSignature(dc)
 	if err != nil {
@@ -1497,8 +1540,8 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 	txEpoch := int(st.Unix())
 
 	cvrReq := &wallet.PrePledgeRequest{
-		DID:                 req.DID,
-		QuorumType:          req.QuorumType,
+		DID:                 initiatorDID,
+		QuorumType:          quorumType,
 		TransferMode:        SpendableFTTransferMode,
 		SCSelfTransferBlock: sc.GetBlock(),
 		SCTransferBlock:     nil,
