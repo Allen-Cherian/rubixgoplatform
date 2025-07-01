@@ -16,6 +16,12 @@ import (
 	"github.com/rubixchain/rubixgoplatform/wrapper/uuid"
 )
 
+type ConsensusReturns struct {
+	TxnDetails    *model.TransactionDetails
+	PledgeDetails *PledgeDetails
+	Msg           string
+}
+
 func (c *Core) InitiateRBTTransfer(reqID string, req *model.RBTTransferRequest) {
 	br := c.initiateRBTTransfer(reqID, req)
 	dc := c.GetWebReq(reqID)
