@@ -516,7 +516,35 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 	go func() {
 		td, _, pds, FTconsErr := c.initiateConsensus(cr, sc, dc)
 		if FTconsErr != nil {
-			resp.Message = fmt.Sprintf("Consensus failed " + FTconsErr.Error())
+			resp.Message = fmt.Sprintf("Consensus failed: %s", FTconsErr.Error())
+			tokens := sc.GetTransTokenInfo()
+			for _, token := range tokens {
+				if token.Token == "" {
+					continue
+				}
+
+				ftToken := &wallet.FTToken{}
+				ReadFTErr := c.s.Read(wallet.FTTokenStorage, ftToken, "token_id=?", token.Token)
+				if ReadFTErr != nil {
+					c.log.Error("Failed to read FT token", "token", token.Token, "err", ReadFTErr)
+					resp.Message = "Failed to read FT token"
+					resp.Status = false
+					resultChan <- resp
+					return
+				}
+
+				if ftToken.TokenStatus == wallet.TokenIsLocked {
+					ftToken.TokenStatus = wallet.TokenIsFree
+					updateFTErr := c.s.Update(wallet.FTTokenStorage, ftToken, "token_id=?", token.Token)
+					if updateFTErr != nil {
+						c.log.Error("Failed to update FT token status", "token", token.Token, "err", updateFTErr)
+						resp.Message = "Failed to update FT token status"
+						resp.Status = false
+						resultChan <- resp
+						return
+					}
+				}
+			}
 			resp.Status = false
 			resultChan <- resp
 			return
