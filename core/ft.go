@@ -545,6 +545,7 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 					}
 				}
 			}
+			c.UpdateUserInfo([]string{did})
 			resp.Status = false
 			resultChan <- resp
 			return
