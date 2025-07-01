@@ -617,6 +617,7 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		}
 
 		c.ec.ExplorerFTTransaction(eTrans)
+		c.UpdateUserInfo([]string{did})
 		// Send final transaction completion response if not already timed out
 		select {
 		case resultChan <- resp:
@@ -730,6 +731,38 @@ func (c *Core) updateFTTable() error {
 			c.log.Error("Failed to add new FT:", Ft.FTName, "Error:", addErr)
 			return addErr
 		}
+	}
+	return nil
+}
+
+func (c *Core) UnlockFTs() error {
+	lockedFTs, err := c.w.GetLockedFTs()
+	if err != nil {
+		c.log.Error("Failed to get locked FTs", "err", err)
+		return err
+	}
+
+	for _, ft := range lockedFTs {
+		if ft.TokenID == "" {
+			continue
+		}
+
+		ft.TokenStatus = wallet.TokenIsFree
+
+		// First, delete the token
+		err := c.s.Delete(wallet.FTTokenStorage, &wallet.FT{}, "token_id=?", ft.TokenID)
+		if err != nil {
+			c.log.Error("Failed to delete FT", "token_id", ft.TokenID, "err", err)
+			continue
+		}
+
+		// Then, re-insert the same token — this moves it to the bottom (new rowid)
+		err = c.s.Write(wallet.FTTokenStorage, &ft)
+		if err != nil {
+			c.log.Error("Failed to re-insert FT", "token_id", ft.TokenID, "err", err)
+			continue
+		}
+		c.log.Info("Unlocked FT", "token_id", ft.TokenID)
 	}
 	return nil
 }
