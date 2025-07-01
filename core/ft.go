@@ -762,7 +762,7 @@ func (c *Core) UnlockFTs() error {
 			c.log.Error("Failed to re-insert FT", "token_id", ft.TokenID, "err", err)
 			continue
 		}
-		c.log.Info("Unlocked FT", "token_id", ft.TokenID)
 	}
+	c.log.Info("Unlocked FT")
 	return nil
 }
