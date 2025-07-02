@@ -26,13 +26,14 @@ func (c *Core) InitiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	br := c.initiateRBTTransfer(reqID, req)
 	dc := c.GetWebReq(reqID)
 	if dc == nil {
-		c.log.Error("Failed to get did channels")
+		c.log.Error("Failed to get did channels in InitiateRBTTransfer")
 		return
 	}
 	dc.OutChan <- br
 }
 
 func gatherTokensForTransaction(c *Core, req *model.RBTTransferRequest, dc did.DIDCrypto, isSelfRBTTransfer bool) ([]wallet.Token, int, error) {
+	c.log.Debug("********gathering tokens for transaction")
 	var tokensForTransfer []wallet.Token
 	var transferMode int = SpendableRBTTransferMode // Default mode
 
@@ -303,7 +304,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 
 	tokensForTxn, transferMode, err := gatherTokensForTransaction(c, req, dc, isSelfRBTTransfer)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to retrieve tokens, err: %v", err)
+		errMsg := fmt.Sprintf("failed to retrieve spendable RBTs for transfer, err: %v", err)
 		c.log.Error(errMsg)
 		resp.Message = errMsg
 		return resp
@@ -316,6 +317,7 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	if len(tokensForTxn) == 0 && isSelfRBTTransfer {
 		resp.Status = true
 		resp.Message = "No tokens present for self transfer"
+		c.log.Error("No tokens present for self transfer")
 		return resp
 	}
 

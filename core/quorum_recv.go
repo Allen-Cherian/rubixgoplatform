@@ -970,7 +970,7 @@ func (c *Core) quorumConensus(req *ensweb.Request) *ensweb.Result {
 	case NFTExecuteMode:
 		c.log.Info("NFT execute consensus started")
 		return c.quorumNFTConsensus(req, did, qdc, &cr)
-	case FTTransferMode:
+	case FTTransferMode, SpendableFTTransferMode:
 		c.log.Debug("FT consensus started")
 		return c.quorumFTConsensus(req, did, qdc, &cr)
 	default:
@@ -1405,7 +1405,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 
 	updatedTokenStateHashes := make([]string, 0)
 
-	// In cvr-1, sync all trans-ft chains, update token type, add new ft block to token chain and 
+	// In cvr-1, sync all trans-ft chains, update token type, add new ft block to token chain and
 	// update FT status, add transaction to transaction history table
 	if cvrStage == wallet.CVRStage1_Sender_to_Receiver {
 		for _, ti := range tokenInfo {
@@ -1415,15 +1415,15 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 				return nil, nil, fmt.Errorf("failed to sync token chain block, missing previous block id for token %v, error: %v", t, err)
 			}
 
-		err = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
-		if err != nil && !strings.Contains(err.Error(), "syncer block height discrepency") {
-			c.log.Error("receiver failed to sync token chain of FT ", ti.Token, "error ", err)
-			// return nil, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
-			syncIssueTokens = append(syncIssueTokens, t)
-			continue
-		} else {
-			err = nil
-		}
+			err = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
+			if err != nil && !strings.Contains(err.Error(), "syncer block height discrepency") {
+				c.log.Error("receiver failed to sync token chain of FT ", ti.Token, "error ", err)
+				// return nil, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
+				syncIssueTokens = append(syncIssueTokens, t)
+				continue
+			} else {
+				err = nil
+			}
 
 			if c.TokenType(PartString) == ti.TokenType {
 				gb := c.w.GetGenesisTokenBlock(t, ti.TokenType)
@@ -1436,12 +1436,12 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 				}
 				_, err = c.syncParentToken(senderPeer, pt)
 				if err != nil {
-					return nil,nil, fmt.Errorf("failed to sync parent token %v childtoken %v err %v : ", pt, t, err)
+					return nil, nil, fmt.Errorf("failed to sync parent token %v childtoken %v err %v : ", pt, t, err)
 				}
 			}
 			ptcbArray, err := c.w.GetTokenBlock(t, ti.TokenType, pblkID)
 			if err != nil {
-				return nil,nil, fmt.Errorf("failed to fetch previous block for token: %v err : %v", t, err)
+				return nil, nil, fmt.Errorf("failed to fetch previous block for token: %v err : %v", t, err)
 			}
 			ptcb := block.InitBlock(ptcbArray, nil)
 			if c.checkIsPledged(ptcb) {
@@ -1496,7 +1496,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 		}
 	}
 
-	// In cvr-2, check pins and state-pins on trans-fts, remove last cvr-1 block from token chain, 
+	// In cvr-2, check pins and state-pins on trans-fts, remove last cvr-1 block from token chain,
 	// update token chain with cvr-2 block and update token-status in table
 	if cvrStage == wallet.CVRStage2_Sender_to_Receiver {
 		results := make([]MultiPinCheckRes, len(tokenInfo))

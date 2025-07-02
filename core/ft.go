@@ -1473,13 +1473,14 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 		response.Message = errMsg
 		return response
 	}
+	c.log.Debug("******* segregated FTs list : ", segratedFtList)
 
 	cvrSuccessFtList := make([]string, 0)
 	cvrFailureFtList := make([]string, 0)
 	// initiate cvr-2 for each FT name and creator did, sequentially
 	for ftNameAndCreatorDID, ftList := range segratedFtList {
-		c.log.Debug("********** initiating cvr-2 for ft name and creator did : ", ftNameAndCreatorDID)
-		cvrResp := c.CreateFTContractAndInitiateCVrTwo(ftList, req.DID, req.QuorumType)
+		c.log.Debug("********** initiating cvr-2 for ft name and creator did : ", ftNameAndCreatorDID, "ft list: ", ftList)
+		cvrResp := c.CreateFTContractAndInitiateCVrTwo(reqID, ftList, req.DID, req.QuorumType)
 		if !cvrResp.Status {
 			cvrFailureFtList = append(cvrFailureFtList, ftNameAndCreatorDID)
 			errMsg := fmt.Sprintf("failed to initiate CVR-2 for ft name and creator did : %v; err : %v ", ftNameAndCreatorDID, cvrResp.Message)
@@ -1489,6 +1490,8 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 		}
 	}
 
+	c.log.Debug("********cvr success FTs list :", cvrSuccessFtList)
+
 	if len(cvrSuccessFtList) > 0 {
 		response.Status = true
 		msg := fmt.Sprintf("cvr-2 completed for FTs (ftname-creatordid): %v, and failed for FTs (ftname-creatordid) : %v", cvrSuccessFtList, cvrFailureFtList)
@@ -1496,6 +1499,7 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 	} else {
 		response.Message = "cvr-2 failed for all free FTs"
 	}
+	c.log.Debug("*******", response.Message)
 	return response
 }
 
@@ -1504,17 +1508,17 @@ func (c *Core) SegregateFtWithNameAndCreatorDID(ftList []wallet.FTToken) (map[st
 	segragatedFTMap := make(map[string][]wallet.FTToken)
 	for _, ftInfo := range ftList {
 		ftNameAndCreatorDID := ftInfo.FTName + "-" + ftInfo.CreatorDID // key is "ftname-creatordid"
-		segragatedFTMap[ftNameAndCreatorDID] = append(segragatedFTMap[ftInfo.FTName], ftInfo)
+		segragatedFTMap[ftNameAndCreatorDID] = append(segragatedFTMap[ftNameAndCreatorDID], ftInfo)
 	}
 	return segragatedFTMap, nil
 }
 
 // this function creates contract block for cvr-2, initiator signs on the txn id, and initiates CVR-2
-func (c *Core) CreateFTContractAndInitiateCVrTwo(ftList []wallet.FTToken, initiatorDID string, quorumType int) *model.BasicResponse {
+func (c *Core) CreateFTContractAndInitiateCVrTwo(reqId string, ftList []wallet.FTToken, initiatorDID string, quorumType int) *model.BasicResponse {
 	response := &model.BasicResponse{
 		Status: false,
 	}
-	dc, err := c.SetupDID(reqID, initiatorDID)
+	dc, err := c.SetupDID(reqId, initiatorDID)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to setup DID, err : %v", err)
 		c.log.Error(errMsg)
@@ -1570,7 +1574,7 @@ func (c *Core) CreateFTContractAndInitiateCVrTwo(ftList []wallet.FTToken, initia
 			ReceiverDID: initiatorDID,
 			TransTokens: tis,
 		},
-		ReqID: reqID,
+		ReqID: reqId,
 	}
 	sc := contract.CreateNewContract(contractType)
 
@@ -1584,16 +1588,23 @@ func (c *Core) CreateFTContractAndInitiateCVrTwo(ftList []wallet.FTToken, initia
 	st := time.Now()
 	txEpoch := int(st.Unix())
 
+	ftInfo := model.FTInfo{
+		FTName:  ftList[0].FTName,
+		FTCount: len(ftList),
+	}
+
 	cvrReq := &wallet.PrePledgeRequest{
 		DID:                 initiatorDID,
 		QuorumType:          quorumType,
 		TransferMode:        SpendableFTTransferMode,
 		SCSelfTransferBlock: sc.GetBlock(),
 		SCTransferBlock:     nil,
-		ReqID:               reqID,
+		ReqID:               reqId,
 		TxnEpoch:            int64(txEpoch),
+		FTInfo:              ftInfo,
 	}
 
 	response = c.initiateCVRTwo(cvrReq)
+	c.log.Debug("*******cvr-2 response :", response.Message)
 	return response
 }

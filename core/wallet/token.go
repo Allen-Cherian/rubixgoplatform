@@ -1125,7 +1125,7 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 		FTInfo.TransactionID = b.GetTid()
 		FTInfo.TokenStateHash = tokenHashMap[tokenInfo.Token]
 
-		w.log.Debug("******** receiver is upating token in db : ", tokenInfo)
+		w.log.Debug("******** receiver is upating token in db : ", FTInfo)
 
 		err = w.s.Update(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
 		if err != nil {

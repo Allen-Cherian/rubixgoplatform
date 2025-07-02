@@ -548,6 +548,10 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	c.log.Debug("********** txn id : ", tid)
 
 	// create new block for trans-tokens
+	if dc == nil {
+		c.log.Error("did crypto not initialised properly")
+		return nil, nil, nil, fmt.Errorf("did crypto is nil")
+	}
 	nb, err := c.createTransTokenBlock(cr, sc, tid, dc)
 	if err != nil {
 		c.log.Error("Failed to  create transaction block, ", "err", err)
@@ -1049,16 +1053,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 		} else {
 			c.log.Debug("************* self transfer mode********")
-			var syncIssueTokens []string
 			// Self update for self transfer tokens
-			newTokenHashes, syncIssueTokens, err = c.updateFTToken(sc.GetSenderDID(), sc.GetSenderDID(), ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, &cr.FTinfo, wallet.CVRStage2_Sender_to_Receiver)
+			newTokenHashes, _, err = c.updateFTToken(sc.GetSenderDID(), sc.GetSenderDID(), ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, &cr.FTinfo, wallet.CVRStage2_Sender_to_Receiver)
 			if err != nil {
 				errMsg := fmt.Errorf("failed while updating self transfer FTs, err: %v", err)
 				c.log.Error(errMsg.Error())
 				return nil, nil, nil, errMsg
-			}
-			if len(syncIssueTokens) > 0{
-				
 			}
 		}
 
@@ -2503,7 +2503,7 @@ func (c *Core) connectQuorum(consensusRequest *ConensusRequest, p *ipfsport.Peer
 		}
 		c.log.Debug("issue type in int is ", issueTypeInt)
 		for _, token := range cresp.Result {
-			if consensusRequest.Mode == FTTransferMode || consensusRequest.Mode == SpendableFTTransferMode{
+			if consensusRequest.Mode == FTTransferMode || consensusRequest.Mode == SpendableFTTransferMode {
 				FTsyncIssueTokenDetails, err2 := c.w.ReadFTToken(token)
 				if err2 != nil {
 					c.log.Error("Consensus failed due to tokenchain sync issue ", "err", err2)
@@ -2516,7 +2516,7 @@ func (c *Core) connectQuorum(consensusRequest *ConensusRequest, p *ipfsport.Peer
 					c.log.Debug("In connectQuorum, sync issue token details status updated", FTsyncIssueTokenDetails)
 					c.w.UpdateFTToken(FTsyncIssueTokenDetails)
 				}
-			} else if consensusRequest.Mode == RBTTransferMode || consensusRequest.Mode == SpendableRBTTransferMode{
+			} else if consensusRequest.Mode == RBTTransferMode || consensusRequest.Mode == SpendableRBTTransferMode {
 				syncIssueTokenDetails, err2 := c.w.ReadToken(token)
 				if err2 != nil {
 					c.log.Error("Consensus failed due to tokenchain sync issue, token not found in tab ", "err", err2)
