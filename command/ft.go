@@ -159,6 +159,7 @@ func (cmd *Command) getFTinfo() {
 			}
 		}
 		for i, name := range ftNames {
+			fmt.Printf("Owner DID : %v \n", cmd.did)
 			fmt.Printf("%-*s: %s (CreatorDID: %s)\n", maxNameLength, name, ftCounts[i], creatorDIDs[i])
 		}
 	}

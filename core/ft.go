@@ -276,7 +276,71 @@ func (c *Core) GetFTInfoByDID(did string) ([]model.FTInfo, error) {
 		c.log.Error("DID does not exist")
 		return nil, fmt.Errorf("DID does not exist")
 	}
-	FT, err := c.w.GetFTsAndCount(did)
+	FT, err := c.w.GetFTsAndCountByStatus(did, wallet.TokenIsFree)
+	if err != nil && err.Error() != "no records found" {
+		c.log.Error("Failed to get tokens FTs and Count", "err", err)
+		return []model.FTInfo{}, fmt.Errorf("Failed to get tokens FTs and Count")
+	}
+	ftInfoMap := make(map[string]map[string]int)
+
+	// Iterate through retrieved FTs and populate the map
+	for _, t := range FT {
+		if ftInfoMap[t.FTName] == nil {
+			ftInfoMap[t.FTName] = make(map[string]int) // Initialize map for each FTName
+		}
+		ftInfoMap[t.FTName][t.CreatorDID] += t.FTCount // Increment count for the specific CreatorDID
+	}
+	info := make([]model.FTInfo, 0)
+	for ftName, creatorCounts := range ftInfoMap {
+		for creatorDID, count := range creatorCounts {
+			info = append(info, model.FTInfo{
+				FTName:     ftName,
+				FTCount:    count,
+				CreatorDID: creatorDID,
+			})
+		}
+	}
+	return info, nil
+}
+
+func (c *Core) GetSpendableFTInfoByDID(did string) ([]model.FTInfo, error) {
+	if !c.w.IsDIDExist(did) {
+		c.log.Error("DID does not exist")
+		return nil, fmt.Errorf("DID does not exist")
+	}
+	FT, err := c.w.GetFTsAndCountByStatus(did, wallet.TokenIsSpendable)
+	if err != nil && err.Error() != "no records found" {
+		c.log.Error("Failed to get tokens FTs and Count", "err", err)
+		return []model.FTInfo{}, fmt.Errorf("Failed to get tokens FTs and Count")
+	}
+	ftInfoMap := make(map[string]map[string]int)
+
+	// Iterate through retrieved FTs and populate the map
+	for _, t := range FT {
+		if ftInfoMap[t.FTName] == nil {
+			ftInfoMap[t.FTName] = make(map[string]int) // Initialize map for each FTName
+		}
+		ftInfoMap[t.FTName][t.CreatorDID] += t.FTCount // Increment count for the specific CreatorDID
+	}
+	info := make([]model.FTInfo, 0)
+	for ftName, creatorCounts := range ftInfoMap {
+		for creatorDID, count := range creatorCounts {
+			info = append(info, model.FTInfo{
+				FTName:     ftName,
+				FTCount:    count,
+				CreatorDID: creatorDID,
+			})
+		}
+	}
+	return info, nil
+}
+
+func (c *Core) GetFreeAndSpendableFTInfoByDID(did string) ([]model.FTInfo, error) {
+	if !c.w.IsDIDExist(did) {
+		c.log.Error("DID does not exist")
+		return nil, fmt.Errorf("DID does not exist")
+	}
+	FT, err := c.w.GetFTsAndCountByStatus(did, -1)
 	if err != nil && err.Error() != "no records found" {
 		c.log.Error("Failed to get tokens FTs and Count", "err", err)
 		return []model.FTInfo{}, fmt.Errorf("Failed to get tokens FTs and Count")
@@ -690,7 +754,7 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 	// var creatorDID string
 	if req.CreatorDID == "" {
 		// Checking for same FTs with different creators
-		info, err := c.GetFTInfoByDID(senderDID)
+		info, err := c.GetSpendableFTInfoByDID(senderDID)
 		if err != nil || info == nil {
 			c.log.Error("Failed to get FT info for transfer", "err", err)
 			resp.Message = "Failed to get FT info for transfer"
@@ -1090,7 +1154,7 @@ func (c *Core) SendFTsToReceiver(sc *contract.Contract, ftData model.FTInfo, ftI
 	// 1. sender receiver on different ports
 	// 2. sender receiver on same port
 	if rpeerid != c.peerID {
-		c.log.Debug("*********** updating token status for sender's transferred token")
+		c.log.Debug("*********** updating token status for sender's transferred FTs")
 		err = c.UpdateTransferredFTsInfo(ftInfoForTable, wallet.TokenIsTransferred, transactionID)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to update trans tokens in DB, err : %v", err)
@@ -1104,7 +1168,7 @@ func (c *Core) SendFTsToReceiver(sc *contract.Contract, ftData model.FTInfo, ftI
 
 	nbid, err := nb.GetBlockID(ftInfo[0].Token)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to get block id of the new block, token : %v; err : %v", ftInfo[0].Token, err)
+		errMsg := fmt.Sprintf("failed to get block id of the new block, FT : %v; err : %v", ftInfo[0].Token, err)
 		c.log.Error(errMsg)
 		resp.Message = errMsg
 		return resp
@@ -1127,6 +1191,7 @@ func (c *Core) SendFTsToReceiver(sc *contract.Contract, ftData model.FTInfo, ftI
 
 	resp.Status = true
 	resp.Message = "FT transferred successfully"
+	c.log.Debug("******* FT cvr-1 completed ***********")
 	return resp
 }
 
@@ -1166,7 +1231,7 @@ func (c *Core) CreateSelfTransferFTContract(selfTransferFTsMap map[string]struct
 			resp.Message = "failed to get latest block, invalid token chain"
 			for _, selfTransFtInfo := range lockedFTsForSelfTransfer {
 
-				c.w.UnlockFT(selfTransFtInfo.TokenID, c.testNet)
+				c.w.UnlockFT(selfTransFtInfo.TokenID)
 			}
 			return resp
 		}
@@ -1176,7 +1241,7 @@ func (c *Core) CreateSelfTransferFTContract(selfTransferFTsMap map[string]struct
 			resp.Message = "failed to get block id, " + err.Error()
 			for _, selfTransFtInfo := range lockedFTsForSelfTransfer {
 
-				c.w.UnlockFT(selfTransFtInfo.TokenID, c.testNet)
+				c.w.UnlockFT(selfTransFtInfo.TokenID)
 			}
 			return resp
 		}
@@ -1413,6 +1478,7 @@ func (c *Core) updateFTTable() error {
 }
 
 func (c *Core) UpdateTransferredFTsInfo(tokenList []wallet.FTToken, newTokenStatus int, txnID string) error {
+	c.log.Debug("****** updating transferred FT info to", "new status ", newTokenStatus)
 	for _, tokenInfo := range tokenList {
 		tokenInfo.TokenStatus = newTokenStatus
 		tokenInfo.TransactionID = txnID
@@ -1422,7 +1488,7 @@ func (c *Core) UpdateTransferredFTsInfo(tokenList []wallet.FTToken, newTokenStat
 			c.log.Error(errMsg)
 			return fmt.Errorf(errMsg)
 		}
-
+		c.log.Debug("****** FT updated in db")
 	}
 	return nil
 }
@@ -1465,7 +1531,7 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 	}
 
 	// release the locked tokens before exit
-	defer c.w.ReleaseFTs(freeFTsList, c.testNet)
+	defer c.w.ReleaseFTs(freeFTsList)
 
 	segratedFtList, err := c.SegregateFtWithNameAndCreatorDID(freeFTsList)
 	if err != nil {

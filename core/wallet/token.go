@@ -167,7 +167,7 @@ func (w *Wallet) GetFreeTokens(did string) ([]Token, error) {
 
 // This function will return all the FTs, their count and the creator DID in the node
 func (w *Wallet) GetAllFTsAndCount() ([]FT, error) {
-	fts, err := w.GetAllFreeFTs()
+	fts, err := w.GetAllFreeAndSpendableFTs()
 	if err != nil {
 		errStr := fmt.Sprint(err)
 		if strings.Contains(errStr, "no records found") {
@@ -203,16 +203,43 @@ func (w *Wallet) GetAllFTsAndCount() ([]FT, error) {
 }
 
 // This function will return all the FTs, their count and the creator DID for a DID
-func (w *Wallet) GetFTsAndCount(did string) ([]FT, error) {
-	fts, err := w.GetFreeFTsByDID(did)
-	if err != nil {
-		errStr := fmt.Sprint(err)
-		if strings.Contains(errStr, "no records found") {
-			w.log.Info("No free FTs found")
+func (w *Wallet) GetFTsAndCountByStatus(did string, ftStatus int) ([]FT, error) {
+	fts := []FTToken{}
+	var err error
+	switch ftStatus {
+	case TokenIsSpendable:
+		fts, err = w.GetSpendableFTsByDID(did)
+		if err != nil {
+			errStr := fmt.Sprint(err)
+			if strings.Contains(errStr, "no records found") {
+				w.log.Info("No free FTs found")
+				return nil, err
+			}
+			w.log.Error("Failed to free FTs", "err", err)
 			return nil, err
 		}
-		w.log.Error("Failed to free FTs", "err", err)
-		return nil, err
+	case TokenIsFree:
+		fts, err = w.GetFreeFTsByDID(did)
+		if err != nil {
+			errStr := fmt.Sprint(err)
+			if strings.Contains(errStr, "no records found") {
+				w.log.Info("No free FTs found")
+				return nil, err
+			}
+			w.log.Error("Failed to free FTs", "err", err)
+			return nil, err
+		}
+	default:
+		fts, err = w.GetFreeAndSpendableFTsByDID(did)
+		if err != nil {
+			errStr := fmt.Sprint(err)
+			if strings.Contains(errStr, "no records found") {
+				w.log.Info("No free FTs found")
+				return nil, err
+			}
+			w.log.Error("Failed to free FTs", "err", err)
+			return nil, err
+		}
 	}
 
 	ftNameCreatorCounts := make(map[string]map[string]int)
@@ -257,9 +284,41 @@ func (w *Wallet) GetFreeFTsByDID(did string) ([]FTToken, error) {
 	return FT, nil
 }
 
-func (w *Wallet) GetAllFreeFTs() ([]FTToken, error) {
+func (w *Wallet) GetSpendableFTsByDID(did string) ([]FTToken, error) {
 	var FT []FTToken
-	err := w.s.Read(FTTokenStorage, &FT, "token_status=?", TokenIsFree)
+	err := w.s.Read(FTTokenStorage, &FT, "owner_did=? AND token_status=? OR token_status=?", did, TokenIsSpendable, TokenIsGenerated)
+
+	if err != nil {
+		readErr := fmt.Sprint(err)
+		if strings.Contains(readErr, "no records found") {
+			w.log.Info("No free FTs")
+			return nil, err
+		}
+		w.log.Error("Failed to get FTs", "err", err)
+		return nil, err
+	}
+	return FT, nil
+}
+
+func (w *Wallet) GetFreeAndSpendableFTsByDID(did string) ([]FTToken, error) {
+	var FT []FTToken
+	err := w.s.Read(FTTokenStorage, &FT, "owner_did=? AND (token_status=? OR token_status=? OR token_status=?)", did, TokenIsFree, TokenIsGenerated, TokenIsSpendable)
+
+	if err != nil {
+		readErr := fmt.Sprint(err)
+		if strings.Contains(readErr, "no records found") {
+			w.log.Info("No free FTs")
+			return nil, err
+		}
+		w.log.Error("Failed to get FTs", "err", err)
+		return nil, err
+	}
+	return FT, nil
+}
+
+func (w *Wallet) GetAllFreeAndSpendableFTs() ([]FTToken, error) {
+	var FT []FTToken
+	err := w.s.Read(FTTokenStorage, &FT, "token_status=? OR token_status=?", TokenIsFree, TokenIsSpendable)
 	if err != nil {
 		readErr := fmt.Sprint(err)
 		if strings.Contains(readErr, "no records found") {
@@ -523,19 +582,14 @@ func (w *Wallet) GetFTByDIDandStatus(ftId string, did string, tokenStatus int) (
 	return ftInfo, nil
 }
 
-func (w *Wallet) UnlockFT(ftId string, isTestNet bool) error {
+func (w *Wallet) UnlockFT(ftId string) error {
 	ftInfo, err := w.ReadFTToken(ftId)
 	if err != nil {
 		w.log.Error("failed to read ft : ", ftId, "err", err)
 	}
 	if ftInfo.TokenStatus == TokenIsLocked {
 		// check the latest block type and update to it's previous state
-		tokenType := 0
-		if isTestNet {
-			tokenType = token.TestNFTTokenType
-		} else {
-			tokenType = token.FTTokenType
-		}
+		tokenType := token.FTTokenType
 
 		latestBlock := w.GetLatestTokenBlock(ftId, tokenType)
 		if latestBlock.GetTransType() == block.OwnershipTransferredType {
@@ -552,11 +606,9 @@ func (w *Wallet) UnlockFT(ftId string, isTestNet bool) error {
 	return nil
 }
 
-func (w *Wallet) ReleaseFTs(ftList []FTToken, isTestNet bool) error {
-	w.l.Lock()
-	defer w.l.Unlock()
+func (w *Wallet) ReleaseFTs(ftList []FTToken) error {
 	for _, ftInfo := range ftList {
-		err := w.UnlockFT(ftInfo.TokenID, isTestNet)
+		err := w.UnlockFT(ftInfo.TokenID)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to unlock ft : %v; err : %v", ftInfo.TokenID, err)
 			w.log.Error(errMsg)
