@@ -515,7 +515,7 @@ func (w *Wallet) GetFTByDIDandStatus(ftId string, did string, tokenStatus int) (
 		return nil, err
 	}
 	ftInfo.TokenStatus = TokenIsLocked
-	err = w.s.Update(TokenStorage, &ftInfo, "did=? AND token_id=?", did, ftInfo.TokenID)
+	err = w.s.Update(FTTokenStorage, &ftInfo, "did=? AND token_id=?", did, ftInfo.TokenID)
 	if err != nil {
 		w.log.Error("Failed to update token status", "err", err)
 		return nil, err
@@ -543,7 +543,7 @@ func (w *Wallet) UnlockFT(ftId string, isTestNet bool) error {
 		} else {
 			ftInfo.TokenStatus = TokenIsFree
 		}
-		err = w.s.Update(FTStorage, &ftInfo, "token_id=?", ftId)
+		err = w.s.Update(FTTokenStorage, &ftInfo, "token_id=?", ftId)
 		if err != nil {
 			w.log.Error("Failed to update ft status", "err", err)
 			return err
@@ -569,7 +569,7 @@ func (w *Wallet) ReleaseFTs(ftList []FTToken, isTestNet bool) error {
 func (w *Wallet) UpdateFT(ft *FTToken) error {
 	w.l.Lock()
 	defer w.l.Unlock()
-	err := w.s.Update(FTStorage, ft, "token_id=?", ft.TokenID)
+	err := w.s.Update(FTTokenStorage, ft, "token_id=?", ft.TokenID)
 	if err != nil {
 		w.log.Error("failed to update ft info, err ", err)
 		return err

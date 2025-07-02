@@ -1382,12 +1382,12 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 	quorumList []string, quorumInfo []QuorumDIDPeerMap, transactionEpoch int, ftinfo *model.FTInfo, cvrStage int) ([]string, []string, error) {
 
 	receiverPeerId, receiverDID, ok := util.ParseAddress(receiverAddress)
-	b := block.InitBlock(tokenChainBlock, nil)
+	b := block.InitBlock(tokenChainBlock, nil, block.NoSignature())
 
 	// Debugging block initialization
 	if b == nil {
 		c.log.Error("Failed to initialize block from tokenChainBlock. Check tokenChainBlock structure.")
-		return nil, nil, fmt.Errorf("invalid token chain block")
+		return nil, nil, fmt.Errorf("invalid ft-token chain block")
 	}
 	var senderPeer *ipfsport.Peer
 	var err error

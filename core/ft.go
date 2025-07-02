@@ -858,7 +858,7 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 	}
 	cvr1Resp := c.SendFTsToReceiver(sc, FTData, TokenInfo, FTsForTxn, txEpoch, receiverPeerID, senderSign)
 	if !cvr1Resp.Status {
-		errMsg := fmt.Sprintf("failed to send tokens to receiver, err : %v", cvr1Resp.Message)
+		errMsg := fmt.Sprintf("failed to send FTs to receiver, err : %v", cvr1Resp.Message)
 		c.log.Error(errMsg)
 		resp.Message = errMsg
 		return resp
@@ -1011,11 +1011,11 @@ func (c *Core) SendFTsToReceiver(sc *contract.Contract, ftData model.FTInfo, ftI
 		InitiatorSignature: senderSig,
 		Epoch:              txEpoch,
 	}
-	c.log.Debug("****creating new transblock for sender to receiver transaction in cvr-1*********")
+	c.log.Debug("****creating new FT transblock for sender to receiver transaction in cvr-1*********")
 	nb := block.CreateNewBlock(ctcb, &tcb)
 	if nb == nil {
-		c.log.Error("Failed to create new token chain block - qrm init")
-		resp.Message = "failed to create new token chain block - qrm init"
+		c.log.Error("Failed to create new FT-token chain block")
+		resp.Message = "failed to create new FT-token chain block"
 		return resp
 	}
 
@@ -1038,9 +1038,8 @@ func (c *Core) SendFTsToReceiver(sc *contract.Contract, ftData model.FTInfo, ftI
 	var br model.BasicResponse
 	err = rp.SendJSONRequest("POST", APISendFTToken, nil, &sr, &br, true)
 	if err != nil {
-
-		c.log.Error("Unable to send tokens to receiver", "err", err)
-		resp.Message = "Unable to send tokens to receiver: " + err.Error()
+		c.log.Error("Unable to send FTs to receiver", "err", err)
+		resp.Message = "Unable to send FTs to receiver: " + err.Error()
 		return resp
 
 	}
@@ -1083,6 +1082,7 @@ func (c *Core) SendFTsToReceiver(sc *contract.Contract, ftData model.FTInfo, ftI
 			}
 		}
 		c.log.Error("Unable to send tokens to receiver", "msg", br.Message)
+		resp.Message = fmt.Sprintf("Unable to send tokens to receiver, msg : %v", br.Message)
 		return resp
 	}
 
@@ -1428,7 +1428,6 @@ func (c *Core) UpdateTransferredFTsInfo(tokenList []wallet.FTToken, newTokenStat
 }
 
 func (c *Core) InitiateFTCVRTwo(reqID string, req *model.CvrAPIRequest) {
-
 	br := c.GatherFreeFTsForConsensus(reqID, req)
 	c.log.Debug("***** received ft cvr-2 response : ", br)
 	didChannel := c.GetWebReq(reqID)
