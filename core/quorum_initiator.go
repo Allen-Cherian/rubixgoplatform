@@ -449,7 +449,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}
 
 	c.log.Debug("********** Quorum ipfs obj list", ipfsPortQrm)
-	c.log.Debug("********** trans-tokens ", sc.GetTransTokenInfo())
+	// c.log.Debug("********** trans-tokens ", sc.GetTransTokenInfo())
 
 	// //wait group for first round of go routine that fetches pledge-tokens details from quorums
 	// var wg sync.WaitGroup

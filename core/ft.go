@@ -715,20 +715,20 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 	}
 	var AllFTs []wallet.FTToken
 	if req.CreatorDID != "" {
-		AllFTs, err = c.w.GetFreeFTsByNameAndCreatorDID(req.FTName, senderDID, req.CreatorDID)
+		AllFTs, err = c.w.GetSpendableFTsByNameAndCreatorDID(req.FTName, senderDID, req.CreatorDID)
 		// creatorDID = req.CreatorDID
 	} else {
-		AllFTs, err = c.w.GetFreeFTsByNameAndDID(req.FTName, senderDID)
+		AllFTs, err = c.w.GetSpendableFTsByNameAndDID(req.FTName, senderDID)
 	}
 	AvailableFTCount := len(AllFTs)
 	if err != nil {
-		c.log.Error("Failed to get FTs", "err", err)
-		resp.Message = "Insufficient FTs or FTs are locked or " + err.Error()
+		c.log.Error("Failed to get spendable FTs", "err", err)
+		resp.Message = "Insufficient spendable FTs or FTs are locked or " + err.Error()
 		return resp
 	} else {
 		if req.FTCount > AvailableFTCount {
-			c.log.Error(fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount))
-			resp.Message = fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount)
+			c.log.Error(fmt.Sprint("Insufficient balance, Available spendable FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount))
+			resp.Message = fmt.Sprint("Insufficient balance, Available spendable FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount)
 			return resp
 		}
 	}
@@ -1428,10 +1428,12 @@ func (c *Core) UpdateTransferredFTsInfo(tokenList []wallet.FTToken, newTokenStat
 }
 
 func (c *Core) InitiateFTCVRTwo(reqID string, req *model.CvrAPIRequest) {
+
 	br := c.GatherFreeFTsForConsensus(reqID, req)
+	c.log.Debug("***** received ft cvr-2 response : ", br)
 	didChannel := c.GetWebReq(reqID)
 	if didChannel == nil {
-		c.log.Error("Failed to get did channels")
+		c.log.Error("Failed to get did channels for FT cvr-2")
 		return
 	}
 	c.log.Debug("!!!!!!!!!!!!!!!!!!! final response from cvr ", br)
@@ -1455,7 +1457,7 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 		return response
 	}
 
-	c.log.Debug("************ list of free FTs : ", freeFTsList)
+	c.log.Debug("************ length of list of free FTs : ", len(freeFTsList))
 
 	if len(freeFTsList) == 0 {
 		c.log.Error("No tokens present for cvr")
@@ -1473,7 +1475,7 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 		response.Message = errMsg
 		return response
 	}
-	c.log.Debug("******* segregated FTs list : ", segratedFtList)
+	// c.log.Debug("******* segregated FTs list : ", segratedFtList)
 
 	cvrSuccessFtList := make([]string, 0)
 	cvrFailureFtList := make([]string, 0)
@@ -1490,7 +1492,7 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 		}
 	}
 
-	c.log.Debug("********cvr success FTs list :", cvrSuccessFtList)
+	c.log.Debug("********cvr success FTs list length :", len(cvrSuccessFtList))
 
 	if len(cvrSuccessFtList) > 0 {
 		response.Status = true

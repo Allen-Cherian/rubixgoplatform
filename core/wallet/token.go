@@ -283,7 +283,28 @@ func (w *Wallet) GetFreeFTsByNameAndDID(ftName string, did string) ([]FTToken, e
 	return FT, nil
 }
 
+func (w *Wallet) GetSpendableFTsByNameAndDID(ftName string, did string) ([]FTToken, error) {
+	var FT []FTToken
+	err := w.s.Read(FTTokenStorage, &FT, "ft_name=? AND token_status =? AND  owner_did=?", ftName, TokenIsSpendable, did)
+
+	if err != nil {
+		w.log.Error("Failed to get Free FTs by name", "err", err)
+		return nil, err
+	}
+	return FT, nil
+}
+
 func (w *Wallet) GetFreeFTsByNameAndCreatorDID(ftName string, did string, creatorDID string) ([]FTToken, error) {
+	var FT []FTToken
+	err := w.s.Read(FTTokenStorage, &FT, "ft_name=? AND token_status =? AND owner_did=? AND creator_did=?", ftName, TokenIsFree, did, creatorDID)
+	if err != nil {
+		w.log.Error("Failed to get Free FTs by name and creator DID", "err", err)
+		return nil, err
+	}
+	return FT, nil
+}
+
+func (w *Wallet) GetSpendableFTsByNameAndCreatorDID(ftName string, did string, creatorDID string) ([]FTToken, error) {
 	var FT []FTToken
 	err := w.s.Read(FTTokenStorage, &FT, "ft_name=? AND token_status =? AND owner_did=? AND creator_did=?", ftName, TokenIsFree, did, creatorDID)
 	if err != nil {
