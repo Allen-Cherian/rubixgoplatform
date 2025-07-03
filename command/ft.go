@@ -139,11 +139,11 @@ func (cmd *Command) getFTinfo() {
 		return
 	}
 	if !info.Status {
-		cmd.log.Error("Failed to get FT info for DID " + cmd.did, "message", info.Message)
+		cmd.log.Error("Failed to get FT info of DID " + cmd.did, "message", info.Message)
 	} else if len(info.FTInfo) == 0 {
 		cmd.log.Info("No FTs found for DID " + cmd.did)
 	} else {
-		cmd.log.Info("Successfully got FT information")
+		cmd.log.Info("Successfully got FT information of DID " + cmd.did)
 		var ftNames []string
 		var ftCounts []string
 		var creatorDIDs []string
@@ -159,7 +159,6 @@ func (cmd *Command) getFTinfo() {
 			}
 		}
 		for i, name := range ftNames {
-			fmt.Printf("Owner DID : %v \n", cmd.did)
 			fmt.Printf("%-*s: %s (CreatorDID: %s)\n", maxNameLength, name, ftCounts[i], creatorDIDs[i])
 		}
 	}
