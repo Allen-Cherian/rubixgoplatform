@@ -139,9 +139,9 @@ func (cmd *Command) getFTinfo() {
 		return
 	}
 	if !info.Status {
-		cmd.log.Error("Failed to get FT info", "message", info.Message)
+		cmd.log.Error("Failed to get FT info for DID " + cmd.did, "message", info.Message)
 	} else if len(info.FTInfo) == 0 {
-		cmd.log.Info("No FTs found")
+		cmd.log.Info("No FTs found for DID " + cmd.did)
 	} else {
 		cmd.log.Info("Successfully got FT information")
 		var ftNames []string
