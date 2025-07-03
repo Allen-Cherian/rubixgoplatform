@@ -1578,6 +1578,29 @@ func (c *Core) updateReceiverFTHandle(req *ensweb.Request) *ensweb.Result {
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
 
+	// verifying sender signature
+	currentBlk := block.InitBlock(sr.TokenChainBlock, nil, block.NoSignature())
+
+	// Debugging block initialization
+	if currentBlk == nil {
+		c.log.Error("failed to initialise token chain block")
+		crep.Message = "failed to initialise token chain block"
+		return c.l.RenderJSON(req, &crep, http.StatusOK)
+	}
+	validationRes, err := c.ValidateSender(currentBlk)
+	if err != nil {
+		errMsg := fmt.Sprintf("sender signature verification failed, sender : %v; err : %v", sr.Address, err)
+		c.log.Error(errMsg)
+		crep.Message = errMsg
+		return c.l.RenderJSON(req, &crep, http.StatusOK)
+	}
+	if !validationRes.Status {
+		errMsg := fmt.Sprintf("sender signature verification failed, sender : %v; err : %v", sr.Address, validationRes.Message)
+		c.log.Error(errMsg)
+		crep.Message = errMsg
+		return c.l.RenderJSON(req, &crep, http.StatusOK)
+	}
+
 	receiverAddress := c.peerID + "." + did
 	updatedtokenhashes, syncIssueTokens, err := c.updateFTToken(
 		sr.Address,
