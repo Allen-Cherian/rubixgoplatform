@@ -816,6 +816,13 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	results := make([]MultiPinCheckRes, len(ti))
 	var wg sync.WaitGroup
 	for i := range ti {
+		// check if this quorum was involved in the previous transaction of this token, if it was then pincheck is not required
+		quorumIsPrevQuorum := c.isCurrentQuorumPrevQuorum(transFTBlock, qdc.GetDID(), ti[i].Token, ti[i].TokenType)
+		if quorumIsPrevQuorum {
+			c.log.Debug("******* skipping pin check")
+			continue
+		}
+		c.log.Debug("****** proceeding for pincheck of token : ", ti[i].Token)
 		wg.Add(1)
 		go c.pinCheck(ti[i].Token, i, consensusRequest.SenderPeerID, consensusRequest.ReceiverPeerID, results, &wg)
 	}
@@ -835,6 +842,7 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 
 	// check token ownership
 
+	c.log.Debug("*********** starting validateTokenOwnership")
 	validateTokenOwnershipVar, err, syncIssueTokens := c.validateTokenOwnership(consensusRequest, sc, did)
 	if len(syncIssueTokens) > 0 {
 		consensusReply.Result = syncIssueTokens
@@ -2205,4 +2213,48 @@ func (c *Core) notifyUnusedQuorumsResponse(req *ensweb.Request) *ensweb.Result {
 	resp.Status = true
 	resp.Message = "unlocked pledge tokens successfully"
 	return c.l.RenderJSON(req, resp, http.StatusOK)
+}
+
+// this function checks if the given quorum was involved in the previous transaction of the given token
+func (c *Core) isCurrentQuorumPrevQuorum(currentBlock *block.Block, quorumDID string, tokenID string, tokenType int) bool {
+	var currentQuorumIsPrevQuorum = false
+	currentBlockHeight, err := currentBlock.GetBlockNumber(tokenID)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to fetch current block height of token : %v, err : %v", tokenID, err)
+		c.log.Error(errMsg)
+		return currentQuorumIsPrevQuorum
+	}
+	c.log.Debug("****** current block height of token ", tokenID)
+	latestBlock := c.w.GetLatestTokenBlock(tokenID, tokenType)
+	if latestBlock == nil {
+		errMsg := fmt.Sprintf("failed to fetch latest block of token : %v, quorum does not have the token chain", tokenID)
+		c.log.Error(errMsg)
+		return currentQuorumIsPrevQuorum
+	}
+	latestBlockHeight, err := latestBlock.GetBlockNumber(tokenID)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to fetch latest block height of token : %v, err : %v", tokenID, err)
+		c.log.Error(errMsg)
+		return currentQuorumIsPrevQuorum
+	}
+	c.log.Debug("****** latest block height of token ", tokenID)
+	// check if quorum is updated with the full token chain and has the latest block or not
+	if latestBlockHeight+1 != currentBlockHeight {
+		return currentQuorumIsPrevQuorum
+	}
+	signers, err := latestBlock.GetSigner()
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to fetch previous quorum of token : %v, err : %v", tokenID, err)
+		c.log.Error(errMsg)
+		return currentQuorumIsPrevQuorum
+	}
+	for _, signer := range signers {
+		// if provided quorum did is found in previous block,
+		// then currenty quorum is one of previous quorums
+		if signer == quorumDID {
+			currentQuorumIsPrevQuorum = true
+			return currentQuorumIsPrevQuorum
+		}
+	}
+	return currentQuorumIsPrevQuorum
 }
