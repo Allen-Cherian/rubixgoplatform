@@ -961,6 +961,7 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 	td := cvr1Resp.Result.(*model.TransactionDetails)
 
 	// self transfer in cvr-1
+	c.log.Debug("self transefr ft map ", selfTransferFTMap)
 	selfTransferFTResponse := c.CreateSelfTransferFTContract(selfTransferFTMap, dc, req, txEpoch)
 	if !selfTransferFTResponse.Status {
 		errMsg := fmt.Sprintf("self transfer contract creation failed, err : %v", selfTransferFTResponse.Message)

@@ -568,13 +568,13 @@ func (w *Wallet) GetFTByDIDandStatus(ftId string, did string, tokenStatus int) (
 	var ftInfo *FTToken
 	w.l.Lock()
 	defer w.l.Unlock()
-	err := w.s.Read(FTTokenStorage, &ftInfo, "token_id=? AND did=? AND token_status", ftId, did, tokenStatus)
+	err := w.s.Read(FTTokenStorage, &ftInfo, "token_id=? AND owner_did=? AND token_status", ftId, did, tokenStatus)
 	if err != nil {
 		w.log.Error("Failed to get tokens", "err", err)
 		return nil, err
 	}
 	ftInfo.TokenStatus = TokenIsLocked
-	err = w.s.Update(FTTokenStorage, &ftInfo, "did=? AND token_id=?", did, ftInfo.TokenID)
+	err = w.s.Update(FTTokenStorage, &ftInfo, "owner_did=? AND token_id=?", did, ftInfo.TokenID)
 	if err != nil {
 		w.log.Error("Failed to update token status", "err", err)
 		return nil, err
