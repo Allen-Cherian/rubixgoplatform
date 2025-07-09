@@ -1804,7 +1804,7 @@ func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contr
 		return
 	}
 	var cresp ConensusReply
-	err = p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, 10*time.Minute)
+	err = p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, 60*time.Minute)
 	if err != nil {
 		c.log.Error("Failed to get consensus", "err", err)
 		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
