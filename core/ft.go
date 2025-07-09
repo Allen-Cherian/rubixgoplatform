@@ -1581,7 +1581,7 @@ func (c *Core) GatherFreeFTsForConsensus(reqID string, req *model.CvrAPIRequest)
 	// gather free tokens for cvr and prepare contract block
 	freeFTsList, err := c.w.GetFreeFTsByDID(req.DID)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to get all free tokens for DID : %v, err : %v", req.DID, err)
+		errMsg := fmt.Sprintf("failed to get all free ft tokens for DID : %v, err : %v", req.DID, err)
 		c.log.Error(errMsg)
 		response.Message = errMsg
 		return response

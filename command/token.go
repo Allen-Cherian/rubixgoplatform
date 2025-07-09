@@ -223,14 +223,14 @@ func (cmd *Command) InitiateFTPrePledge() {
 
 	br, err := cmd.c.PrePledgeFT(&rt)
 	if err != nil {
-		cmd.log.Error("Failed RBT pre-pledge", "err", err)
+		cmd.log.Error("Failed FT pre-pledge", "err", err)
 		return
 	}
 	msg, status := cmd.SignatureResponse(br)
 	if !status {
-		cmd.log.Error("Failed to pre-pledge RBT", "msg", msg)
+		cmd.log.Error("Failed to pre-pledge FT", "msg", msg)
 		return
 	}
 	cmd.log.Info(msg)
-	cmd.log.Info("RBT pre-pledged successfully")
+	cmd.log.Info("FT pre-pledged successfully")
 }
