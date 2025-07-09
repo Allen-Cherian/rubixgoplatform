@@ -787,6 +787,13 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		c.log.Debug("************** quorum info : ", quorumInfo)
 
 		var newtokenhashes []string
+
+		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
+		if pledgeFinalityError != nil {
+			c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
+			return nil, nil, nil, pledgeFinalityError
+		}
 		//if sender and receiver are not same, then add the block at receiver side
 		if sc.GetReceiverDID() != sc.GetSenderDID() {
 			c.log.Debug("***************** sending to receiver")
@@ -897,12 +904,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 		}
 
-		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
-		if pledgeFinalityError != nil {
-			c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
-			return nil, nil, nil, pledgeFinalityError
-		}
+		// //trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		// pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
+		// if pledgeFinalityError != nil {
+		// 	c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
+		// 	return nil, nil, nil, pledgeFinalityError
+		// }
 
 		//call ipfs repo gc after unpinnning
 		c.ipfsRepoGc()
@@ -959,7 +966,24 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		c.log.Debug("************** quorum info : ", quorumInfo)
 
-		var newTokenHashes []string
+		// var newTokenHashes []string
+	
+		var txnTokenHashes []string = make([]string, 0)
+		for _, info := range ti {
+			t := info.Token
+			blockId, _ := nb.GetBlockID(t)
+			tokenIDTokenStateData := t + blockId
+			tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
+			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
+		}
+		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
+		if pledgeFinalityError != nil {
+			c.log.Error("Pledge finlaity not achieved", "err", err)
+			return nil, nil, nil, pledgeFinalityError
+		}
+
 		//if sender and receiver are not same, then add the block at receiver side
 		if sc.GetReceiverDID() != sc.GetSenderDID() {
 			// Connect to the receiver's peer
@@ -1029,19 +1053,19 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 
 			// Extract new token state hashes from response
-			newTokenHashResult, ok := br.Result.([]interface{})
-			if !ok {
-				c.log.Error("Failed to assert type for new token hashes")
-				return nil, nil, nil, fmt.Errorf("Type assertion to string failed")
-			}
-			for i, newTokenHash := range newTokenHashResult {
-				stateHash, ok := newTokenHash.(string)
-				if !ok {
-					c.log.Error("Type assertion to string failed at index", i)
-					return nil, nil, nil, fmt.Errorf("Type assertion to string failed at index %d", i)
-				}
-				newTokenHashes = append(newTokenHashes, stateHash)
-			}
+			// newTokenHashResult, ok := br.Result.([]interface{})
+			// if !ok {
+			// 	c.log.Error("Failed to assert type for new token hashes")
+			// 	return nil, nil, nil, fmt.Errorf("Type assertion to string failed")
+			// }
+			// for i, newTokenHash := range newTokenHashResult {
+			// 	stateHash, ok := newTokenHash.(string)
+			// 	if !ok {
+			// 		c.log.Error("Type assertion to string failed at index", i)
+			// 		return nil, nil, nil, fmt.Errorf("Type assertion to string failed at index %d", i)
+			// 	}
+			// 	newTokenHashes = append(newTokenHashes, stateHash)
+			// }
 
 			err = c.w.FTTokensTransffered(sc.GetSenderDID(), ti, nb, rp.IsLocal())
 			if err != nil {
@@ -1054,7 +1078,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		} else {
 			c.log.Debug("************* self transfer mode********")
 			// Self update for self transfer tokens
-			newTokenHashes, _, err = c.updateFTToken(sc.GetSenderDID(), sc.GetSenderDID(), ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, &cr.FTinfo, wallet.CVRStage2_Sender_to_Receiver)
+			_, _, err := c.updateFTToken(sc.GetSenderDID(), sc.GetSenderDID(), ti, nb.GetBlock(), cr.QuorumList, quorumInfo, cr.TransactionEpoch, &cr.FTinfo, wallet.CVRStage2_Sender_to_Receiver)
 			if err != nil {
 				errMsg := fmt.Errorf("failed while updating self transfer FTs, err: %v", err)
 				c.log.Error(errMsg.Error())
@@ -1062,14 +1086,13 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 		}
 
-		c.log.Debug("********* quorum pledge finality")
 
-		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newTokenHashes, tid)
-		if pledgeFinalityError != nil {
-			c.log.Error("Pledge finlaity not achieved", "err", err)
-			return nil, nil, nil, pledgeFinalityError
-		}
+		// //trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		// pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newTokenHashes, tid)
+		// if pledgeFinalityError != nil {
+		// 	c.log.Error("Pledge finlaity not achieved", "err", err)
+		// 	return nil, nil, nil, pledgeFinalityError
+		// }
 
 		c.log.Debug("************ checking prev quorums to unpledge")
 
@@ -1147,6 +1170,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		return &td, pl, pds, nil
+		
 	case RBTTransferMode:
 		rp, err := c.getPeer(cr.ReceiverPeerID + "." + sc.GetReceiverDID())
 		if err != nil {

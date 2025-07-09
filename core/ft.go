@@ -846,6 +846,8 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 		resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
 		return resp
 	}
+	
+	c.log.Debug("******Receiver is:*********", req.Receiver)
 
 	receiverPeerID, err := c.getPeer(req.Receiver)
 	if err != nil {
