@@ -788,12 +788,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		var newtokenhashes []string
 
-		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
-		if pledgeFinalityError != nil {
-			c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
-			return nil, nil, nil, pledgeFinalityError
-		}
+	
 		//if sender and receiver are not same, then add the block at receiver side
 		if sc.GetReceiverDID() != sc.GetSenderDID() {
 			c.log.Debug("***************** sending to receiver")
@@ -904,12 +899,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 		}
 
-		// //trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		// pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
-		// if pledgeFinalityError != nil {
-		// 	c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
-		// 	return nil, nil, nil, pledgeFinalityError
-		// }
+		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
+		if pledgeFinalityError != nil {
+			c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
+			return nil, nil, nil, pledgeFinalityError
+		}
 
 		//call ipfs repo gc after unpinnning
 		c.ipfsRepoGc()
