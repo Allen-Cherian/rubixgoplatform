@@ -670,14 +670,14 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	}
 	//check if token has multiple pins
 	ti := sc.GetTransTokenInfo()
-	results := make([]MultiPinCheckRes, len(ti))
+	//results := make([]MultiPinCheckRes, len(ti))
 	var wg sync.WaitGroup
-	for i := range ti {
-		wg.Add(1)
-		go c.pinCheck(ti[i].Token, i, cr.SenderPeerID, cr.ReceiverPeerID, results, &wg)
-	}
+	//for i := range ti {
+	//	wg.Add(1)
+	//	go c.pinCheck(ti[i].Token, i, cr.SenderPeerID, cr.ReceiverPeerID, results, &wg)
+	//}
 	wg.Wait()
-	for i := range results {
+	/* for i := range results {
 		if results[i].Error != nil {
 			c.log.Error("Error occured", "error", results[i].Error)
 			crep.Message = "Error while cheking FT Token multiple Pins"
@@ -688,7 +688,7 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 			crep.Message = "FT Token has multiple owners"
 			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
-	}
+	} */
 
 	// check token ownership
 
