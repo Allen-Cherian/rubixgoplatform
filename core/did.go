@@ -410,7 +410,7 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 	peerID := c.w.GetPeerID(didStr)
 	c.log.Debug("GetPeerDIDInfo c.w.GetPeerID(didStr)", "did", didStr, "peerID", peerID)
 	if peerID == "" {
-
+		c.log.Debug("Peer ID not found in DIDPeerTable for did", "did", didStr)
 		didInfo, err := c.w.GetDID(didStr)
 		if err == nil {
 			peerDIDInfo.DIDType = &didInfo.Type
