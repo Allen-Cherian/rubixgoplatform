@@ -172,7 +172,7 @@ func (c *Core) AddPeerDetails(peerDetail wallet.DIDPeerMap) error {
 		return err
 	}
 	did := c.w.GetPeerID(peerDetail.DID)
-	if err != nil {
+	if did != "" {
 		c.log.Error("Failed to get DID for PeerDetails", "err", err)
 	} else {
 		c.log.Info("PeerDetails added to DIDPeerTable", "did", did)
