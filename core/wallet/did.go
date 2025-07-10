@@ -168,14 +168,11 @@ func (w *Wallet) GetLastChar(did string) (string, error) {
 }
 
 func (w *Wallet) GetPeerID(did string) string {
-	w.log.Info("GetPeerID called for did", "did", did)
 	var dm DIDPeerMap
 	err := w.s.Read(DIDPeerStorage, &dm, "did=?", did)
 	if err != nil {
 		w.log.Error("couldn't read from peer did table", "err", err)
 		return ""
-	} else {
-		w.log.Info("PeerID fetched successfully", "did", did, "peerID", dm.PeerID)
 	}
 	return dm.PeerID
 }
