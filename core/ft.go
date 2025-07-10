@@ -846,7 +846,7 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 		resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
 		return resp
 	}
-	
+
 	c.log.Debug("******Receiver is:*********", req.Receiver)
 
 	receiverPeerID, err := c.getPeer(req.Receiver)
@@ -980,57 +980,57 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 	td.TotalTime = float64(dif.Milliseconds())
 	c.w.AddTransactionHistory(td)
 
-	//TODO :  Extra details regarding the FT need to added in the explorer
+	// TODO :  Extra details regarding the FT need to added in the explorer
 	// etrans := &ExplorerTrans{
 	// 	TID:         td.TransactionID,
-	// 	SenderDID:   did,
+	// 	SenderDID:   senderDID,
 	// 	ReceiverDID: rdid,
 	// 	Amount:      float64(req.FTCount),
 	// 	TrasnType:   req.QuorumType,
 	// 	TokenIDs:    FTTokenIDs,
-	// 	QuorumList:  cr.QuorumList,
-	// 	TokenTime:   float64(dif.Milliseconds()),
+	// 	// QuorumList:  cr.QuorumList,
+	// 	TokenTime: float64(dif.Milliseconds()),
 	// }
 	// explorerErr := c.ec.ExplorerTransaction(etrans)
 	// if explorerErr != nil {
 	// 	c.log.Error("Failed to send FT transaction to explorer ", "err", explorerErr)
 	// }
 
-	// AllTokens := make([]AllToken, len(FTsForTxn))
-	// for i := range FTsForTxn {
-	// 	tokenDetail := AllToken{}
-	// 	tokenDetail.TokenHash = FTsForTxn[i].TokenID
-	// 	tt := c.TokenType(FTString)
-	// 	blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
-	// 	bid, _ := blk.GetBlockID(FTsForTxn[i].TokenID)
-	// 	blockNoPart := strings.Split(bid, "-")[0]
-	// 	// Convert the string part to an int
-	// 	blockNoInt, err := strconv.Atoi(blockNoPart)
-	// 	if err != nil {
-	// 		log.Printf("Error getting BlockID: %v", err)
-	// 		continue
-	// 	}
-	// 	tokenDetail.BlockNumber = blockNoInt
-	// 	tokenDetail.BlockHash = strings.Split(bid, "-")[1]
-	// 	AllTokens[i] = tokenDetail
-	// }
+	AllTokens := make([]AllToken, len(FTsForTxn))
+	for i := range FTsForTxn {
+		tokenDetail := AllToken{}
+		tokenDetail.TokenHash = FTsForTxn[i].TokenID
+		tt := c.TokenType(FTString)
+		blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
+		bid, _ := blk.GetBlockID(FTsForTxn[i].TokenID)
+		blockNoPart := strings.Split(bid, "-")[0]
+		// Convert the string part to an int
+		blockNoInt, err := strconv.Atoi(blockNoPart)
+		if err != nil {
+			log.Printf("Error getting BlockID: %v", err)
+			continue
+		}
+		tokenDetail.BlockNumber = blockNoInt
+		tokenDetail.BlockHash = strings.Split(bid, "-")[1]
+		AllTokens[i] = tokenDetail
+	}
 
-	// eTrans := &ExplorerFTTrans{
-	// 	FTBlockHash:     AllTokens,
-	// 	CreatorDID:      creatorDID,
-	// 	SenderDID:       did,
-	// 	ReceiverDID:     rdid,
-	// 	FTName:          req.FTName,
-	// 	FTTransferCount: req.FTCount,
-	// 	Network:         req.QuorumType,
-	// 	FTSymbol:        "N/A",
-	// 	Comments:        req.Comment,
-	// 	TransactionID:   td.TransactionID,
-	// 	PledgeInfo:      PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
-	// 	QuorumList:      extractQuorumDID(cr.QuorumList),
-	// 	Amount:          FTsForTxn[0].TokenValue * float64(req.FTCount),
-	// 	FTTokenList:     FTTokenIDs,
-	// }
+	eTrans := &ExplorerFTTrans{
+		FTBlockHash:     AllTokens,
+		CreatorDID:      req.CreatorDID,
+		SenderDID:       senderDID,
+		ReceiverDID:     rdid,
+		FTName:          req.FTName,
+		FTTransferCount: req.FTCount,
+		Network:         req.QuorumType,
+		FTSymbol:        "N/A",
+		Comments:        req.Comment,
+		TransactionID:   td.TransactionID,
+		// PledgeInfo:      PledgeInfo{PledgeDetails: pds.PledgedTokens, PledgedTokenList: pds.TokenList},
+		// QuorumList:      extractQuorumDID(cr.QuorumList),
+		Amount:      FTsForTxn[0].TokenValue * float64(req.FTCount),
+		FTTokenList: FTTokenIDs,
+	}
 
 	updateFTTableErr := c.updateFTTable()
 	if updateFTTableErr != nil {
@@ -1038,10 +1038,10 @@ func (c *Core) ftTransfer(reqID string, req *model.TransferFTReq) *model.BasicRe
 		resp.Message = "Failed to update FT table after transfer"
 		return resp
 	}
-	// explorerErr := c.ec.ExplorerFTTransaction(eTrans)
-	// if explorerErr != nil {
-	// 	c.log.Error("Failed to send FT transaction to explorer ", "err", explorerErr)
-	// }
+	explorerErr := c.ec.ExplorerFTTransaction(eTrans)
+	if explorerErr != nil {
+		c.log.Error("Failed to send FT transaction to explorer ", "err", explorerErr)
+	}
 
 	// Starting CVR stage-2
 	cvrRequest := &wallet.PrePledgeRequest{
@@ -1547,7 +1547,7 @@ func (c *Core) UpdateTransferredFTsInfo(tokenList []wallet.FTToken, newTokenStat
 	for _, tokenInfo := range tokenList {
 		tokenInfo.TokenStatus = newTokenStatus
 		tokenInfo.TransactionID = txnID
-		err := c.w.UpdateFT(&tokenInfo)
+		err := c.w.UpdateFTToken(&tokenInfo)
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to update token : %v from Tokentable, err : %v", tokenInfo.TokenID, err)
 			c.log.Error(errMsg)

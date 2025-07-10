@@ -2207,3 +2207,124 @@ func (c *Core) notifyUnusedQuorumsResponse(req *ensweb.Request) *ensweb.Result {
 	resp.Message = "unlocked pledge tokens successfully"
 	return c.l.RenderJSON(req, resp, http.StatusOK)
 }
+
+type ReceiverRollBack struct {
+	TokenStatusMap  map[int][]string `json:"token_status_map"`
+	TxnID           string           `json:"txn_id"`
+	TokenType       string           `json:"token_type"`
+}
+
+func (c *Core) notifyReceiverToRollback(req *ensweb.Request) *ensweb.Result {
+	// unused quorums are notified to unlock pledge tokens by API : /api/notify-unused-quorums
+	resp := &model.BasicResponse{
+		Status: false,
+	}
+	var receiverRollBackReq ReceiverRollBack
+	err := c.l.ParseJSON(req, &receiverRollBackReq)
+	c.log.Debug("notification to update the received tokens to requested status")
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to parse json request, err : %v", err)
+		c.log.Error(errMsg)
+		resp.Message = errMsg
+		return c.l.RenderJSON(req, resp, http.StatusOK)
+	}
+
+	rollBackFailedTokens := make([]string, 0)
+
+	resp.Status = true
+	// read token and update status and chain as per token type
+	switch receiverRollBackReq.TokenType {
+	case RBTString, PartString:
+		for tokenStatus, tokensList := range receiverRollBackReq.TokenStatusMap {
+			for _, tokenID := range tokensList {
+				rbtInfo, err := c.w.ReadToken(tokenID)
+				if err != nil {
+					errMsg := fmt.Sprintf("failed to read RBT info from Tokens Table to rollback; tokenId : %v, err : %v", tokenID, err)
+					c.log.Error(errMsg)
+					rollBackFailedTokens = append(rollBackFailedTokens, tokenID)
+					resp.Status = resp.Status && false
+					continue
+				}
+
+				// get token type string
+				tokenTypeStr := RBTString
+				if rbtInfo.TokenValue != 1 {
+					tokenTypeStr = PartString
+				}
+
+				// if the provided token has the provided txn id and is a free token then only update the token info
+				if rbtInfo.TokenStatus == wallet.TokenIsFree && rbtInfo.TransactionID == receiverRollBackReq.TxnID {
+					rbtInfo.TokenStatus = tokenStatus
+					err = c.w.UpdateToken(rbtInfo)
+					if err != nil {
+						errMsg := fmt.Sprintf("failed to update RBT status in tokens table while rollback; tokenId : %v, err : %v", tokenID, err)
+						c.log.Error(errMsg)
+						rollBackFailedTokens = append(rollBackFailedTokens, tokenID)
+						resp.Status = resp.Status && false
+						continue
+					}
+					// remove last cvr-1 block
+					err = c.RemoveSpendableRBTTransferredBlock(tokenID, c.TokenType(tokenTypeStr))
+					if err != nil {
+						errMsg := fmt.Sprintf("failed to remove latest block of RBT chain while rollback; tokenId : %v, err : %v", tokenID, err)
+						c.log.Error(errMsg)
+						rollBackFailedTokens = append(rollBackFailedTokens, tokenID)
+						resp.Status = resp.Status && false
+						continue
+					}
+				}
+			}
+		}
+	case FTString:
+		for tokenStatus, tokensList := range receiverRollBackReq.TokenStatusMap {
+			for _, tokenID := range tokensList {
+				ftInfo, err := c.w.ReadFTToken(tokenID)
+				if err != nil {
+					errMsg := fmt.Sprintf("failed to read FT info from FtTable to rollback; tokenId : %v, err : %v", tokenID, err)
+					c.log.Error(errMsg)
+					rollBackFailedTokens = append(rollBackFailedTokens, tokenID)
+					resp.Status = resp.Status && false
+					continue
+				}
+				// if the provided token has the provided txn id and is a free token then only update the token info
+				if ftInfo.TokenStatus == wallet.TokenIsFree && ftInfo.TransactionID == receiverRollBackReq.TxnID {
+					ftInfo.TokenStatus = tokenStatus
+					err = c.w.UpdateFTToken(ftInfo)
+					if err != nil {
+						errMsg := fmt.Sprintf("failed to update FT status in FT table while rollback; tokenId : %v, err : %v", tokenID, err)
+						c.log.Error(errMsg)
+						rollBackFailedTokens = append(rollBackFailedTokens, tokenID)
+						resp.Status = resp.Status && false
+						continue
+					}
+					// remove last cvr-1 block
+					err = c.RemoveSpendableRBTTransferredBlock(tokenID, token.FTTokenType)
+					if err != nil {
+						errMsg := fmt.Sprintf("failed to remove latest block of FT chain while rollback; tokenId : %v, err : %v", tokenID, err)
+						c.log.Error(errMsg)
+						rollBackFailedTokens = append(rollBackFailedTokens, tokenID)
+						resp.Status = resp.Status && false
+						continue
+					}
+				}
+			}
+		}
+	default:
+		// TODO : handle double spent issue for NFT
+		errMsg := fmt.Sprintf("invalid token type : %v, cannot rollback directly", receiverRollBackReq.TokenType)
+		c.log.Error(errMsg)
+		resp.Status = false
+		resp.Message = errMsg
+		return c.l.RenderJSON(req, resp, http.StatusOK)
+	}
+
+	if !resp.Status {
+		errMsg := fmt.Sprintf("receiver's roll back failed for %v tokens", len(rollBackFailedTokens))
+		resp.Message = errMsg
+		resp.Result = rollBackFailedTokens
+	} else {
+		resp.Status = true
+		resp.Message = "receiver rolled backed double-spent tokens successfully"
+	}
+	return c.l.RenderJSON(req, resp, http.StatusOK)
+}

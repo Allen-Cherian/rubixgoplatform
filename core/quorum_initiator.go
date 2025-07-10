@@ -209,6 +209,7 @@ func (c *Core) QuroumSetup() {
 	c.l.AddRoute(APISendFTToken, "POST", c.updateReceiverFTHandle)
 	c.l.AddRoute(APICheckPinRole, "GET", c.checkPinRole)
 	c.l.AddRoute(APINotifyUnusedQuorums, "POST", c.notifyUnusedQuorumsResponse)
+	c.l.AddRoute(APINotifyReceiverToRollback, "POST", c.notifyReceiverToRollback)
 	if c.arbitaryMode {
 		c.l.AddRoute(APIMapDIDArbitration, "POST", c.mapDIDArbitration)
 		c.l.AddRoute(APICheckDIDArbitration, "GET", c.chekDIDArbitration)
@@ -788,6 +789,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		var newtokenhashes []string
 
+		c.log.Debug("********* starting quorum pledge finality")
 		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
 		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
 		if pledgeFinalityError != nil {
@@ -967,7 +969,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		c.log.Debug("************** quorum info : ", quorumInfo)
 
 		// var newTokenHashes []string
-	
+
 		var txnTokenHashes []string = make([]string, 0)
 		for _, info := range ti {
 			t := info.Token
@@ -977,6 +979,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
 		}
+		c.log.Debug("********* starting quorum pledge finality")
 		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
 		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
 		if pledgeFinalityError != nil {
@@ -1086,7 +1089,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 		}
 
-
 		// //trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
 		// pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newTokenHashes, tid)
 		// if pledgeFinalityError != nil {
@@ -1170,7 +1172,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		return &td, pl, pds, nil
-		
+
 	case RBTTransferMode:
 		rp, err := c.getPeer(cr.ReceiverPeerID + "." + sc.GetReceiverDID())
 		if err != nil {
@@ -2569,7 +2571,13 @@ func (c *Core) connectQuorum(consensusRequest *ConensusRequest, p *ipfsport.Peer
 			token = cresp.Message[tStart:]
 			c.log.Debug("Token is being Double spent. Token is ", token)
 		}
-		if consensusRequest.Mode == FTTransferMode {
+		doubleSpendTokensMap := map[int][]string{}
+		doubleSpendTokensMap[wallet.TokenIsBeingDoubleSpent] = []string{token}
+		receiverRollbackRequest := ReceiverRollBack{
+			TxnID: consensusRequest.TransactionID,
+		}
+
+		if consensusRequest.Mode == FTTransferMode || consensusRequest.Mode == SpendableFTTransferMode {
 			doubleSpendFTDetails, err2 := c.w.ReadFTToken(token)
 			if err2 != nil {
 				c.log.Error("Consensus failed due to token being double spent ", "err", err2)
@@ -2581,6 +2589,21 @@ func (c *Core) connectQuorum(consensusRequest *ConensusRequest, p *ipfsport.Peer
 			c.log.Debug("Double spend token details status updated", doubleSpendFTDetails)
 			c.w.UpdateFTToken(doubleSpendFTDetails)
 			c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
+
+			// notify receiver to rollback
+			receiverRollbackRequest.TokenType = FTString
+			var rollBackResp *model.BasicResponse
+			err := p.SendJSONRequest("POST", APINotifyReceiverToRollback, nil, receiverRollbackRequest, &rollBackResp, true)
+			if err != nil {
+				c.log.Error("Failed to get roll back response from receiver", "err", err)
+				return
+			}
+			if !rollBackResp.Status {
+				errMsg := fmt.Sprintf("roll back msg : %v; failed tokens : %v", rollBackResp.Message, rollBackResp.Result.([]string))
+				c.log.Error(errMsg)
+			} else {
+				c.log.Debug("********** received rollback response from receiver : ", rollBackResp.Message)
+			}
 			return
 		}
 		doubleSpendTokenDetails, err2 := c.w.ReadToken(token)
@@ -2594,6 +2617,24 @@ func (c *Core) connectQuorum(consensusRequest *ConensusRequest, p *ipfsport.Peer
 		c.log.Debug("Double spend token details status updated", doubleSpendTokenDetails)
 		c.w.UpdateToken(doubleSpendTokenDetails)
 		c.finishConsensus(consensusRequest.ReqID, p, false, "", nil, nil)
+
+		// notify receiver to rollback
+		receiverRollbackRequest.TokenType = RBTString
+		if doubleSpendTokenDetails.TokenValue != 1 {
+			receiverRollbackRequest.TokenType = PartString
+		}
+		var rollBackResp *model.BasicResponse
+		err := p.SendJSONRequest("POST", APINotifyReceiverToRollback, nil, receiverRollbackRequest, &rollBackResp, true)
+		if err != nil {
+			c.log.Error("Failed to get roll back response from receiver", "err", err)
+			return
+		}
+		if !rollBackResp.Status {
+			errMsg := fmt.Sprintf("roll back msg : %v; failed tokens : %v", rollBackResp.Message, rollBackResp.Result.([]string))
+			c.log.Error(errMsg)
+		} else {
+			c.log.Debug("********** received rollback response from receiver : ", rollBackResp.Message)
+		}
 		return
 	}
 

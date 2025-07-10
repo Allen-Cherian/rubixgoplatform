@@ -618,17 +618,6 @@ func (w *Wallet) ReleaseFTs(ftList []FTToken) error {
 	return nil
 }
 
-func (w *Wallet) UpdateFT(ft *FTToken) error {
-	w.l.Lock()
-	defer w.l.Unlock()
-	err := w.s.Update(FTTokenStorage, ft, "token_id=?", ft.TokenID)
-	if err != nil {
-		w.log.Error("failed to update ft info, err ", err)
-		return err
-	}
-	return nil
-}
-
 func (w *Wallet) LockToken(wt *Token) error {
 	w.l.Lock()
 	defer w.l.Unlock()

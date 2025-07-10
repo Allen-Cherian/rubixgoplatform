@@ -64,6 +64,7 @@ const (
 	APIUpdateStatus                 string = "/api/update-status"
 	APIGetTokenStatus               string = "/api/get-token-status"
 	APINotifyUnusedQuorums          string = "/api/notify-unused-quorums"
+	APINotifyReceiverToRollback     string = "/api/notify-receiver"
 )
 
 const (

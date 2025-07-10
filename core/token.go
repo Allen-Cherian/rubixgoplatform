@@ -1893,8 +1893,9 @@ func (c *Core) RemoveSpendableRBTTransferredBlock(tokenID string, tokenType int)
 	if latestBlock.GetTransType() == block.SpendableTokenTransferredType {
 		//TODO: delete the temp block(cvr-1) before adding cvr-2 block
 		removeRequest := &model.TCRemoveRequest{
-			Token:  tokenID,
-			Latest: true,
+			Token:     tokenID,
+			Latest:    true,
+			TokenType: tokenType,
 		}
 		removeResp := c.RemoveTokenChainBlock(removeRequest)
 		if !removeResp.Status {
