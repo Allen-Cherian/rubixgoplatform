@@ -440,7 +440,7 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 
 				peerInfo = &wallet.DIDPeerMap{
 					DID:     didStr,
-					PeerID:  p.ID().String(),
+					PeerID:  p.GetPeerID(),
 					DIDType: details.PeerInfo.DIDType,
 				}
 			} else {
