@@ -51,7 +51,7 @@ func (c *Core) GetPeerFromExplorer(didStr string) (*wallet.DIDPeerMap, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
-
+	fmt.Println("Raw response body:", string(body))
 	// Check for known error message
 	var genericResp struct {
 		Message string          `json:"message"`
@@ -71,6 +71,11 @@ func (c *Core) GetPeerFromExplorer(didStr string) (*wallet.DIDPeerMap, error) {
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %v", err)
 	}
+
+	c.log.Debug("Explorer response parsed",
+		"userDID", apiResp.Data.UserDID,
+		"peerID", apiResp.Data.PeerID,
+		"didType", apiResp.Data.DIDType)
 
 	userDID := apiResp.Data.UserDID
 
@@ -109,6 +114,10 @@ func (c *Core) GetPeerFromExplorer(didStr string) (*wallet.DIDPeerMap, error) {
 	if apiResp.Data.DIDType == "BIP39" {
 		*peerInfo.DIDType = did.LiteDIDMode
 	} else if hasPNG {
+		mode := did.BasicDIDMode
+		peerInfo.DIDType = &mode
+	} else {
+		// fallback default
 		mode := did.BasicDIDMode
 		peerInfo.DIDType = &mode
 	}
@@ -430,7 +439,11 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 		// if peer id not found in table, try to fetch from explorer for mainnet RBTs
 		peerDIDInfo, err = c.GetPeerFromExplorer(didStr)
 		if peerDIDInfo != nil {
-			c.AddPeerDetails(*peerDIDInfo)
+			if peerDIDInfo.DIDType != nil {
+				c.AddPeerDetails(*peerDIDInfo)
+			} else {
+				c.log.Error("DIDType is nil from explorer for did", didStr)
+			}
 		}
 		if err != nil {
 			c.log.Error("failed to fetch peer Id from explorer for ", didStr, "err", err)
