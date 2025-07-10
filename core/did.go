@@ -3,8 +3,10 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,101 +32,91 @@ type DIDInfo struct {
 }
 
 func (c *Core) GetPeerFromExplorer(didStr string) (*wallet.DIDPeerMap, error) {
-	// Construct the API URL
-	fmt.Println("Fetching peer: ", didStr)
-	url := "https://rexplorer.azurewebsites.net/api/user/get-did-info/" + didStr
+	c.log.Debug("Fetching peer from explorer", "did", didStr)
 
-	// Make the HTTP GET request
+	url := "https://rexplorer.azurewebsites.net/api/user/get-did-info/" + didStr
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %v", err)
+		return nil, fmt.Errorf("failed to request explorer: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Check if the request was successful
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("explorer returned status: %d", resp.StatusCode)
 	}
 
-	// Read the response body
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err)
+		return nil, fmt.Errorf("failed to read explorer response: %w", err)
 	}
-	fmt.Println("Raw response body:", string(body))
-	// Check for known error message
+
+	c.log.Debug("Explorer raw response", "body", string(body))
+
+	// First, parse basic structure
 	var genericResp struct {
 		Message string          `json:"message"`
 		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(body, &genericResp); err != nil {
-		return nil, fmt.Errorf("failed to parse generic JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse explorer response: %w", err)
 	}
 
 	if strings.Contains(genericResp.Message, "Deployer not found") {
-		c.log.Error("Deployer not found for DID:", didStr)
-		return nil, fmt.Errorf("PeerID not found for DID: %s", didStr)
+		c.log.Error("Deployer not found for DID", "did", didStr)
+		return nil, fmt.Errorf("peer not found in explorer for DID: %s", didStr)
 	}
 
-	// Parse the JSON response
+	// Parse full response
 	var apiResp APIResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON: %v", err)
+		return nil, fmt.Errorf("failed to parse DID data: %w", err)
 	}
 
-	c.log.Debug("Explorer response parsed",
-		"userDID", apiResp.Data.UserDID,
-		"peerID", apiResp.Data.PeerID,
-		"didType", apiResp.Data.DIDType)
+	c.log.Debug("Explorer response parsed", "userDID", apiResp.Data.UserDID, "peerID", apiResp.Data.PeerID, "didType", apiResp.Data.DIDType)
 
-	userDID := apiResp.Data.UserDID
-
-	// Fetch the DID
-	if err := c.FetchDID(userDID); err != nil {
-		c.log.Error("Failed to fetch DID:", err)
-		return nil, fmt.Errorf("failed to fetch DID: %v", err)
+	// Fetch DID content to local node
+	if err := c.FetchDID(apiResp.Data.UserDID); err != nil {
+		c.log.Error("Failed to fetch DID", "did", apiResp.Data.UserDID, "err", err)
+		return nil, fmt.Errorf("failed to fetch DID from network: %w", err)
 	}
 
-	// Check for .png files in the folder
-	didDirPath := filepath.Join(c.didDir, userDID)
+	// Determine if DID has .png file to identify BasicDID
 	hasPNG := false
-
-	files, err := ioutil.ReadDir(didDirPath)
-	if err != nil {
-		fmt.Println("Failed to read DID directory:", err)
-		return nil, fmt.Errorf("failed to read DID directory: %v", err)
+	didDir := filepath.Join(c.didDir, apiResp.Data.UserDID)
+	if files, err := os.ReadDir(didDir); err == nil {
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".png") {
+				hasPNG = true
+				break
+			}
+		}
+	} else {
+		c.log.Warn("Failed to scan DID directory", "path", didDir, "err", err)
 	}
 
-	for _, file := range files {
-		if !file.IsDir() && filepath.Ext(file.Name()) == ".png" {
-			hasPNG = true
-			break
+	// Resolve DID type
+	var resolvedType int
+	switch apiResp.Data.DIDType {
+	case "BIP39":
+		resolvedType = did.LiteDIDMode
+	default:
+		if hasPNG {
+			resolvedType = did.BasicDIDMode
+		} else {
+			resolvedType = did.LiteDIDMode // fallback default
 		}
 	}
 
-	// Initialize DIDType with a pointer
-	didType := -1
 	peerInfo := &wallet.DIDPeerMap{
 		DID:     apiResp.Data.UserDID,
 		PeerID:  apiResp.Data.PeerID,
-		DIDType: &didType,
+		DIDType: &resolvedType,
 	}
 
-	// Determine DIDType based on conditions
-	if apiResp.Data.DIDType == "BIP39" {
-		*peerInfo.DIDType = did.LiteDIDMode
-	} else if hasPNG {
-		mode := did.BasicDIDMode
-		peerInfo.DIDType = &mode
-	} else {
-		// fallback default
-		mode := did.BasicDIDMode
-		peerInfo.DIDType = &mode
-	}
-
-	err = c.AddPeerDetails(*peerInfo)
-	if err != nil {
-		c.log.Error("failed to add peer to DIDPeerTable, err ", err)
+	// Add peer to table (upsert logic should be inside AddPeerDetails)
+	if err := c.AddPeerDetails(*peerInfo); err != nil {
+		c.log.Error("Failed to add peer details to table", "did", peerInfo.DID, "err", err)
+		// Return peerInfo anyway, in case caller can proceed
 		return peerInfo, nil
 	}
 
@@ -402,96 +394,111 @@ func (c *Core) CreateDIDFromPubKey(didCreate *did.DIDCreate, pubKey string) (str
 	return did, nil
 }
 
-// GetPeerDIDInfo fetched peer info either from DIDTable (if in the same node), or DIDPeerTable, or explorer
-// If did type is still not found then it connects the peer and fetches did type
-// And it adds peer to DIDPeerTable, in case peer is not in the same node
-// This function throws error in 3 cases :
-// case-1 : if peer details not found anywhere, returns nil, and error;
-// case-2 : if peerId not found anywhere but did type is in DB, retrns did type and error;
-// case-3 : if failed to add peer info to DB, returns DIDPeerMap and error containing 'retry' msg
+// This function, GetPeerDIDInfo, retrieves information about a peer's DID (Decentralized Identifier)
+// from various sources, including the local database, an explorer, or directly from the peer.
+// It returns a wallet.DIDPeerMap containing the peer's DID, Peer ID, and DID type,
+// or an error if the information cannot be found.
 func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
-	peerDIDInfo := &wallet.DIDPeerMap{
-		DID: didStr,
-	}
-	// check if peer is in same node
-
-	// if peer is in different node, fetch peer id from DIDPeerTable
 	peerID := c.w.GetPeerID(didStr)
-	c.log.Debug("GetPeerDIDInfo c.w.GetPeerID(didStr)", "did", didStr, "peerID", peerID)
+	c.log.Debug("GetPeerDIDInfo: resolved peer ID", "did", didStr, "peerID", peerID)
+
+	var peerInfo *wallet.DIDPeerMap
+
 	if peerID == "" {
-		c.log.Debug("Peer ID not found in DIDPeerTable for did", "did", didStr)
-		didInfo, err := c.w.GetDID(didStr)
-		if err == nil {
-			peerDIDInfo.DIDType = &didInfo.Type
-			peerDIDInfo.PeerID = c.peerID
-			return peerDIDInfo, nil
-		}
-
-		if c.testNet {
-			didType, _ := c.w.GetPeerDIDType(didStr)
-			if didType == -1 {
-				c.log.Error("missing peer details of peer ", didStr)
-				return nil, err
+		// Try local DB
+		if didInfo, err := c.w.GetDID(didStr); err == nil {
+			peerInfo = &wallet.DIDPeerMap{
+				DID:     didStr,
+				PeerID:  c.peerID,
+				DIDType: &didInfo.Type,
 			}
-			peerDIDInfo.DIDType = &didType
-			return peerDIDInfo, fmt.Errorf("failed to find peer ID, err : " + err.Error())
+			return peerInfo, nil
 		}
-		// if peer id not found in table, try to fetch from explorer for mainnet RBTs
-		peerDIDInfo, err = c.GetPeerFromExplorer(didStr)
-		if err != nil {
-			c.log.Error("failed to fetch peer Id from explorer for ", didStr, "err", err)
 
-			// if peer id not found in explorer too, then return only did type, if it is in table
-			didType, _ := c.w.GetPeerDIDType(didStr)
-			if didType == -1 {
-				return nil, err
-			}
-			peerDIDInfo.DIDType = &didType
-			return peerDIDInfo, fmt.Errorf("failed find peer ID, err : " + err.Error())
-		}
-	} else {
-		peerDIDInfo.PeerID = peerID
-	}
-
-	//if did type is not fetched yet or is incorrect, then try to fetch it from db or from the peer itself
-	if peerDIDInfo.DIDType == nil || *peerDIDInfo.DIDType == -1 {
+		// Try explorer for mainnet
 		if !c.testNet {
-			peerDIDInfo, err := c.GetPeerFromExplorer(didStr)
-			if err != nil && *peerDIDInfo.DIDType != -1 {
-				c.log.Error("failed to fetch peer details from explorer for ", didStr, "err", err)
-
+			var err error
+			peerInfo, err = c.GetPeerFromExplorer(didStr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch peer info from explorer: %w", err)
 			}
 		} else {
+			// For testnet, fallback to DB or fetch from peer
 			didType, _ := c.w.GetPeerDIDType(didStr)
 			if didType == -1 {
-				c.log.Debug("Connecting with peer to get DID type of peer did", didStr)
-				p, err := c.getPeer(peerDIDInfo.PeerID + "." + didStr)
+				c.log.Info("DID type unknown, attempting peer connection", "did", didStr)
+				p, err := c.getPeer(didStr)
 				if err != nil {
-					c.log.Error("could not connect with peer to fetch did type, error ", err)
-					return peerDIDInfo, nil
+					return nil, fmt.Errorf("failed to connect to peer: %w", err)
 				}
 				defer p.Close()
+
+				details, err := c.GetPeerInfo(p, didStr)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get peer info: %w", err)
+				}
+
+				peerInfo = &wallet.DIDPeerMap{
+					DID:     didStr,
+					PeerID:  p.ID().String(),
+					DIDType: details.PeerInfo.DIDType,
+				}
+			} else {
+				peerInfo = &wallet.DIDPeerMap{
+					DID:     didStr,
+					PeerID:  c.peerID,
+					DIDType: &didType,
+				}
+			}
+		}
+	} else {
+		// Peer ID exists, now resolve DIDType if not known
+		didType, _ := c.w.GetPeerDIDType(didStr)
+		if didType == -1 {
+			// Try fetching again from explorer
+			if !c.testNet {
+				var err error
+				peerInfo, err = c.GetPeerFromExplorer(didStr)
+				if err != nil {
+					return nil, fmt.Errorf("explorer fetch failed: %w", err)
+				}
+			} else {
+				p, err := c.getPeer(peerID + "." + didStr)
+				if err != nil {
+					return nil, fmt.Errorf("peer connection failed: %w", err)
+				}
+				defer p.Close()
+
 				peerDetails, err := c.GetPeerInfo(p, didStr)
 				if err != nil {
-					c.log.Error("failed to fetch did type from peer ", didStr, "err", err)
-					return peerDIDInfo, nil
+					return nil, fmt.Errorf("failed to fetch from peer: %w", err)
 				}
-				peerDIDInfo.DIDType = peerDetails.PeerInfo.DIDType
-			} else {
-				peerDIDInfo.DIDType = &didType
+
+				peerInfo = &wallet.DIDPeerMap{
+					DID:     didStr,
+					PeerID:  peerID,
+					DIDType: peerDetails.PeerInfo.DIDType,
+				}
 			}
-			c.AddPeerDetails(*peerDIDInfo)
-		}
-
-	}
-
-	// add peer to DIDPeerTable, if peer is in different node
-	if peerDIDInfo.PeerID != c.peerID {
-		err := c.AddPeerDetails(*peerDIDInfo)
-		if err != nil {
-			c.log.Error("failed to add peer to DIDPeerTable, err ", err)
-			return peerDIDInfo, fmt.Errorf("failed to add peer info to table, please retry adding")
+		} else {
+			peerInfo = &wallet.DIDPeerMap{
+				DID:     didStr,
+				PeerID:  peerID,
+				DIDType: &didType,
+			}
 		}
 	}
-	return peerDIDInfo, nil
+
+	if peerInfo == nil || peerInfo.DIDType == nil {
+		return nil, fmt.Errorf("could not determine DIDType for DID: %s", didStr)
+	}
+
+	// Only add to table if peer is different node
+	if peerInfo.PeerID != c.peerID {
+		if err := c.AddPeerDetails(*peerInfo); err != nil {
+			return nil, fmt.Errorf("failed to save peer info: %w", err)
+		}
+	}
+
+	return peerInfo, nil
 }
