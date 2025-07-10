@@ -86,8 +86,6 @@ func (w *Wallet) GetDID(did string) (*DIDType, error) {
 	if err != nil {
 		w.log.Error("Failed to get DID", "err", err)
 		return nil, err
-	} else {
-		w.log.Info("DID fetched successfully GetDID", "did", did)
 	}
 	return &dt, nil
 }
