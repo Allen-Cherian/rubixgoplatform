@@ -1940,7 +1940,7 @@ func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contr
 	}
 
 	if !cresp.Status {
-		c.log.Error("Failed to get consensus", "msg", cresp.Message)
+		c.log.Error("Failed to get consensus", "msg", cresp.Message, "|| crep is ", cresp)
 		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
 		return
 	}

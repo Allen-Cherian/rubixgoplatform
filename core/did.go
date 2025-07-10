@@ -413,6 +413,7 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 	}
 	// if peer is in different node, fetch peer id from DIDPeerTable
 	peerID := c.w.GetPeerID(didStr)
+	c.log.Debug("GetPeerDIDInfo c.w.GetPeerID(didStr)", "did", didStr, "peerID", peerID)
 	if peerID == "" {
 		if c.testNet {
 			didType, _ := c.w.GetPeerDIDType(didStr)

@@ -694,6 +694,7 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 
 	validateTokenOwnershipVar, err, syncIssueTokens := c.validateTokenOwnership(cr, sc, did)
 	if len(syncIssueTokens) > 0 {
+		crep.Message = "Token ownership check failed, err: " + fmt.Sprint(syncIssueTokens)
 		crep.Result = syncIssueTokens
 	}
 	if err != nil {
