@@ -293,7 +293,11 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 			ParentTokenID: "",
 			DID:           ti.OwnerDID,
 		}
-		err = c.w.CreateToken(tokenInfo)
+		dbWriteSem <- struct{}{}
+		err := util.RetrySQLiteWrite(func() error {
+			return c.w.CreateToken(tokenInfo)
+		}, 10, 100*time.Millisecond)
+		<-dbWriteSem
 		if err != nil {
 			return err, false
 		}
@@ -303,7 +307,12 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 	tokenInfo.TokenStatus = wallet.QuorumPledgedForThisToken
 	tokenInfo.TransactionID = b.GetTid()
 	tokenInfo.SyncStatus = wallet.SyncIncomplete
-	if err = c.w.UpdateToken(tokenInfo); err != nil {
+	dbWriteSem <- struct{}{}
+	err = util.RetrySQLiteWrite(func() error {
+		return c.w.UpdateToken(tokenInfo)
+	}, 10, 100*time.Millisecond)
+	<-dbWriteSem
+	if err != nil {
 		return err, false
 	}
 
