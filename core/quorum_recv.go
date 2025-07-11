@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -797,61 +798,80 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 
-	//initiate trans token block
 	transFTBlock := block.InitBlock(consensusRequest.TransTokenBlock, nil, block.NoSignature())
 	if transFTBlock == nil {
 		c.log.Error("Failed to do signature, invalid NFT")
 		consensusReply.Message = "Failed to do signature, invalid NFT"
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	// //Validate sender signature
-	// response, err := c.ValidateTxnInitiator(transNFTBlock)
-	// if err != nil {
-	// 	c.log.Error("signature request failed, msg", response.Message, "err", err)
-	// 	consensusReply.Message = response.Message
-	// 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-	// }
-	//check if token has multiple pins
+
 	ti := sc.GetTransTokenInfo()
-	results := make([]MultiPinCheckRes, len(ti))
-	var wg sync.WaitGroup
-	for i := range ti {
-		wg.Add(1)
-		go c.pinCheck(ti[i].Token, i, consensusRequest.SenderPeerID, consensusRequest.ReceiverPeerID, results, &wg)
+	pinCheckResults := make([]MultiPinCheckRes, len(ti))
+	tokenStateCheckResults := make([]TokenStateCheckResult, len(ti))
+
+	// === Parallel Pin Check ===
+	// This section remains similar to your original, but using pinWG
+	pinBucketSize := 3 // Tunable bucket size for pin checks
+	pinConcurrency := runtime.NumCPU()
+	pinTokenBuckets := c.createTokenBuckets(ti, pinBucketSize)
+	var pinWG sync.WaitGroup // Dedicated WaitGroup for Pin Checks
+	pinErrChan := make(chan error, len(pinTokenBuckets))
+	pinSem := make(chan struct{}, pinConcurrency) // Semaphore for pin checks
+
+	for _, bucket := range pinTokenBuckets {
+		pinWG.Add(1) // Add for the goroutine that processes this bucket
+		pinSem <- struct{}{}
+		go func(toks []contract.TokenInfo) {
+			defer pinWG.Done() // Done for the bucket goroutine
+			defer func() { <-pinSem }()
+
+			for _, t := range toks {
+				var err error
+				for attempt := 0; attempt < 3; attempt++ {
+					err = c.pinCheckWorker(t, consensusRequest.SenderPeerID, consensusRequest.ReceiverPeerID, pinCheckResults, ti)
+					if err == nil || !isRecoverableError(err) {
+						break
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+				if err != nil {
+					pinErrChan <- fmt.Errorf("pin check failed for token %s: %w", t.Token, err)
+					// No return here, allow other tokens in the same bucket to be processed
+				}
+			}
+		}(bucket)
 	}
-	wg.Wait()
-	for i := range results {
-		if results[i].Error != nil {
-			c.log.Error("Error occured", "error", results[i].Error)
-			consensusReply.Message = "Error while cheking FT Token multiple Pins"
-			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-		}
-		if results[i].Status {
-			c.log.Error("FT Token has multiple owners", "FT token", results[i].Token, "owners", results[i].Owners)
-			consensusReply.Message = "FT Token has multiple owners"
+	pinWG.Wait() // Wait for all pin check goroutines to finish
+	close(pinErrChan)
+
+	for err := range pinErrChan {
+		c.log.Error("Error occurred during pin check", "error", err)
+		consensusReply.Message = "Error while checking FT Token multiple Pins: " + err.Error()
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
+
+	for i := range pinCheckResults {
+		if pinCheckResults[i].Status { // If Status is true, it means multiple owners
+			c.log.Error("FT Token has multiple owners", "FT token", pinCheckResults[i].Token, "owners", pinCheckResults[i].Owners)
+			consensusReply.Message = "FT Token has multiple owners: " + pinCheckResults[i].Token
 			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 	}
 
-	// check token ownership
-
+	// === Token Ownership Check ===
 	c.log.Debug("*********** starting validateTokenOwnership")
-	validateTokenOwnershipVar, err, syncIssueTokens := c.validateTokenOwnership(consensusRequest, sc, did)
+	validateTokenOwnershipVar, err, syncIssueTokens := c.validateTokenOwnershipInBatch(consensusRequest, sc, did)
 	if len(syncIssueTokens) > 0 {
 		consensusReply.Result = syncIssueTokens
 	}
 	if err != nil {
-		validateTokenOwnershipErrorString := fmt.Sprint(err)
-		if strings.Contains(validateTokenOwnershipErrorString, "parent token is not in burnt stage") {
-			consensusReply.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
-			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-		}
-		if strings.Contains(validateTokenOwnershipErrorString, "failed to sync tokenchain Token") {
-			consensusReply.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
+		errStr := err.Error()
+		if strings.Contains(errStr, "parent token is not in burnt stage") || strings.Contains(errStr, "failed to sync tokenchain Token") {
+			consensusReply.Message = "Token ownership check failed, err: " + errStr
 			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 		}
 		c.log.Error("Tokens ownership check failed")
-		consensusReply.Message = "Token ownership check failed, err : " + err.Error()
+		consensusReply.Message = "Token ownership check failed, err : " + errStr
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 	if !validateTokenOwnershipVar {
@@ -859,62 +879,79 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		consensusReply.Message = "Token ownership check failed"
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	/* 	if !c.validateTokenOwnership(cr, sc) {
-		c.log.Error("Token ownership check failed")
-		crep.Message = "Token ownership check failed"
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
-	} */
 
-	//Token state check and pinning
-	/*
-		1. get the latest block from token chain,
-		2. retrive the Block Id
-		3. concat token id and blockId
-		4. add to ipfs
-		5. check for pin and if none pin the content
-		6. if pin exist , exit with error token state exhauste
-	*/
+	// === Token State Check (Parallel) ===
+	// This section is now distinct and uses its own tokenStateWG
+	tokenStateBucketSize := 3 // Tunable bucket size for token state checks
+	tokenStateConcurrency := runtime.NumCPU()
+	tokenStateTokenBuckets := c.createTokenBuckets(ti, tokenStateBucketSize)
+	var tokenStateWG sync.WaitGroup                                                         // Dedicated WaitGroup for Token State Checks
+	tokenStateErrChan := make(chan error, len(tokenStateTokenBuckets)*tokenStateBucketSize) // Max errors = total tokens
+	tokenStateSem := make(chan struct{}, tokenStateConcurrency)                             // Semaphore for token state checks
 
-	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
-	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
-	for i := range ti {
-		wg.Add(1)
-		go c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, &wg, consensusRequest.QuorumList, ti[i].TokenType)
+	// Loop over buckets to launch goroutines
+	for _, bucket := range tokenStateTokenBuckets {
+		// Each goroutine will handle a bucket of tokens.
+		// For each token *within* the bucket, `checkTokenState` will call `wg.Done()`.
+		// So, `tokenStateWG.Add()` needs to be called for each token, NOT each bucket goroutine.
+		// We'll manage this by adding inside the goroutine if `checkTokenState` must call Done().
+		tokenStateSem <- struct{}{} // Acquire semaphore slot for this bucket goroutine
+		go func(toks []contract.TokenInfo) {
+			defer func() { <-tokenStateSem }() // Release semaphore slot when this bucket goroutine finishes
+
+			for _, t := range toks {
+				tokenStateWG.Add(1) // ADD FOR EACH TOKEN, as checkTokenState calls Done() for each token
+				// Call checkTokenState directly. It has its own retry logic (if applicable) and writes to results.
+				// The wg parameter here refers to the tokenStateWG in the outer scope.
+				var checkErr error // To capture errors if a retry fails
+				for attempt := 0; attempt < 3; attempt++ {
+					c.checkTokenState(t.Token, did, indexOfToken(ti, t.Token), tokenStateCheckResults, &tokenStateWG, consensusRequest.QuorumList, t.TokenType)
+					// After checkTokenState returns, its internal defer wg.Done() has fired.
+					// We need to check the error it wrote to the resultArray
+					checkErr = tokenStateCheckResults[indexOfToken(ti, t.Token)].Error
+					if checkErr == nil || !isRecoverableError(checkErr) {
+						break
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+
+				if checkErr != nil {
+					tokenStateErrChan <- fmt.Errorf("token state check failed for token %s: %w", t.Token, checkErr)
+				} else if tokenStateCheckResults[indexOfToken(ti, t.Token)].Exhausted {
+					tokenStateErrChan <- fmt.Errorf("token %s is exhausted: %s", t.Token, tokenStateCheckResults[indexOfToken(ti, t.Token)].Message)
+				}
+				// No `return` here, allow other tokens in the same bucket to be processed.
+			}
+		}(bucket)
 	}
-	wg.Wait()
 
-	for i := range tokenStateCheckResult {
-		if tokenStateCheckResult[i].Error != nil {
-			c.log.Error("Error occured", "error", tokenStateCheckResult[i].Error)
-			consensusReply.Message = "Error while cheking Token State Message : " + tokenStateCheckResult[i].Message
-			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-		}
-		if tokenStateCheckResult[i].Exhausted {
-			c.log.Debug("Token state has been exhausted, Token being Double spent:", tokenStateCheckResult[i].Token)
-			consensusReply.Message = tokenStateCheckResult[i].Message
-			return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
-		}
-		c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
-	}
-	c.log.Debug("Proceeding to pin token state to prevent double spend")
-	sender := consensusRequest.SenderPeerID + "." + sc.GetSenderDID()
-	receiver := consensusRequest.ReceiverPeerID + "." + sc.GetReceiverDID()
-	err1 := c.pinTokenState(tokenStateCheckResult, did, consensusRequest.TransactionID, sender, receiver, float64(0))
-	if err1 != nil {
-		consensusReply.Message = "Error Pinning token state" + err.Error()
+	tokenStateWG.Wait() // Wait for all individual token state checks to complete
+	close(tokenStateErrChan)
+
+	for err := range tokenStateErrChan {
+		c.log.Error("Error occurred during token state check", "error", err)
+		consensusReply.Message = "Error while checking Token State: " + err.Error()
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
 
-	c.log.Debug("Finished FT Tokenstate check")
+	// === Pin Token State ===
+	c.log.Debug("Proceeding to pin token state to prevent double spend")
+	sender := consensusRequest.SenderPeerID + "." + sc.GetSenderDID()
+	receiver := consensusRequest.ReceiverPeerID + "." + sc.GetReceiverDID()
+	err1 := c.pinTokenState(tokenStateCheckResults, did, consensusRequest.TransactionID, sender, receiver, float64(0))
+	if err1 != nil {
+		consensusReply.Message = "Error Pinning token state: " + err1.Error()
+		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+	}
 
-	//get trans token block hash
+	// === Sign Final Block ===
 	txnBlockHash, err := transFTBlock.GetHash()
 	if err != nil {
 		c.log.Error("failed to get trans-block-hash for credit; err", err)
 		consensusReply.Message = err.Error()
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 	}
-	//quorum's signature on block hash
+
 	qsb, ppb, err := qdc.Sign(txnBlockHash)
 	if err != nil {
 		c.log.Error("Failed to get quorum signature", "err", err)
@@ -928,6 +965,48 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	consensusReply.PrivSig = ppb
 	consensusReply.Hash = txnBlockHash
 	return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
+}
+
+func (c *Core) pinCheckWorker(token contract.TokenInfo, senderID, receiverID string, results []MultiPinCheckRes, ti []contract.TokenInfo) error {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	idx := indexOfToken(ti, token.Token)
+	c.pinCheck(token.Token, idx, senderID, receiverID, results, &wg)
+	wg.Wait()
+	return results[idx].Error
+}
+
+func (c *Core) createTokenBuckets(ti []contract.TokenInfo, bucketSize int) [][]contract.TokenInfo {
+	var buckets [][]contract.TokenInfo
+	for i := 0; i < len(ti); i += bucketSize {
+		end := i + bucketSize
+		if end > len(ti) {
+			end = len(ti)
+		}
+		buckets = append(buckets, ti[i:end])
+	}
+	return buckets
+}
+
+func indexOfToken(tokens []contract.TokenInfo, id string) int {
+	for i, t := range tokens {
+		if t.Token == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func isRecoverableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "ipfs") ||
+		strings.Contains(errMsg, "network") ||
+		strings.Contains(errMsg, "timeout") ||
+		strings.Contains(errMsg, "EOF") ||
+		strings.Contains(errMsg, "connection reset")
 }
 
 func (c *Core) quorumConensus(req *ensweb.Request) *ensweb.Result {
@@ -2209,9 +2288,9 @@ func (c *Core) notifyUnusedQuorumsResponse(req *ensweb.Request) *ensweb.Result {
 }
 
 type ReceiverRollBack struct {
-	TokenStatusMap  map[int][]string `json:"token_status_map"`
-	TxnID           string           `json:"txn_id"`
-	TokenType       string           `json:"token_type"`
+	TokenStatusMap map[int][]string `json:"token_status_map"`
+	TxnID          string           `json:"txn_id"`
+	TokenType      string           `json:"token_type"`
 }
 
 func (c *Core) notifyReceiverToRollback(req *ensweb.Request) *ensweb.Result {

@@ -789,7 +789,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		var newtokenhashes []string
 
-	
 		//if sender and receiver are not same, then add the block at receiver side
 		if sc.GetReceiverDID() != sc.GetSenderDID() {
 			c.log.Debug("***************** sending to receiver")
@@ -1134,7 +1133,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				updateTokenHashDetailsQuery := make(map[string]string)
 				updateTokenHashDetailsQuery["tokenIDTokenStateHash"] = prevtokenIDTokenStateHash
 				previousQuorumPeer.SendJSONRequest("POST", APIUpdateTokenHashDetails, updateTokenHashDetailsQuery, nil, nil, true)
-
+				previousQuorumPeer.Close()
 			}
 		}
 
