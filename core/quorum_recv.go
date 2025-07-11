@@ -2,13 +2,16 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ipfsnode "github.com/ipfs/go-ipfs-api"
@@ -242,7 +245,8 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
-	err1 := c.pinTokenState(tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
+	ctx := req.Context()
+	err1 := c.pinTokenState(ctx, tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
 	if err1 != nil {
 		crep.Message = "Error Pinning token state" + err.Error()
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
@@ -480,7 +484,8 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 	}
 
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
-	err = c.pinTokenState(tokenStateCheckResult, did, consensusRequest.TransactionID, "NA", "NA", float64(0)) // TODO: Ensure that smart contract trnx id and things are proper
+	ctx := req.Context()
+	err = c.pinTokenState(ctx, tokenStateCheckResult, did, consensusRequest.TransactionID, "NA", "NA", float64(0)) // TODO: Ensure that smart contract trnx id and things are proper
 	if err != nil {
 		consensusReply.Message = "Error Pinning token state" + err.Error()
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
@@ -636,7 +641,9 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	}
 
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
-	err = c.pinTokenState(tokenStateCheckResult, did, consensusRequest.TransactionID, "NA", "NA", float64(0)) // TODO: Ensure that smart contract trnx id and things are proper
+	ctx := req.Context()
+
+	err = c.pinTokenState(ctx, tokenStateCheckResult, did, consensusRequest.TransactionID, "NA", "NA", float64(0)) // TODO: Ensure that smart contract trnx id and things are proper
 	if err != nil {
 		consensusReply.Message = "Error Pinning token state" + err.Error()
 		return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
@@ -692,19 +699,23 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 
 	// check token ownership
 
+	c.log.Debug("Validating token ownership for FT Consensus")
 	validateTokenOwnershipVar, err, syncIssueTokens := c.validateTokenOwnership(cr, sc, did)
 	if len(syncIssueTokens) > 0 {
 		crep.Message = "Token ownership check failed, err: " + fmt.Sprint(syncIssueTokens)
 		crep.Result = syncIssueTokens
 	}
+	c.log.Debug("Token ownership validation completed. Checking for errors")
 	if err != nil {
 		validateTokenOwnershipErrorString := fmt.Sprint(err)
 		if strings.Contains(validateTokenOwnershipErrorString, "parent token is not in burnt stage") {
 			crep.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
+			c.log.Error("Token ownership check failed", "error", validateTokenOwnershipErrorString)
 			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
 		if strings.Contains(validateTokenOwnershipErrorString, "failed to sync tokenchain Token") {
 			crep.Message = "Token ownership check failed, err: " + validateTokenOwnershipErrorString
+			c.log.Error("Token ownership check failed", "error", validateTokenOwnershipErrorString)
 			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
 		c.log.Error("Tokens ownership check failed")
@@ -732,14 +743,32 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		6. if pin exist , exit with error token state exhauste
 	*/
 
+	c.log.Debug("Validating token state for FT Consensus")
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
+	var completed int32
+	var lastLoggedPercent int32
+	total := len(ti)
+
 	for i := range ti {
 		wg.Add(1)
-		go c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, &wg, cr.QuorumList, ti[i].TokenType)
-	}
-	wg.Wait()
+		go func(i int) {
+			defer wg.Done()
 
+			c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, &wg, cr.QuorumList, ti[i].TokenType)
+
+			newCount := atomic.AddInt32(&completed, 1)
+			currentPercent := int32(math.Floor(float64(newCount*100) / float64(total)))
+
+			// Only log if it's a new 10% milestone
+			if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
+				if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
+					c.log.Debug(fmt.Sprintf("Token state check progress: %d%% (%d/%d completed)", currentPercent, newCount, total))
+				}
+			}
+		}(i)
+	}
+	c.log.Debug("Token state validation completed, checking for errors")
 	for i := range tokenStateCheckResult {
 		if tokenStateCheckResult[i].Error != nil {
 			c.log.Error("Error occured", "error", tokenStateCheckResult[i].Error)
@@ -756,9 +785,14 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
-	err1 := c.pinTokenState(tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
+	c.log.Debug("Pinning token state for FT Consensus")
+	ctx, cancel := context.WithTimeout(req.Context(), 30*time.Second) // optional timeout
+	defer cancel()
+
+	err1 := c.pinTokenState(ctx, tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
 	if err1 != nil {
-		crep.Message = "Error Pinning token state" + err.Error()
+		c.log.Error("Pinning token state failed", "err", err1)
+		crep.Message = "Error Pinning token state: " + err1.Error()
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
 

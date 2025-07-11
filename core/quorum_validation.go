@@ -2,10 +2,16 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"math"
+	"math/rand"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	ipfsnode "github.com/ipfs/go-ipfs-api"
 	"github.com/rubixchain/rubixgoplatform/block"
@@ -25,6 +31,35 @@ type TokenStateCheckResult struct {
 	Message               string
 	tokenIDTokenStateData string
 	tokenIDTokenStateHash string
+}
+
+const (
+	maxRetries     = 3
+	baseRetryDelay = 500 * time.Millisecond
+)
+
+func retry(operation func() error) error {
+	var err error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err = operation()
+		if err == nil {
+			return nil
+		}
+		sleep := backoff(attempt)
+		time.Sleep(sleep)
+	}
+	return err
+}
+
+func backoff(attempt int) time.Duration {
+	jitter := time.Duration(rand.Intn(100)) * time.Millisecond
+	return time.Duration(math.Pow(2, float64(attempt-1)))*baseRetryDelay + jitter
+}
+
+func recordFirstError(errPtr *error, err error, once *sync.Once) {
+	once.Do(func() {
+		*errPtr = err
+	})
 }
 
 func (c *Core) validateSigner(b *block.Block, selfDID string, p *ipfsport.Peer) (bool, error) {
@@ -627,29 +662,128 @@ func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []Tok
 	resultArray[index] = result
 }
 
-func (c *Core) pinTokenState(tokenStateCheckResult []TokenStateCheckResult, did string, transactionId string, sender string, receiver string, tokenValue float64) error {
-	var ids []string
-	for i := range tokenStateCheckResult {
-		tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenStateCheckResult[i].tokenIDTokenStateData))
-		tokenIDTokenStateHash, err := c.w.Add(tokenIDTokenStateBuffer, did, wallet.QuorumPinRole)
-		if err != nil {
-			c.log.Error("Error triggered while adding token state", err)
-			return err
-		}
-		ids = append(ids, tokenIDTokenStateHash)
-		_, err = c.w.Pin(tokenIDTokenStateHash, wallet.QuorumPinRole, did, transactionId, sender, receiver, tokenValue)
-		if err != nil {
-			c.log.Error("Error triggered while pinning token state", err)
-			c.unPinTokenState(ids, did)
-			return err
-		}
-		c.log.Debug("token state pinned", tokenIDTokenStateHash)
+func (c *Core) pinTokenState(
+	ctx context.Context,
+	tokenStateCheckResult []TokenStateCheckResult,
+	did, transactionId, sender, receiver string,
+	tokenValue float64,
+) error {
+	var (
+		ids              []string
+		total            = len(tokenStateCheckResult)
+		completed        int32
+		lastLoggedPct    int32
+		mu               sync.Mutex // Protects shared slice `ids`
+		wg               sync.WaitGroup
+		errOnce          sync.Once
+		firstErr         error
+		numWorkers       = runtime.NumCPU()
+		tasks            = make(chan int, total)
+		cancelableCtx, _ = context.WithCancel(ctx) // In case you want to cancel all on first error
+	)
+
+	if total == 0 {
+		c.log.Warn("No token states to pin")
+		return nil
 	}
+
+	// Worker pool
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range tasks {
+				select {
+				case <-cancelableCtx.Done():
+					return
+				default:
+				}
+
+				data := tokenStateCheckResult[i].tokenIDTokenStateData
+
+				var tokenIDTokenStateHash string
+				var err error
+
+				// Retry block for Add
+				err = retry(func() error {
+					var retryErr error
+					tokenIDTokenStateHash, retryErr = c.w.Add(
+						bytes.NewBuffer([]byte(data)),
+						did,
+						wallet.QuorumPinRole,
+					)
+					return retryErr
+				})
+				if err != nil {
+					c.log.Error("Failed to add token state after retries", "index", i, "err", err)
+					recordFirstError(&firstErr, err, &errOnce)
+					return
+				}
+
+				// Save the hash safely
+				mu.Lock()
+				ids = append(ids, tokenIDTokenStateHash)
+				mu.Unlock()
+
+				// Retry block for Pin
+				err = retry(func() error {
+					_, retryErr := c.w.Pin(
+						tokenIDTokenStateHash,
+						wallet.QuorumPinRole,
+						did,
+						transactionId,
+						sender,
+						receiver,
+						tokenValue,
+					)
+					return retryErr
+				})
+				if err != nil {
+					c.log.Error("Failed to pin token state after retries", "index", i, "err", err)
+					recordFirstError(&firstErr, err)
+
+					// Optionally unpin already pinned
+					if unpinErr := c.unPinTokenState(ids, did); unpinErr != nil {
+						c.log.Warn("Failed to unpin token states after pin failure", "err", unpinErr)
+					}
+					return
+				}
+
+				newCount := atomic.AddInt32(&completed, 1)
+				currentPct := int32(math.Floor(float64(newCount*100) / float64(total)))
+				if currentPct%10 == 0 && atomic.LoadInt32(&lastLoggedPct) < currentPct {
+					if atomic.CompareAndSwapInt32(&lastLoggedPct, lastLoggedPct, currentPct) {
+						c.log.Debug(fmt.Sprintf("Pinning progress: %d%% (%d/%d)", currentPct, newCount, total))
+					}
+				}
+
+				c.log.Debug("Token state pinned", "hash", tokenIDTokenStateHash)
+			}
+		}()
+	}
+
+	// Enqueue tasks
+	for i := 0; i < total; i++ {
+		tasks <- i
+	}
+	close(tasks)
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return fmt.Errorf("pinning failed: %w", firstErr)
+	}
+
 	return nil
 }
 
-func (c *Core) unPinTokenState(ids []string, did string) {
-	for i := range ids {
-		c.w.UnPin(ids[i], wallet.QuorumRole, did)
+func (c *Core) unPinTokenState(ids []string, did string) error {
+	for _, id := range ids {
+		_, err := c.w.UnPin(id, wallet.QuorumRole, did)
+		if err != nil {
+			c.log.Warn("Error unpinning token state", "id", id, "err", err)
+			return err
+		}
 	}
+	return nil
 }
