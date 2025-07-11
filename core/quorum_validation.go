@@ -564,8 +564,7 @@ func (c *Core) getUnpledgeId(wt string, tokenType int) string {
  * Function to check whether the TokenState is pinned or not
  * Input tokenId, index, resultArray, waitgroup,quorumList
  */
-func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []TokenStateCheckResult, wg *sync.WaitGroup, quorumList []string, tokenType int) {
-	defer wg.Done()
+func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []TokenStateCheckResult, quorumList []string, tokenType int) {
 	var result TokenStateCheckResult
 	result.Token = tokenId
 

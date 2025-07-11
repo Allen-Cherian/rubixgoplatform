@@ -223,10 +223,32 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
+	// The caller function where you spawn goroutines (simplified snippet)
+	var completed int32
+	var lastLoggedPercent int32
+	total := len(ti) // assuming ti is your token slice
+
 	for i := range ti {
 		wg.Add(1)
-		go c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, &wg, cr.QuorumList, ti[i].TokenType)
+		go func(i int) {
+			defer wg.Done()
+
+			// Call without wg parameter, removed from checkTokenState signature
+			c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, cr.QuorumList, ti[i].TokenType)
+
+			// Update progress counters
+			newCount := atomic.AddInt32(&completed, 1)
+			currentPercent := int32(math.Floor(float64(newCount*100) / float64(total)))
+
+			// Only log if it's a new 10% milestone
+			if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
+				if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
+					c.log.Debug(fmt.Sprintf("Token state check progress: %d%% (%d/%d completed)", currentPercent, newCount, total))
+				}
+			}
+		}(i)
 	}
+
 	wg.Wait()
 
 	for i := range tokenStateCheckResult {
@@ -440,9 +462,10 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 		for i, ti := range commitedTokenInfo {
 			t := ti.Token
 			wg.Add(1)
-			go c.checkTokenState(t, did, i, tokenStateCheckResult, &wg, consensusRequest.QuorumList, ti.TokenType)
+			go c.checkTokenState(t, did, i, tokenStateCheckResult, consensusRequest.QuorumList, ti.TokenType)
 		}
 		wg.Wait()
+
 	} else {
 		//sync the smartcontract tokenchain
 		address := consensusRequest.ExecuterPeerID + "." + consensusContract.GetExecutorDID()
@@ -597,7 +620,7 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		for i, ti := range commitedTokenInfo {
 			t := ti.Token
 			wg.Add(1)
-			go c.checkTokenState(t, did, i, tokenStateCheckResult, &wg, consensusRequest.QuorumList, ti.TokenType)
+			go c.checkTokenState(t, did, i, tokenStateCheckResult, consensusRequest.QuorumList, ti.TokenType)
 		}
 		wg.Wait()
 	} else {
@@ -755,7 +778,7 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		go func(i int) {
 			defer wg.Done()
 
-			c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, &wg, cr.QuorumList, ti[i].TokenType)
+			c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, cr.QuorumList, ti[i].TokenType)
 
 			newCount := atomic.AddInt32(&completed, 1)
 			currentPercent := int32(math.Floor(float64(newCount*100) / float64(total)))
@@ -1051,10 +1074,15 @@ func (c *Core) updateReceiverToken(
 	}
 
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
+	wg = sync.WaitGroup{}
 	for i, ti := range tokenInfo {
 		t := ti.Token
 		wg.Add(1)
-		go c.checkTokenState(t, receiverDID, i, tokenStateCheckResult, &wg, quorumList, ti.TokenType)
+		go func(t string, i int, tokenType int) {
+			defer wg.Done()
+			// NOTE: Removed wg param from checkTokenState to avoid WaitGroup panic
+			c.checkTokenState(t, receiverDID, i, tokenStateCheckResult, quorumList, tokenType)
+		}(t, i, ti.TokenType)
 	}
 	wg.Wait()
 
@@ -1270,10 +1298,15 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 	}
 
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
+	wg = sync.WaitGroup{}
 	for i, ti := range tokenInfo {
 		t := ti.Token
 		wg.Add(1)
-		go c.checkTokenState(t, receiverDID, i, tokenStateCheckResult, &wg, quorumList, ti.TokenType)
+		go func(t string, i int, tokenType int) {
+			defer wg.Done()
+			// NOTE: Removed wg param from checkTokenState to avoid WaitGroup panic
+			c.checkTokenState(t, receiverDID, i, tokenStateCheckResult, quorumList, tokenType)
+		}(t, i, ti.TokenType)
 	}
 	wg.Wait()
 	for i := range tokenStateCheckResult {
