@@ -740,7 +740,7 @@ func (c *Core) pinTokenState(
 				})
 				if err != nil {
 					c.log.Error("Failed to pin token state after retries", "index", i, "err", err)
-					recordFirstError(&firstErr, err)
+					recordFirstError(&firstErr, err, &errOnce)
 
 					// Optionally unpin already pinned
 					if unpinErr := c.unPinTokenState(ids, did); unpinErr != nil {
