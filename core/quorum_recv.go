@@ -811,7 +811,9 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 
 	// === Parallel Pin Check ===
 	// This section remains similar to your original, but using pinWG
-	pinBucketSize := 3 // Tunable bucket size for pin checks
+
+	// UPDATE: Token Bucket size update here
+	pinBucketSize := 20 // Tunable bucket size for pin checks
 	pinConcurrency := runtime.NumCPU()
 	pinTokenBuckets := c.createTokenBuckets(ti, pinBucketSize)
 	var pinWG sync.WaitGroup // Dedicated WaitGroup for Pin Checks
@@ -882,7 +884,9 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 
 	// === Token State Check (Parallel) ===
 	// This section is now distinct and uses its own tokenStateWG
-	tokenStateBucketSize := 3 // Tunable bucket size for token state checks
+
+	// UPDATE: Token Bucket size update here
+	tokenStateBucketSize := 20 // Tunable bucket size for token state checks
 	tokenStateConcurrency := runtime.NumCPU()
 	tokenStateTokenBuckets := c.createTokenBuckets(ti, tokenStateBucketSize)
 	var tokenStateWG sync.WaitGroup                                                         // Dedicated WaitGroup for Token State Checks

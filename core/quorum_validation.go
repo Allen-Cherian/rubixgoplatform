@@ -508,7 +508,8 @@ func (c *Core) validateTokenOwnershipInBatch(cr *ConensusRequest, sc *contract.C
 	defer p.Close()
 
 	var syncIssueTokenArray []string
-	bucketSize := 3
+	// UPDATE: Token Bucket size update here
+	bucketSize := 20
 	tokenBuckets := c.createTokenBuckets(ti, bucketSize)
 
 	for _, bucket := range tokenBuckets {
