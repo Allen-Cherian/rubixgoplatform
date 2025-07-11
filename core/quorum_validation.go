@@ -7,7 +7,6 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -225,12 +224,96 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 	}
 	return tt, nil
 }
+func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, quorumDID string, ti contract.TokenInfo, p *ipfsport.Peer, address, receiverAddress string) (error, bool) {
+	if ids, err := c.GetDHTddrs(ti.Token); err != nil || len(ids) == 0 {
+		return nil, false // skip token if no DHT entries found
+	}
+
+	if err := c.syncTokenChainFrom(p, ti.BlockID, ti.Token, ti.TokenType); err != nil {
+		if strings.Contains(err.Error(), "syncer block height discrepency") {
+			// logic for handling block height discrepancy if needed
+			return nil, true // mark this token as having a sync issue
+		}
+		return err, true
+	}
+
+	genesisBlock := c.w.GetGenesisTokenBlock(ti.Token, ti.TokenType)
+	if genesisBlock == nil {
+		return fmt.Errorf("failed to get first token chain block %v", ti.Token), false
+	}
+
+	if c.TokenType(PartString) == ti.TokenType {
+		parentToken, _, err := genesisBlock.GetParentDetials(ti.Token)
+		if err != nil {
+			return err, false
+		}
+		parentTokenType, err := c.syncParentToken(p, parentToken)
+		if err != nil || parentTokenType == -1 {
+			return err, false
+		}
+		_, err = c.w.Pin(parentToken, wallet.ParentTokenPinByQuorumRole, quorumDID, cr.TransactionID, address, receiverAddress, ti.TokenValue)
+		if err != nil {
+			return err, false
+		}
+	}
+
+	if ti.TokenType == token.RBTTokenType {
+		tl, tn, err := genesisBlock.GetTokenDetials(ti.Token)
+		if err != nil {
+			return err, false
+		}
+		tid, err := c.ipfs.Add(bytes.NewBufferString(token.GetTokenString(tl, tn)), ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		if err != nil {
+			return err, false
+		}
+		if tid != ti.Token {
+			return fmt.Errorf("Invalid token hash for %s", ti.Token), false
+		}
+	}
+
+	b := c.w.GetLatestTokenBlock(ti.Token, ti.TokenType)
+	if b == nil {
+		return fmt.Errorf("Invalid token chain block for %s", ti.Token), false
+	}
+
+	if b.GetPinningNodeDID() != "" && b.GetOwner() != sc.GetSenderDID() {
+		return fmt.Errorf("invalid token owner: token pinned as service, token %s", ti.Token), false
+	}
+
+	valid, err := c.validateSigner(b, quorumDID, p)
+	if !valid || err != nil {
+		return fmt.Errorf("failed to validate token signer for %s", ti.Token), false
+	}
+
+	tokenInfo, err := c.w.ReadToken(ti.Token)
+	if err != nil || tokenInfo.TokenID == "" {
+		tokenInfo = &wallet.Token{
+			TokenID:       ti.Token,
+			TokenValue:    ti.TokenValue,
+			ParentTokenID: "",
+			DID:           ti.OwnerDID,
+		}
+		err = c.w.CreateToken(tokenInfo)
+		if err != nil {
+			return err, false
+		}
+	}
+
+	tokenInfo.DID = sc.GetSenderDID()
+	tokenInfo.TokenStatus = wallet.QuorumPledgedForThisToken
+	tokenInfo.TransactionID = b.GetTid()
+	tokenInfo.SyncStatus = wallet.SyncIncomplete
+	if err = c.w.UpdateToken(tokenInfo); err != nil {
+		return err, false
+	}
+
+	return nil, false
+}
 
 func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract, quorumDID string) (bool, error, []string) {
-
 	var ti []contract.TokenInfo
-	var address string
-	var receiverAddress string
+	var address, receiverAddress string
+
 	if cr.Mode == SmartContractDeployMode || cr.Mode == NFTDeployMode {
 		ti = sc.GetCommitedTokensInfo()
 		address = cr.DeployerPeerID + "." + sc.GetDeployerDID()
@@ -239,271 +322,60 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		address = cr.SenderPeerID + "." + sc.GetSenderDID()
 		receiverAddress = cr.ReceiverPeerID + "." + sc.GetReceiverDID()
 	}
-	for i := range ti {
-		ids, err := c.GetDHTddrs(ti[i].Token)
-		if err != nil || len(ids) == 0 {
-			continue
-		}
-	}
+
 	p, err := c.getPeer(address)
 	if err != nil {
 		c.log.Error("Failed to get peer", "err", err)
 		return false, err, nil
 	}
 	defer p.Close()
-	tokensSyncInfo := make([]TokenSyncInfo, 0)
-	var syncIssueTokenArray []string
-	for i := range ti {
-		err := c.syncTokenChainFrom(p, ti[i].BlockID, ti[i].Token, ti[i].TokenType)
-		if err != nil {
-			if strings.Contains(err.Error(), "syncer block height discrepency") {
-				parts := strings.SplitN(err.Error(), "|", 2)   // split err into two parts: message & blockID
-				blockParts := strings.SplitN(parts[1], "-", 2) // split blockID into two parts: height & blockID
-				blockHeightStr := blockParts[0]
-				blockHeight, err := strconv.Atoi(blockHeightStr)
-				if err != nil {
-					return false, fmt.Errorf("invalid block height - block height discrepency: %v", err), nil
-				}
-				tknBlocks, _, err := c.w.GetAllTokenBlocks(ti[i].Token, ti[i].TokenType, "")
-				if err != nil {
-					c.log.Error("Failed to get all token blocks - block height discrepency", "err", err)
-					return false, fmt.Errorf("Failed to get all token blocks in block height discrepency"), nil
-				}
-				verificationBlk := block.InitBlock(tknBlocks[blockHeight], nil)
-				verificationBlkNum, err := verificationBlk.GetBlockNumber(ti[i].Token)
-				if err != nil {
-					c.log.Error("Failed to get block number - block height discrepency", "err", err)
-					return false, fmt.Errorf("Failed to get block number in block height discrepency"), nil
-				}
-				if verificationBlkNum != uint64(blockHeight) {
-					c.log.Error("Failed to verify block number - block height discrepency", "err", err)
-					return false, fmt.Errorf("Failed to verify block number in block height discrepency"), nil
-				}
-				latestBlk := c.w.GetLatestTokenBlock(ti[i].Token, ti[i].TokenType)
-				latestBlkRec := latestBlk.GetReceiverDID()
-				latestBlkSender := latestBlk.GetSenderDID()
-				if latestBlkRec != sc.GetReceiverDID() || latestBlkSender != sc.GetSenderDID() {
-					c.log.Error("Fto verify sender/receiver - block height exist", ti[i].Token, " | ", "err", err)
-					//return false, fmt.Errorf("Failed to verify sender/receiver in block height discrepency"), syncIssueTokenArray
-				}
-				err = c.w.RemoveTokenChainBlocklatest(ti[i].Token, ti[i].TokenType)
-				if err != nil {
-					c.log.Error("Failed to resolve sync issue", ti[i].Token, "err", err)
-					return false, fmt.Errorf("Failed to resolve sync issue : %v", ti[i].Token), nil
-				}
-			} else {
-				c.log.Error("Failed to sync token chain block", "err", err)
-				syncIssueTokenArray = append(syncIssueTokenArray, ti[i].Token)
-				continue
-			}
-		}
 
-		// blocksToSync := cr.TransTokenSyncInfo[ti[i].Token]
-		// genesisBlock := block.InitBlock(blocksToSync.GenesisBlock, nil)
-		// if genesisBlock == nil {
-		// 	c.log.Error("Failed to add genesis block, invalid block of token", ti[i].Token)
-		// 	return false, fmt.Errorf("Failed to add genesis block, invalid block of token : %v", ti[i].Token)
-		// }
-		// err := c.w.AddTokenBlock(ti[i].Token, genesisBlock)
-		// if err != nil {
-		// 	c.log.Error("Failed to add genesis block of token", ti[i].Token, "err", err)
-		// 	return false, err
-		// }
-
-		// if blocksToSync.LatestBlock != nil {
-		// 	latestBlock := block.InitBlock(blocksToSync.LatestBlock, nil)
-		// 	err := c.w.AddTokenBlock(ti[i].Token, latestBlock)
-		// 	if err != nil {
-		// 		c.log.Error("Failed to add last token chain block of token", ti[i].Token, "err", err)
-		// 		return false, err
-		// 	}
-		// }
-
-		genesisBlock := c.w.GetGenesisTokenBlock(ti[i].Token, ti[i].TokenType)
-		if genesisBlock == nil {
-			// p.Close()
-			c.log.Error("Failed to get first token chain block")
-			return false, fmt.Errorf("failed to get first token chain block %v", ti[i].Token), nil
-		}
-		var parentToken string
-		if c.TokenType(PartString) == ti[i].TokenType {
-			parentToken, _, err := genesisBlock.GetParentDetials(ti[i].Token)
-			if err != nil {
-				// p.Close()
-				c.log.Error("failed to fetch parent token detials", "err", err, "token", ti[i].Token)
-				return false, err, nil
-			}
-			parentTokenType, err := c.syncParentToken(p, parentToken)
-			if err != nil {
-				// p.Close()
-				c.log.Error("failed to sync parent token chain", "token", parentToken)
-				return false, err, nil
-			}
-			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: parentToken, TokenType: parentTokenType})
-
-			// // add parent blocks
-			// parentGenesisBlock := block.InitBlock(blocksToSync.ParentGenesisBlock, nil)
-			// if parentGenesisBlock == nil {
-			// 	c.log.Error("Failed to add genesis block, invalid block of parent token", pt, "token", ti[i].Token)
-			// 	return false, fmt.Errorf("failed to add parent genesis block, invalid parent genesis block of token : %v", ti[i].Token)
-			// }
-			// err = c.w.AddTokenBlock(pt, parentGenesisBlock)
-			// if err != nil {
-			// 	c.log.Error("Failed to add parent's genesis block of token", ti[i].Token, "err", err)
-			// 	return false, err
-			// }
-
-			// parentLatestBlock := block.InitBlock(blocksToSync.ParentLatestBlock, nil)
-			// err = c.w.AddTokenBlock(pt, parentLatestBlock)
-			// if err != nil {
-			// 	c.log.Error("Failed to add parent's latest token chain block of token", ti[i].Token, "err", err)
-			// 	return false, err
-			// }
-			_, err = c.w.Pin(parentToken, wallet.ParentTokenPinByQuorumRole, quorumDID, cr.TransactionID, address, receiverAddress, ti[i].TokenValue)
-			if err != nil {
-				// p.Close()
-				c.log.Error("Failed to Pin parent token in Quorum", "err", err)
-				return false, err, nil
-			}
-		}
-
-		// Check the token validation
-		if ti[i].TokenType == token.RBTTokenType {
-			tl, tn, err := genesisBlock.GetTokenDetials(ti[i].Token)
-			if err != nil {
-				// p.Close()
-				c.log.Error("Failed to get token detials", "err", err)
-				return false, err, nil
-			}
-			ct := token.GetTokenString(tl, tn)
-			tb := bytes.NewBuffer([]byte(ct))
-			tid, err := c.ipfs.Add(tb, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
-			if err != nil {
-				// p.Close()
-				c.log.Error("Failed to validate, failed to get token hash", "err", err)
-				return false, err, nil
-			}
-			if tid != ti[i].Token {
-				// p.Close()
-				c.log.Error("Invalid token", "token", ti[i].Token, "exp_token", tid, "tl", tl, "tn", tn)
-				return false, fmt.Errorf("Invalid token", "token", ti[i].Token, "exp_token", tid, "tl", tl, "tn", tn), nil
-			}
-		}
-		b := c.w.GetLatestTokenBlock(ti[i].Token, ti[i].TokenType)
-		if b == nil {
-			// p.Close()
-			c.log.Error("Invalid token chain block")
-			return false, fmt.Errorf("Invalid token chain block for ", ti[i].Token), nil
-		}
-		c.log.Info("Validating token ownership", "token", ti[i].Token, "owner", b.GetOwner(), "sender", sc.GetSenderDID())
-		pinningNodeDID := b.GetPinningNodeDID()
-		ownerDID := b.GetOwner()
-		senderDID := sc.GetSenderDID()
-
-		if pinningNodeDID != "" {
-			c.log.Info("The token is Pinned as a service on Node ", pinningNodeDID)
-			if ownerDID != senderDID {
-				// p.Close()
-				c.log.Error("Invalid token owner: The token is Pinned as a service", "owner", ownerDID, "The node which is trying to transfer", senderDID)
-				return false, fmt.Errorf("invalid token owner: The token is Pinned as a service"), nil
-			}
-		}
-		signatureValidation, err := c.validateSigner(b, quorumDID, p)
-		if !signatureValidation || err != nil {
-			// p.Close()
-			c.log.Error("Failed to validate token ownership ", "token ID:", ti[i].Token)
-			return false, err, nil
-		}
-
-		// add trans tokens to TokensTable with token status = 17
-		// Check if token already exists
-		tokenInfo, err := c.w.ReadToken(ti[i].Token)
-		if err != nil || tokenInfo.TokenID == "" {
-			// // Token doesn't exist, proceed to handle it
-			// dir := util.GetRandString()
-			// if err := util.CreateDir(dir); err != nil {
-			// 	c.log.Error("Failed to create directory", "err", err)
-			// 	return false, err
-			// }
-			// defer os.RemoveAll(dir)
-
-			// // Get the token
-			// if err := w.Get(tokenInfo.Token, did, OwnerRole, dir); err != nil {
-			// 	w.log.Error("Failed to get token", "err", err)
-			// 	return nil, err
-			// }
-
-			// Create new token entry
-			tokenInfo = &wallet.Token{
-				TokenID:       ti[i].Token,
-				TokenValue:    ti[i].TokenValue,
-				ParentTokenID: parentToken,
-				DID:           ti[i].OwnerDID,
-			}
-
-			err = c.w.CreateToken(tokenInfo)
-			if err != nil {
-				c.log.Error("failed to write to db, token ", ti[i].Token, "err", err)
-				return false, err, nil
-			} else {
-				fmt.Println("Token created successfully", tokenInfo, "!!! TokenID", tokenInfo.TokenID)
-			}
-		}
-
-		// Update token status
-		tokenInfo.DID = senderDID
-		tokenInfo.TokenStatus = wallet.QuorumPledgedForThisToken
-		tokenInfo.TransactionID = b.GetTid()
-
-		// t.TokenStateHash = tokenHashMap[ti[i].Token]
-		tokenInfo.SyncStatus = wallet.SyncIncomplete
-
-		err = c.w.UpdateToken(tokenInfo)
-		if err != nil {
-			c.log.Error("failed to update to db, token ", ti[i].Token, "err", err)
-			return false, err, nil
-		}
-
-		// quorum fetches tokens to be synced
-		tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: ti[i].Token, TokenType: ti[i].TokenType})
+	type tokenValidationResult struct {
+		Token     string
+		Err       error
+		SyncIssue bool
 	}
 
-	if len(syncIssueTokenArray) > 0 {
-		return false, fmt.Errorf("failed to sync tokenchain Token: issueType: %v", TokenChainNotSynced), syncIssueTokenArray
+	numCores := runtime.NumCPU()
+	maxWorkers := numCores * 2
+	sem := make(chan struct{}, maxWorkers)
+	var wg sync.WaitGroup
+	results := make(chan tokenValidationResult, len(ti))
+
+	for _, tokenInfo := range ti {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(t contract.TokenInfo) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			err, syncIssue := c.validateSingleToken(cr, sc, quorumDID, t, p, address, receiverAddress)
+			results <- tokenValidationResult{
+				Token:     t.Token,
+				Err:       err,
+				SyncIssue: syncIssue,
+			}
+		}(tokenInfo)
 	}
 
-	// sync full token chain of all the tokens in syncing Queue
-	tokenSyncMap := make(map[string][]TokenSyncInfo)
-	tokenSyncMap[p.GetPeerID()+"."+p.GetPeerDID()] = tokensSyncInfo
-	go c.syncFullTokenChains(tokenSyncMap)
+	wg.Wait()
+	close(results)
 
-	// for i := range wt {
-	// 	c.log.Debug("Requesting Token status")
-	// 	ts := TokenPublish{
-	// 		Token: wt[i],
-	// 	}
-	// 	c.ps.Publish(TokenStatusTopic, &ts)
-	// 	c.log.Debug("Finding dht", "token", wt[i])
-	// 	ids, err := c.GetDHTddrs(wt[i])
-	// 	if err != nil || len(ids) == 0 {
-	// 		c.log.Error("Failed to find token owner", "err", err)
-	// 		crep.Message = "Failed to find token owner"
-	// 		return c.l.RenderJSON(req, &crep, http.StatusOK)
-	// 	}
-	// 	if len(ids) > 1 {
-	// 		// ::TODO:: to more check to findout right pwner
-	// 		c.log.Error("Mutiple owner found for the token", "token", wt, "owners", ids)
-	// 		crep.Message = "Mutiple owner found for the token"
-	// 		return c.l.RenderJSON(req, &crep, http.StatusOK)
-	// 	} else {
-	// 		//:TODO:: get peer from the table
-	// 		if cr.SenderPeerID != ids[0] {
-	// 			c.log.Error("Token peer id mismatched", "expPeerdID", cr.SenderPeerID, "peerID", ids[0])
-	// 			crep.Message = "Token peer id mismatched"
-	// 			return c.l.RenderJSON(req, &crep, http.StatusOK)
-	// 		}
-	// 	}
-	// }
+	var syncIssueTokens []string
+	for res := range results {
+		if res.Err != nil {
+			c.log.Error("Token validation failed", "token", res.Token, "err", res.Err)
+			if res.SyncIssue {
+				syncIssueTokens = append(syncIssueTokens, res.Token)
+			} else {
+				return false, res.Err, nil
+			}
+		}
+	}
+
+	if len(syncIssueTokens) > 0 {
+		return false, fmt.Errorf("failed to sync tokenchain Token: issueType: %v", TokenChainNotSynced), syncIssueTokens
+	}
+
 	return true, nil, nil
 }
 
