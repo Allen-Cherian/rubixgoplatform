@@ -63,8 +63,6 @@ const (
 	APISyncGenesisAndLatestBlock    string = "/api/sync-gennesis-n-lastest-block"
 	APIUpdateStatus                 string = "/api/update-status"
 	APIGetTokenStatus               string = "/api/get-token-status"
-	APINotifyUnusedQuorums          string = "/api/notify-unused-quorums"
-	APINotifyReceiverToRollback     string = "/api/notify-receiver"
 )
 
 const (
@@ -693,7 +691,3 @@ func (c *Core) InitialiseDID(didStr string, didType int) (did.DIDCrypto, error) 
 		return did.InitDIDBasic(didStr, c.didDir, nil), nil
 	}
 }
-
-// func (c *Core)ConvertContractToBlock(contract *contract.ContractType) *block.Block {
-
-// }
