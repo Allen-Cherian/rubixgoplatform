@@ -1808,7 +1808,7 @@ func (c *Core) tokenArbitration(req *ensweb.Request) *ensweb.Result {
 		}
 		str := token.GetTokenString(tl, tn)
 		tbr := bytes.NewBuffer([]byte(str))
-		thash, err := c.ipfs.Add(tbr, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		thash, err := IpfsAddWithBackoff(c.ipfs, tbr, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		if err != nil {
 			c.log.Error("Failed to do token abitration, failed to get ipfs hash", "err", err)
 			srep.Message = "Failed to do token abitration, failed to get ipfs hash"

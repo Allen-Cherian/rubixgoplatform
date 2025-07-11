@@ -262,7 +262,7 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 		if err != nil {
 			return err, false
 		}
-		tid, err := c.ipfs.Add(bytes.NewBufferString(token.GetTokenString(tl, tn)), ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		tid, err := IpfsAddWithBackoff(c.ipfs, bytes.NewBufferString(token.GetTokenString(tl, tn)), ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		if err != nil {
 			return err, false
 		}
@@ -471,7 +471,7 @@ func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []Tok
 	tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
 
 	//add to ipfs get only the hash of the token+tokenstate
-	tokenIDTokenStateHash, err := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+	tokenIDTokenStateHash, err := IpfsAddWithBackoff(c.ipfs, tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 	result.tokenIDTokenStateHash = tokenIDTokenStateHash
 	if err != nil {
 		c.log.Error("Error adding data to ipfs", err)

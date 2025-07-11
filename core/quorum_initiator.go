@@ -650,7 +650,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			prevtokenIDTokenStateBuffer := bytes.NewBuffer([]byte(prevtokenIDTokenStateData))
 
 			//add to ipfs get only the hash of the token+tokenstate. This is the hash just before transferring i.e. the exhausted token state hash, and updating in Sender side
-			prevtokenIDTokenStateHash, errIpfsAdd := c.ipfs.Add(prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			prevtokenIDTokenStateHash, errIpfsAdd := IpfsAddWithBackoff(c.ipfs, prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			if errIpfsAdd != nil {
 				return nil, nil, nil, fmt.Errorf("unable to get previous token state hash for token: %v, err: %v", tokeninfo.Token, errIpfsAdd)
 			}
@@ -856,7 +856,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			prevtokenIDTokenStateBuffer := bytes.NewBuffer([]byte(prevtokenIDTokenStateData))
 
 			//add to ipfs get only the hash of the token+tokenstate. This is the hash just before transferring i.e. the exhausted token state hash, and updating in Sender side
-			prevtokenIDTokenStateHash, errIpfsAdd := c.ipfs.Add(prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			prevtokenIDTokenStateHash, errIpfsAdd := IpfsAddWithBackoff(c.ipfs, prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			if errIpfsAdd != nil {
 				return nil, nil, nil, fmt.Errorf("unable to get previous token state hash for token: %v, err: %v", tokeninfo.Token, errIpfsAdd)
 			}
@@ -1055,7 +1055,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			prevtokenIDTokenStateBuffer := bytes.NewBuffer([]byte(prevtokenIDTokenStateData))
 
 			//add to ipfs get only the hash of the token+tokenstate. This is the hash just before transferring i.e. the exhausted token state hash, and updating in Sender side
-			prevtokenIDTokenStateHash, errIpfsAdd := c.ipfs.Add(prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			prevtokenIDTokenStateHash, errIpfsAdd := IpfsAddWithBackoff(c.ipfs, prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			if errIpfsAdd != nil {
 				return nil, nil, nil, fmt.Errorf("unable to get previous token state hash for token: %v, err: %v", tokeninfo.Token, errIpfsAdd)
 			}
@@ -1195,7 +1195,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			prevtokenIDTokenStateBuffer := bytes.NewBuffer([]byte(prevtokenIDTokenStateData))
 
 			//add to ipfs get only the hash of the token+tokenstate. This is the hash just before transferring i.e. the exhausted token state hash, and updating in Sender side
-			prevtokenIDTokenStateHash, errIpfsAdd := c.ipfs.Add(prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			prevtokenIDTokenStateHash, errIpfsAdd := IpfsAddWithBackoff(c.ipfs, prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			if errIpfsAdd != nil {
 				return nil, nil, nil, fmt.Errorf("unable to get previous token state hash for token: %v, err: %v", tokeninfo.Token, errIpfsAdd)
 			}
@@ -1310,7 +1310,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		//Latest Smart contract token hash after being deployed.
 		scTokenStateData := cr.SmartContractToken + newBlockId
 		tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(scTokenStateData))
-		newtokenIDTokenStateHash, err := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		newtokenIDTokenStateHash, err := IpfsAddWithBackoff(c.ipfs, tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		c.log.Info(fmt.Sprintf("New smart contract token hash after being deployed : %s", newtokenIDTokenStateHash))
 
 		//trigger pledge finality to the quorum and adding the details in token hash table
@@ -1383,7 +1383,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		//Latest Smart contract token hash after being executed.
 		scTokenStateData := cr.SmartContractToken + newBlockId
 		tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(scTokenStateData))
-		newtokenIDTokenStateHash, err := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		newtokenIDTokenStateHash, err := IpfsAddWithBackoff(c.ipfs, tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		c.log.Info(fmt.Sprintf("New smart contract token hash after being executed : %s", newtokenIDTokenStateHash))
 
 		//trigger pledge finality to the quorum and adding the details in token hash table
@@ -1415,7 +1415,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		scTokenStateDataOld := cr.SmartContractToken + prevBlockId
 		scTokenStateDataOldBuffer := bytes.NewBuffer([]byte(scTokenStateDataOld))
-		oldsctokenIDTokenStateHash, errIpfsAdd := c.ipfs.Add(scTokenStateDataOldBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		oldsctokenIDTokenStateHash, errIpfsAdd := IpfsAddWithBackoff(c.ipfs, scTokenStateDataOldBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		if errIpfsAdd != nil {
 			return nil, nil, nil, fmt.Errorf("unable to get previous token state hash for token: %v, err: %v", cr.SmartContractToken, errIpfsAdd)
 		}
@@ -1475,7 +1475,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		//Latest NFT token hash after being deployed.
 		nftStateData := cr.NFT + newBlockId
 		nftIDTokenStateBuffer := bytes.NewBuffer([]byte(nftStateData))
-		newnftIDTokenStateHash, err := c.ipfs.Add(nftIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		newnftIDTokenStateHash, err := IpfsAddWithBackoff(c.ipfs, nftIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		c.log.Info(fmt.Sprintf("New nft state hash after being deployed : %s", newnftIDTokenStateHash))
 
 		//trigger pledge finality to the quorum and adding the details in token hash table
@@ -1526,7 +1526,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		//Latest Smart contract token hash after being executed.
 		nftStateData := cr.NFT + newBlockId
 		tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(nftStateData))
-		newtokenIDTokenStateHash, err := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		newtokenIDTokenStateHash, err := IpfsAddWithBackoff(c.ipfs, tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		c.log.Info(fmt.Sprintf("New NFT state hash after being executed : %s", newtokenIDTokenStateHash))
 
 		//trigger pledge finality to the quorum and adding the details in token hash table
@@ -1539,7 +1539,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		prevBlockId, _ := nb.GetPrevBlockID((cr.NFT))
 		nftTokenStateDataOld := cr.NFT + prevBlockId
 		nftTokenStateDataOldBuffer := bytes.NewBuffer([]byte(nftTokenStateDataOld))
-		oldnfttokenIDTokenStateHash, errIpfsAdd := c.ipfs.Add(nftTokenStateDataOldBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		oldnfttokenIDTokenStateHash, errIpfsAdd := IpfsAddWithBackoff(c.ipfs, nftTokenStateDataOldBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		if errIpfsAdd != nil {
 			return nil, nil, nil, fmt.Errorf("unable to get previous token state hash for token: %v, err: %v", nftTokenStateDataOldBuffer, errIpfsAdd)
 		}
