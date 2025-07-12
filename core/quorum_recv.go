@@ -814,7 +814,7 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
 	c.log.Debug("Pinning token state for FT Consensus")
-	ctx, cancel := context.WithTimeout(req.Context(), 30*time.Second) // optional timeout
+	ctx, cancel := context.WithTimeout(req.Context(), 3*time.Minute) // optional timeout
 	defer cancel()
 
 	err1 := c.pinTokenState(ctx, tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
