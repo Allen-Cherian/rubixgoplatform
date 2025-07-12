@@ -498,6 +498,24 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			return nil, nil, nil, err
 		}
 		defer rp.Close()
+
+		var txnTokenHashes []string = make([]string, 0)
+		for _, info := range ti {
+			t := info.Token
+			blockId, _ := nb.GetBlockID(t)
+			tokenIDTokenStateData := t + blockId
+			tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
+			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
+		}
+		//calling quorum pledge finality before calling the APISendReceiver Token
+		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
+		if pledgeFinalityError != nil {
+			c.log.Error("Pledge finlaity not achieved", "err", err)
+			return nil, nil, nil, pledgeFinalityError
+		}
+
 		sr := SendTokenRequest{
 			Address:            cr.SenderPeerID + "." + sc.GetSenderDID(),
 			TokenInfo:          ti,
@@ -549,6 +567,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			//add quorum details to the data to be shared
 			sr.QuorumInfo = append(sr.QuorumInfo, qrmInfo)
 		}
+
 		var br model.BasicResponse
 		err = rp.SendJSONRequest("POST", APISendReceiverToken, nil, &sr, &br, true)
 		if err != nil {
@@ -594,28 +613,29 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			return nil, nil, nil, fmt.Errorf("unable to send tokens to receiver, " + br.Message)
 		}
 
+		//TODO:Remove this below commented out code, once after testing the quorum pledge finality location change.
 		// br.Result will contain the new token state after sending tokens to receiver as a response to APISendReceiverToken
-		newtokenhashresult, ok := br.Result.([]interface{})
-		if !ok {
-			c.log.Error("Type assertion to string failed")
-			return nil, nil, nil, fmt.Errorf("Type assertion to string failed")
-		}
-		var newtokenhashes []string
-		for i, newTokenHash := range newtokenhashresult {
-			statehash, ok := newTokenHash.(string)
-			if !ok {
-				c.log.Error("Type assertion to string failed at index", i)
-				return nil, nil, nil, fmt.Errorf("Type assertion to string failed at index", i)
-			}
-			newtokenhashes = append(newtokenhashes, statehash)
-		}
+		// newtokenhashresult, ok := br.Result.([]interface{})
+		// if !ok {
+		// 	c.log.Error("Type assertion to string failed")
+		// 	return nil, nil, nil, fmt.Errorf("Type assertion to string failed")
+		// }
+		// var newtokenhashes []string
+		// for i, newTokenHash := range newtokenhashresult {
+		// 	statehash, ok := newTokenHash.(string)
+		// 	if !ok {
+		// 		c.log.Error("Type assertion to string failed at index", i)
+		// 		return nil, nil, nil, fmt.Errorf("Type assertion to string failed at index", i)
+		// 	}
+		// 	newtokenhashes = append(newtokenhashes, statehash)
+		// }
 
-		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
-		if pledgeFinalityError != nil {
-			c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
-			return nil, nil, nil, pledgeFinalityError
-		}
+		// //trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		// pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newtokenhashes, tid)
+		// if pledgeFinalityError != nil {
+		// 	c.log.Error("Pledge finlaity not achieved", "err", pledgeFinalityError)
+		// 	return nil, nil, nil, pledgeFinalityError
+		// }
 
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
 		for _, tokeninfo := range ti {
@@ -721,6 +741,22 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		defer rp.Close()
 
+		var txnTokenHashes []string = make([]string, 0)
+		for _, info := range ti {
+			t := info.Token
+			blockId, _ := nb.GetBlockID(t)
+			tokenIDTokenStateData := t + blockId
+			tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
+			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
+		}
+		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
+		if pledgeFinalityError != nil {
+			c.log.Error("Pledge finlaity not achieved", "err", err)
+			return nil, nil, nil, pledgeFinalityError
+		}
+
 		// Prepare the send request with the necessary information
 		sr := SendFTRequest{
 			Address:          cr.SenderPeerID + "." + sc.GetSenderDID(),
@@ -811,29 +847,31 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			return nil, nil, nil, fmt.Errorf("unable to send FT tokens to receiver, " + br.Message)
 		}
 
-		// Extract new token state hashes from response
-		newTokenHashResult, ok := br.Result.([]interface{})
-		if !ok {
-			c.log.Error("Failed to assert type for new token hashes")
-			return nil, nil, nil, fmt.Errorf("Type assertion to string failed")
-		}
+		//TODO: remove the following commented out code once after testing, calling the quorum pledge finality before APISendFT token
+		// // Extract new token state hashes from response
+		// newTokenHashResult, ok := br.Result.([]interface{})
+		// if !ok {
+		// 	c.log.Error("Failed to assert type for new token hashes")
+		// 	return nil, nil, nil, fmt.Errorf("Type assertion to string failed")
+		// }
 
-		var newTokenHashes []string
-		for i, newTokenHash := range newTokenHashResult {
-			stateHash, ok := newTokenHash.(string)
-			if !ok {
-				c.log.Error("Type assertion to string failed at index", i)
-				return nil, nil, nil, fmt.Errorf("Type assertion to string failed at index %d", i)
-			}
-			newTokenHashes = append(newTokenHashes, stateHash)
-		}
+		// var newTokenHashes []string
+		// for i, newTokenHash := range newTokenHashResult {
+		// 	stateHash, ok := newTokenHash.(string)
+		// 	if !ok {
+		// 		c.log.Error("Type assertion to string failed at index", i)
+		// 		return nil, nil, nil, fmt.Errorf("Type assertion to string failed at index %d", i)
+		// 	}
+		// 	newTokenHashes = append(newTokenHashes, stateHash)
+		// }
 
-		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newTokenHashes, tid)
-		if pledgeFinalityError != nil {
-			c.log.Error("Pledge finlaity not achieved", "err", err)
-			return nil, nil, nil, pledgeFinalityError
-		}
+		// //trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		// pledgeFinalityError := c.quorumPledgeFinality(cr, nb, newTokenHashes, tid)
+		// if pledgeFinalityError != nil {
+		// 	c.log.Error("Pledge finlaity not achieved", "err", err)
+		// 	return nil, nil, nil, pledgeFinalityError
+		// }
+
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
