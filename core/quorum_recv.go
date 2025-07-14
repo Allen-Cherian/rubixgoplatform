@@ -1179,37 +1179,37 @@ func (c *Core) updateReceiverTokenHandle(req *ensweb.Request) *ensweb.Result {
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
 
-	// receiver fetches tokens to be synced
-	tokensSyncInfo := make([]TokenSyncInfo, 0)
-	for _, token := range sr.TokenInfo {
-		tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: token.Token, TokenType: token.TokenType})
-		if token.TokenType == c.TokenType(PartString) {
-			tokenInfo, err := c.w.ReadToken(token.Token)
-			if err != nil {
-				c.log.Error("failed to fetch parent token info, err ", err)
-				//TODO : handle the situation when not able to fetch parent tokenId to sync parent token chain
-				continue
-			}
-			// parentTokenId := tokenInfo.ParentTokenID
-			parentTokenInfo, err := c.w.ReadToken(tokenInfo.ParentTokenID)
-			if err != nil {
-				c.log.Error("failed to fetch parent token value, err ", err)
-				// update token sync status
-				c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID, wallet.SyncIncomplete)
-				continue
-			}
-			if parentTokenInfo.TokenValue != 1.0 {
-				tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(PartString)})
-			} else {
-				tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(RBTString)})
-			}
-		}
-	}
-	tokenSyncMap := make(map[string][]TokenSyncInfo)
-	tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
+	// // receiver fetches tokens to be synced
+	// tokensSyncInfo := make([]TokenSyncInfo, 0)
+	// for _, token := range sr.TokenInfo {
+	// 	tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: token.Token, TokenType: token.TokenType})
+	// 	if token.TokenType == c.TokenType(PartString) {
+	// 		tokenInfo, err := c.w.ReadToken(token.Token)
+	// 		if err != nil {
+	// 			c.log.Error("failed to fetch parent token info, err ", err)
+	// 			//TODO : handle the situation when not able to fetch parent tokenId to sync parent token chain
+	// 			continue
+	// 		}
+	// 		// parentTokenId := tokenInfo.ParentTokenID
+	// 		parentTokenInfo, err := c.w.ReadToken(tokenInfo.ParentTokenID)
+	// 		if err != nil {
+	// 			c.log.Error("failed to fetch parent token value, err ", err)
+	// 			// update token sync status
+	// 			c.w.UpdateTokenSyncStatus(tokenInfo.ParentTokenID, wallet.SyncIncomplete)
+	// 			continue
+	// 		}
+	// 		if parentTokenInfo.TokenValue != 1.0 {
+	// 			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(PartString)})
+	// 		} else {
+	// 			tokensSyncInfo = append(tokensSyncInfo, TokenSyncInfo{TokenID: tokenInfo.ParentTokenID, TokenType: c.TokenType(RBTString)})
+	// 		}
+	// 	}
+	// }
+	// tokenSyncMap := make(map[string][]TokenSyncInfo)
+	// tokenSyncMap[senderPeer.GetPeerID()+"."+senderPeer.GetPeerDID()] = tokensSyncInfo
 
 	// syncing starts in the background
-	go c.syncFullTokenChains(tokenSyncMap)
+	// go c.syncFullTokenChains(tokenSyncMap)
 
 	crep.Status = true
 	crep.Message = "Token received successfully"

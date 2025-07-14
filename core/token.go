@@ -520,88 +520,88 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		BlockID:   blkID,
 	}
 
-	if tokenType == c.TokenType(RBTString) || tokenType == c.TokenType(PartString) {
-		syncReq.BlockHeight = blkHeight
-		// sync only latest blcok of the token chain for the transaction
-		err = c.syncGenesisAndLatestBlockFrom(p, syncReq)
+	// if tokenType == c.TokenType(RBTString) || tokenType == c.TokenType(PartString) {
+	// 	syncReq.BlockHeight = blkHeight
+	// 	// sync only latest blcok of the token chain for the transaction
+	// 	err = c.syncGenesisAndLatestBlockFrom(p, syncReq)
+	// 	if err != nil {
+	// 		c.log.Error("failed to sync latest block, err ", err)
+	// 		return err
+	// 	}
+	// 	// update sync status to incomplete
+	// 	err = c.w.UpdateTokenSyncStatus(syncReq.Token, wallet.SyncIncomplete)
+	// 	if err != nil {
+	// 		if !strings.Contains(err.Error(), "no records found") {
+	// 			c.log.Error("failed to update token sync status as incomplete, token ", token)
+	// 		}
+	// 	}
+	// } else {
+	// in case of FTs, and NFTs
+	for {
+		var trep TCBSyncReply
+		err = p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
 		if err != nil {
-			c.log.Error("failed to sync latest block, err ", err)
+			c.log.Error("Failed to sync token chain block", "err", err)
 			return err
 		}
-		// update sync status to incomplete
-		err = c.w.UpdateTokenSyncStatus(syncReq.Token, wallet.SyncIncomplete)
-		if err != nil {
-			if !strings.Contains(err.Error(), "no records found") {
-				c.log.Error("failed to update token sync status as incomplete, token ", token)
-			}
+		if !trep.Status {
+			c.log.Error("Failed to sync token chain block", "msg", trep.Message)
+			return fmt.Errorf(trep.Message)
 		}
-	} else {
-		// in case of FTs, and NFTs
-		for {
-			var trep TCBSyncReply
-			err = p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
-			if err != nil {
-				c.log.Error("Failed to sync token chain block", "err", err)
-				return err
-			}
-			if !trep.Status {
-				c.log.Error("Failed to sync token chain block", "msg", trep.Message)
-				return fmt.Errorf(trep.Message)
-			}
-			if strings.Contains(trep.Message, "Sent all blocks") {
-				diffVar := int(blkHeight) - len(trep.TCBlock)
-				if diffVar > 1 {
-					// Quorum is ahead of sender by more than 1 block — not allowed
-					c.log.Error("Block height discrepancy too large")
-					return fmt.Errorf("sync failed: block height discrepancy too large (diff: %d)", diffVar)
-				} else {
-					// Get syncer latest token block hash
-					syncerLatestBlk := block.InitBlock(trep.TCBlock[len(trep.TCBlock)-1], nil)
-					syncerLatestBlkHash, err := syncerLatestBlk.GetHash()
-					if err != nil {
-						c.log.Error("Failed to get block hash of synced block", "err", err)
-						return err
-					}
-
-					// Get DID owner latest token block hash
-					didOwnerAllTknBlks, _, err := c.w.GetAllTokenBlocks(token, tokenType, "")
-					didOwnerBlock := block.InitBlock(didOwnerAllTknBlks[len(trep.TCBlock)-1], nil)
-					didOwnerLatestBlkHash, err := didOwnerBlock.GetHash()
-					if err != nil {
-						c.log.Error("Failed to get block hash of owner block", "err", err)
-						return err
-					}
-
-					// Compare both block hashes
-					if strings.Contains(syncerLatestBlkHash, didOwnerLatestBlkHash) {
-						syncerLatestBlkID, err := syncerLatestBlk.GetBlockID(token)
-						if err != nil {
-							c.log.Error("Failed to get block id of synced block", "err", err)
-							return err
-						}
-						return fmt.Errorf("syncer block height discrepency|%s", syncerLatestBlkID)
-					}
-				}
-			}
-			for _, bb := range trep.TCBlock {
-				blk := block.InitBlock(bb, nil)
-				if blk == nil {
-					c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
-					return fmt.Errorf("failed to add token chain block, invalid block, sync failed")
-				}
-				err = c.w.AddTokenBlock(token, blk)
+		if strings.Contains(trep.Message, "Sent all blocks") {
+			diffVar := int(blkHeight) - len(trep.TCBlock)
+			if diffVar > 1 {
+				// Quorum is ahead of sender by more than 1 block — not allowed
+				c.log.Error("Block height discrepancy too large")
+				return fmt.Errorf("sync failed: block height discrepancy too large (diff: %d)", diffVar)
+			} else {
+				// Get syncer latest token block hash
+				syncerLatestBlk := block.InitBlock(trep.TCBlock[len(trep.TCBlock)-1], nil)
+				syncerLatestBlkHash, err := syncerLatestBlk.GetHash()
 				if err != nil {
-					c.log.Error("Failed to add token chain block, syncing failed", "err", err)
+					c.log.Error("Failed to get block hash of synced block", "err", err)
 					return err
 				}
-			}
-			if trep.NextBlockID == "" {
-				break
-			}
-			syncReq.BlockID = trep.NextBlockID
 
+				// Get DID owner latest token block hash
+				didOwnerAllTknBlks, _, err := c.w.GetAllTokenBlocks(token, tokenType, "")
+				didOwnerBlock := block.InitBlock(didOwnerAllTknBlks[len(trep.TCBlock)-1], nil)
+				didOwnerLatestBlkHash, err := didOwnerBlock.GetHash()
+				if err != nil {
+					c.log.Error("Failed to get block hash of owner block", "err", err)
+					return err
+				}
+
+				// Compare both block hashes
+				if strings.Contains(syncerLatestBlkHash, didOwnerLatestBlkHash) {
+					syncerLatestBlkID, err := syncerLatestBlk.GetBlockID(token)
+					if err != nil {
+						c.log.Error("Failed to get block id of synced block", "err", err)
+						return err
+					}
+					return fmt.Errorf("syncer block height discrepency|%s", syncerLatestBlkID)
+				}
+			}
 		}
+		for _, bb := range trep.TCBlock {
+			blk := block.InitBlock(bb, nil)
+			if blk == nil {
+				c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
+				return fmt.Errorf("failed to add token chain block, invalid block, sync failed")
+			}
+			err = c.w.AddTokenBlock(token, blk)
+			if err != nil {
+				c.log.Error("Failed to add token chain block, syncing failed", "err", err)
+				return err
+			}
+		}
+		if trep.NextBlockID == "" {
+			break
+		}
+		syncReq.BlockID = trep.NextBlockID
+
 	}
+	// }
 	return nil
 }
 
