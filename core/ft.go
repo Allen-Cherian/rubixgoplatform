@@ -54,14 +54,14 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		return fmt.Errorf("DID crypto is not initialized, err: %v ", err)
 	}
 
-	var FT []wallet.FT
+	// var FT []wallet.FT
 
-	c.s.Read(wallet.FTStorage, &FT, "ft_name=? AND creator_did=?", FTName, did)
+	// c.s.Read(wallet.FTStorage, &FT, "ft_name=? AND creator_did=?", FTName, did)
 
-	if len(FT) != 0 {
-		c.log.Error("FT Name already exists")
-		return fmt.Errorf("FT Name already exists")
-	}
+	// if len(FT) != 0 {
+	// 	c.log.Error("FT Name already exists")
+	// 	return fmt.Errorf("FT Name already exists")
+	// }
 
 	// Validate input parameters
 
