@@ -1059,24 +1059,24 @@ func (c *Core) updateReceiverToken(
 		return nil, senderPeer, fmt.Errorf("unable to parse sender address: %v", senderAddress)
 	}
 
-	results := make([]MultiPinCheckRes, len(tokenInfo))
+	//results := make([]MultiPinCheckRes, len(tokenInfo))
 	var wg sync.WaitGroup
-	for i, ti := range tokenInfo {
+	/* for i, ti := range tokenInfo {
 		t := ti.Token
 		wg.Add(1)
 
 		go c.pinCheck(t, i, senderPeerId, receiverPeerId, results, &wg)
-	}
+	} */
 	wg.Wait()
 
-	for i := range results {
+	/* 	for i := range results {
 		if results[i].Error != nil {
 			return nil, senderPeer, fmt.Errorf("error while cheking Token multiple Pins for token %v, error : %v", results[i].Token, results[i].Error)
 		}
 		if results[i].Status {
 			return nil, senderPeer, fmt.Errorf("token %v has multiple owners: %v", results[i].Token, results[i].Owners)
 		}
-	}
+	} */
 
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
 	wg = sync.WaitGroup{}
@@ -1285,22 +1285,22 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 		return nil, nil, fmt.Errorf("Unable to parse sender address: %v", senderAddress)
 	}
 
-	results := make([]MultiPinCheckRes, len(tokenInfo))
+	//results := make([]MultiPinCheckRes, len(tokenInfo))
 	var wg sync.WaitGroup
-	for i, ti := range tokenInfo {
+	/* for i, ti := range tokenInfo {
 		t := ti.Token
 		wg.Add(1)
 		go c.pinCheck(t, i, senderPeerId, receiverPeerId, results, &wg)
-	}
+	} */
 	wg.Wait()
-	for i := range results {
+	/* for i := range results {
 		if results[i].Error != nil {
 			return nil, nil, fmt.Errorf("Error while checking Token multiple Pins for token %v, error : %v", results[i].Token, results[i].Error)
 		}
 		if results[i].Status {
 			return nil, nil, fmt.Errorf("Token %v has multiple owners: %v", results[i].Token, results[i].Owners)
 		}
-	}
+	} */
 
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
 	wg = sync.WaitGroup{}
