@@ -512,7 +512,7 @@ func (c *Core) NFTCallBack(peerID string, topic string, data []byte) {
 		return
 	}
 
-	err = c.syncTokenChainFrom(publisherPeer, "", nft, nftTokenType)
+	err, _ = c.syncTokenChainFrom(publisherPeer, "", nft, nftTokenType)
 	if err != nil {
 		c.log.Error("Failed to sync token chain block", "err", err)
 		return

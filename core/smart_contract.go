@@ -308,7 +308,7 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 			return basicResponse
 		}
 
-		errSync := c.syncTokenChainFrom(smartContractOriginPeer, "", fetchSmartContractRequest.SmartContractToken, c.TokenType("sc"))
+		errSync, _ := c.syncTokenChainFrom(smartContractOriginPeer, "", fetchSmartContractRequest.SmartContractToken, c.TokenType("sc"))
 		if errSync != nil {
 			basicResponse.Message = fmt.Sprintf("unable to sync token chain for contract: %v, err: %v", fetchSmartContractRequest.SmartContractToken, errSync)
 			return basicResponse
@@ -419,7 +419,7 @@ func (c *Core) ContractCallBack(peerID string, topic string, data []byte) {
 		c.log.Error("Failed to get peer", "err", err)
 		return
 	}
-	err = c.syncTokenChainFrom(p, "", smartContractToken, tokenType)
+	err, _ = c.syncTokenChainFrom(p, "", smartContractToken, tokenType)
 	if err != nil {
 		c.log.Error("Failed to sync token chain block", "err", err)
 		return

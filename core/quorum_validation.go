@@ -169,10 +169,10 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 	// 		lbID = ""
 	// 	}
 	// }
-	err = c.syncTokenChainFrom(p, lbID, pt, tt)
+	err, syncResponse := c.syncTokenChainFrom(p, lbID, pt, tt)
 	if err != nil {
-		c.log.Error("failed to sync token chain block", "err", err)
-		return -1, fmt.Errorf("failed to sync tokenchain Parent Token: %v, issueType: %v", pt, TokenChainNotSynced)
+		c.log.Error("failed to sync token chain block", "err", err, "syncResponse", syncResponse)
+		return -1, fmt.Errorf(" failed to sync tokenchain Parent Token: %v, issueType: %v", pt, TokenChainNotSynced)
 	}
 	ptb := c.w.GetLatestTokenBlock(pt, tt)
 	if ptb == nil {
@@ -230,13 +230,14 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 		return nil, false // skip token if no DHT entries found
 	}
 
-	if err := c.syncTokenChainFrom(p, ti.BlockID, ti.Token, ti.TokenType); err != nil {
+	err, syncResponse := c.syncTokenChainFrom(p, ti.BlockID, ti.Token, ti.TokenType)
+	if err != nil {
 		if strings.Contains(err.Error(), "syncer block height discrepency") {
-			c.log.Debug("Token has sync issue", "token", ti.Token, "err", err)
+			c.log.Debug("Token has sync issue", "token", ti.Token, "err", err, "syncResponse", syncResponse)
 			// logic for handling block height discrepancy if needed
 			return nil, true // mark this token as having a sync issue
 		}
-		c.log.Error("Failed to sync token chain for token", "token", ti.Token, "err", err)
+		c.log.Error("Failed to sync token chain for token", "token", ti.Token, "err", err, "syncResponse", syncResponse)
 		return err, true
 	}
 
@@ -393,8 +394,9 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 			defer func() { <-sem }()
 
 			// 1. Sync token chain before validation
-			err := c.syncTokenChainFrom(p, t.BlockID, t.Token, t.TokenType)
+			err, syncResp := c.syncTokenChainFrom(p, t.BlockID, t.Token, t.TokenType)
 			if err != nil {
+				c.log.Debug("syncResponse", syncResp)
 				if strings.Contains(err.Error(), "syncer block height discrepency") {
 					c.log.Info("Block height discrepancy detected during sync", "token", t.Token, "err", err)
 					parts := strings.SplitN(err.Error(), "|", 2)
@@ -429,8 +431,18 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 						c.log.Error("Failed to remove latest block during discrepancy resolution", "token", t.Token, "err", errRemove)
 					}
 					c.log.Info("Retrying syncTokenChainFrom after removing latest block", "token", t.Token)
-					errRetry := c.syncTokenChainFrom(p, t.BlockID, t.Token, t.TokenType)
+					errRetry, syncResp := c.syncTokenChainFrom(p, t.BlockID, t.Token, t.TokenType)
 					if errRetry != nil {
+						c.log.Error(
+							"Failed to sync token chain in token validation (retry)",
+							"token", t.Token,
+							"blockID", t.BlockID,
+							"tokenType", t.TokenType,
+							"peerID", p.GetPeerID(),
+							"peerDID", p.GetPeerDID(),
+							"syncResponse", syncResp,
+							"err", errRetry,
+						)
 						c.log.Error("Retry syncTokenChainFrom failed after discrepancy resolution", "token", t.Token, "err", errRetry)
 						// Commenting out marking as sync issue for further investigation
 						// results <- tokenValidationResult{Token: t.Token, Err: errRetry, SyncIssue: true}
@@ -511,24 +523,31 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	c.log.Debug("Grouping tokens by their latest blocks", "totalTokens", len(ti))
 
 	for _, tokenInfo := range ti {
+		// Sync the token chain for this token
+		c.log.Info("Syncing token chain before validation", "token", tokenInfo.Token, "blockID", tokenInfo.BlockID, "peerID", p.GetPeerID(), "peerDID", p.GetPeerDID())
+		err, syncResp := c.syncTokenChainFrom(p, tokenInfo.BlockID, tokenInfo.Token, tokenInfo.TokenType)
+		if err != nil {
+			c.log.Error(
+				"Failed to sync token chain in token validation",
+				"token", tokenInfo.Token,
+				"blockID", tokenInfo.BlockID,
+				"tokenType", tokenInfo.TokenType,
+				"peerID", p.GetPeerID(),
+				"peerDID", p.GetPeerDID(),
+				"syncResponse", syncResp,
+				"err", err,
+			)
+			return false, fmt.Errorf(
+				"[SYNC FAILURE] Failed to sync token chain for token %s (peer %s, did %s): %v | SyncResponse: %+v",
+				tokenInfo.Token, p.GetPeerID(), p.GetPeerDID(), err, syncResp,
+			), nil
+		}
+		c.log.Info("Syncing token chain completed for token", "token", tokenInfo.Token)
 		// Get the latest block for this token
 		latestBlock := c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
 		if latestBlock == nil {
-			c.log.Debug("DEBUG BLOCK LIST LOG REACHED (quorum/optimized)", "token", tokenInfo.Token)
-			blocks, _, _ := c.w.GetAllTokenBlocks(tokenInfo.Token, tokenInfo.TokenType, "")
-			blockIDs := make([]string, 0, len(blocks))
-			for _, blkBytes := range blocks {
-				blk := block.InitBlock(blkBytes, nil)
-				if blk != nil {
-					bid, err := blk.GetBlockID(tokenInfo.Token)
-					if err == nil {
-						blockIDs = append(blockIDs, bid)
-					}
-				}
-			}
-			c.log.Debug("Token chain block list for token", "token", tokenInfo.Token, "blockIDs", blockIDs)
-			c.log.Error("[validateTokenOwnershipOptimized] Invalid token chain block for token", "token", tokenInfo.Token)
-			return false, fmt.Errorf("[validateTokenOwnershipOptimized] invalid token chain block for %s", tokenInfo.Token), nil
+			c.log.Error("Failed to get latest token block", "token", tokenInfo.Token)
+			return false, fmt.Errorf("failed to get latest token block for token %s", tokenInfo.Token), nil
 		}
 
 		// Get block hash as the grouping key

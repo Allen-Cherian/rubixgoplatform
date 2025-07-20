@@ -120,7 +120,7 @@ func (c *Core) quorumDTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	}
 	defer p.Close()
 	for k := range dt {
-		err := c.syncTokenChainFrom(p, dt[k].BlockID, dt[k].Token, dt[k].TokenType)
+		err, _ := c.syncTokenChainFrom(p, dt[k].BlockID, dt[k].Token, dt[k].TokenType)
 		if err != nil {
 			c.log.Error("Failed to sync token chain block", "err", err)
 			crep.Message = "Failed to sync token chain block"
@@ -481,7 +481,7 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 		smartContractTokenInfo := consensusContract.GetTransTokenInfo()
 		for i, ti := range smartContractTokenInfo {
 			t := ti.Token
-			err = c.syncTokenChainFrom(peerConn, "", ti.Token, ti.TokenType)
+			err, _ = c.syncTokenChainFrom(peerConn, "", ti.Token, ti.TokenType)
 			if err != nil {
 				c.log.Error("Failed to sync smart contract token chain block fro execution validation", "err", err)
 				consensusReply.Message = "Failed to sync smart contract token chain block fro execution validation"
@@ -638,7 +638,7 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		nftInfo := consensusContract.GetTransTokenInfo()
 		for i, ti := range nftInfo {
 			t := ti.Token
-			err = c.syncTokenChainFrom(peerConn, "", ti.Token, ti.TokenType)
+			err, _ = c.syncTokenChainFrom(peerConn, "", ti.Token, ti.TokenType)
 			if err != nil {
 				c.log.Error("Failed to sync nft chain block from execution validation", "err", err)
 				consensusReply.Message = "Failed to sync nft chain block from execution validation"
@@ -1009,10 +1009,12 @@ func (c *Core) updateReceiverToken(
 
 	if receiverAddress != "" {
 		var err error
+		var syncResponse *TCBSyncReply
 		senderPeer, err = c.getPeer(senderAddress)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to get peer : %v", err.Error())
 		}
+
 		// defer senderPeer.Close()
 		for _, ti := range tokenInfo {
 			t := ti.Token
@@ -1021,9 +1023,10 @@ func (c *Core) updateReceiverToken(
 				return nil, senderPeer, fmt.Errorf("failed to sync token chain block, missing previous block id for token %v, error: %v", t, err)
 			}
 
-			err = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
+			err, syncResponse = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
 			if err != nil {
 				// Add return of syncIssueTokenArray
+				c.log.Error("syncError", syncResponse)
 				c.log.Error("receiver failed to sync token chain of token ", ti.Token, "error ", err)
 				return nil, senderPeer, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
 			}
@@ -1244,9 +1247,9 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 			return nil, nil, fmt.Errorf("failed to sync token chain block, missing previous block id for token %v, error: %v", t, err)
 		}
 
-		err = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
+		err, syncResp := c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
 		if err != nil && !strings.Contains(err.Error(), "syncer block height discrepency") {
-			c.log.Error("receiver failed to sync token chain of FT ", ti.Token, "error ", err)
+			c.log.Error("receiver failed to sync token chain of FT ", ti.Token, "syncResponse ", syncResp, "error ", err)
 			// return nil, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
 			syncIssueTokens = append(syncIssueTokens, t)
 			continue

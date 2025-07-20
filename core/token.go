@@ -481,7 +481,7 @@ func (c *Core) GetTokenStatus(getTokenStatusReq *model.GetTokenStatusReq) (model
 	return resp, nil
 }
 
-func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string, tokenType int) error {
+func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string, tokenType int) (error, *TCBSyncReply) {
 	// p, err := c.getPeer(address)
 	// if err != nil {
 	// 	c.log.Error("Failed to get peer", "err", err)
@@ -494,7 +494,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		_, err = blk.GetBlockNumber(token)
 		if err != nil {
 			c.log.Error("Failed to get block number while syncing", "err", err)
-			return err
+			return err, nil
 		}
 	}
 	blkID := ""
@@ -502,15 +502,15 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		blkID, err = blk.GetBlockID(token)
 		if err != nil {
 			c.log.Error("Failed to get block id", "err", err)
-			return err
+			return err, nil
 		}
 		if blkID == pblkID {
-			return nil
+			return nil, nil
 		}
 		_, err = blk.GetBlockNumber(token)
 		if err != nil {
 			c.log.Error("invalid block, failed to get block number")
-			return err
+			return err, nil
 		}
 	}
 	syncReq := TCBSyncRequest{
@@ -542,19 +542,19 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		c.log.Debug("syncTokenChainFrom: Sent sync request", "request", syncReq)
 		if err != nil {
 			c.log.Error("Failed to sync token chain block", "err", err)
-			return err
+			return err, &trep
 		}
 		c.log.Debug("syncTokenChainFrom: Received response", "response", trep)
 		if !trep.Status {
 			c.log.Error("Failed to sync token chain block", "msg", trep.Message)
-			return fmt.Errorf(trep.Message)
+			return fmt.Errorf(trep.Message), &trep
 		}
 		if len(trep.TCBlock) > 0 {
 			for i, bb := range trep.TCBlock {
 				blk := block.InitBlock(bb, nil)
 				if blk == nil {
 					c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
-					return fmt.Errorf("failed to add token chain block, invalid block, sync failed")
+					return fmt.Errorf("failed to add token chain block, invalid block, sync failed"), &trep
 				}
 				blockID, _ := blk.GetBlockID(token)
 				blockHash, _ := blk.GetHash()
@@ -562,7 +562,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 				err = c.w.AddTokenBlock(token, blk)
 				if err != nil {
 					c.log.Error("Failed to add token chain block, syncing failed", "err", err)
-					return err
+					return err, &trep
 				}
 			}
 		}
@@ -572,7 +572,7 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 		syncReq.BlockID = trep.NextBlockID
 	}
 	// }
-	return nil
+	return nil, nil
 }
 
 func (c *Core) syncFullTokenChain(p *ipfsport.Peer, tokenSyncInfo TokenSyncInfo) error {
