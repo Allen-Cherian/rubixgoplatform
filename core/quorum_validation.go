@@ -283,6 +283,7 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 
 	b := c.w.GetLatestTokenBlock(ti.Token, ti.TokenType)
 	if b == nil {
+		c.log.Info("DEBUG BLOCK LIST LOG REACHED (quorum)", "token", ti.Token)
 		// Debug log: print all block IDs for this token
 		blocks, _, _ := c.w.GetAllTokenBlocks(ti.Token, ti.TokenType, "")
 		blockIDs := make([]string, 0, len(blocks))
@@ -296,9 +297,10 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 			}
 		}
 		c.log.Debug("Token chain block list for token", "token", ti.Token, "blockIDs", blockIDs)
-		c.log.Error("Invalid token chain block for token", "token", ti.Token)
-		return fmt.Errorf("Invalid token chain block for %s", ti.Token), false
+		c.log.Error("[validateSingleToken] token", "token", ti.Token)
+		return fmt.Errorf("[validateSingleToken] Invalid token chain block for %s", ti.Token), false
 	}
+	c.log.Info("DEBUG LATEST BLOCK LOG REACHED (quorum)", "token", ti.Token)
 	// Debug log: print latest block details
 	blockID, _ := b.GetBlockID(ti.Token)
 	blockHash, _ := b.GetHash()
@@ -462,8 +464,8 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		// Get the latest block for this token
 		latestBlock := c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
 		if latestBlock == nil {
-			c.log.Error("Invalid token chain block for token", "token", tokenInfo.Token)
-			return false, fmt.Errorf("invalid token chain block for %s", tokenInfo.Token), nil
+			c.log.Error("[validateTokenOwnershipOptimized] Invalid token chain block for token", "token", tokenInfo.Token)
+			return false, fmt.Errorf("[validateTokenOwnershipOptimized] invalid token chain block for %s", tokenInfo.Token), nil
 		}
 
 		// Get block hash as the grouping key

@@ -214,6 +214,7 @@ func (c *Core) ValidateTokenChain(userDID string, tokenInfo *wallet.Token, token
 	latestBlock := c.w.GetLatestTokenBlock(tokenInfo.TokenID, tokenType)
 
 	if latestBlock == nil {
+		c.log.Info("DEBUG BLOCK LIST LOG REACHED (sender)", "token", tokenInfo.TokenID)
 		// Debug log: print all block IDs for this token
 		blocks, _, _ := c.w.GetAllTokenBlocks(tokenInfo.TokenID, tokenType, "")
 		blockIDs := make([]string, 0, len(blocks))
@@ -227,10 +228,11 @@ func (c *Core) ValidateTokenChain(userDID string, tokenInfo *wallet.Token, token
 			}
 		}
 		c.log.Debug("Token chain block list for token", "token", tokenInfo.TokenID, "blockIDs", blockIDs)
-		c.log.Error("Invalid token chain block for token", "token", tokenInfo.TokenID)
+		c.log.Error("[ValidateTokenChain] Invalid token chain block for token", "token", tokenInfo.TokenID)
 		response.Message = "Invalid token chain block"
 		return response, fmt.Errorf("invalid token chain block")
 	}
+	c.log.Info("DEBUG LATEST BLOCK LOG REACHED (sender)", "token", tokenInfo.TokenID)
 	// Debug log: print latest block details
 	blockID, _ := latestBlock.GetBlockID(tokenInfo.TokenID)
 	blockHash, _ := latestBlock.GetHash()
