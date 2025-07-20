@@ -228,7 +228,7 @@ func (c *Core) ValidateTokenChain(userDID string, tokenInfo *wallet.Token, token
 			}
 		}
 		c.log.Debug("Token chain block list for token", "token", tokenInfo.TokenID, "blockIDs", blockIDs)
-		c.log.Error("[ValidateTokenChain] Invalid token chain block for token", "token", tokenInfo.TokenID)
+		c.log.Error("Invalid token chain block for token", "token", tokenInfo.TokenID)
 		response.Message = "Invalid token chain block"
 		return response, fmt.Errorf("invalid token chain block")
 	}

@@ -298,8 +298,7 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 			}
 		}
 		c.log.Debug("Token chain block list for token", "token", ti.Token, "blockIDs", blockIDs)
-		c.log.Error("[validateSingleToken] token", "token", ti.Token)
-		return fmt.Errorf("[validateSingleToken] Invalid token chain block for %s", ti.Token), false
+		return fmt.Errorf("Invalid token chain block for %s", ti.Token), false
 	}
 	c.log.Info("DEBUG LATEST BLOCK LOG REACHED (quorum)", "token", ti.Token)
 	// Debug log: print latest block details
@@ -538,7 +537,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 				"err", err,
 			)
 			return false, fmt.Errorf(
-				"[SYNC FAILURE] Failed to sync token chain for token %s (peer %s, did %s): %v | SyncResponse: %+v",
+				"Failed to sync token chain for token %s (peer %s, did %s): %v | SyncResponse: %+v",
 				tokenInfo.Token, p.GetPeerID(), p.GetPeerDID(), err, syncResp,
 			), nil
 		}
