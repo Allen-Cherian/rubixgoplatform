@@ -283,9 +283,26 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 
 	b := c.w.GetLatestTokenBlock(ti.Token, ti.TokenType)
 	if b == nil {
+		// Debug log: print all block IDs for this token
+		blocks, _, _ := c.w.GetAllTokenBlocks(ti.Token, ti.TokenType, "")
+		blockIDs := make([]string, 0, len(blocks))
+		for _, blkBytes := range blocks {
+			blk := block.InitBlock(blkBytes, nil)
+			if blk != nil {
+				bid, err := blk.GetBlockID(ti.Token)
+				if err == nil {
+					blockIDs = append(blockIDs, bid)
+				}
+			}
+		}
+		c.log.Debug("Token chain block list for token", "token", ti.Token, "blockIDs", blockIDs)
 		c.log.Error("Invalid token chain block for token", "token", ti.Token)
 		return fmt.Errorf("Invalid token chain block for %s", ti.Token), false
 	}
+	// Debug log: print latest block details
+	blockID, _ := b.GetBlockID(ti.Token)
+	blockHash, _ := b.GetHash()
+	c.log.Debug("Latest block for token", "token", ti.Token, "blockID", blockID, "blockHash", blockHash, "owner", b.GetOwner())
 
 	if b.GetPinningNodeDID() != "" && b.GetOwner() != sc.GetSenderDID() {
 		c.log.Error("Invalid token owner for token", "token", ti.Token, "expected", sc.GetSenderDID(), "actual", b.GetOwner())
