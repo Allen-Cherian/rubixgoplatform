@@ -512,7 +512,7 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 
 	resultChan := make(chan *model.BasicResponse, 1)
 
-	// start transacion in go routine
+	// start transaction in go routine
 	go func() {
 		td, _, pds, FTconsErr := c.initiateConsensus(cr, sc, dc)
 		if FTconsErr != nil {
@@ -629,25 +629,30 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 		}
 
 	}()
-	select {
-	case result := <-resultChan:
-		// Transaction completed within 40s or failed
-		c.log.Debug("FT transaction completed before 20 secs")
-		return result
 
-	case <-time.After(20 * time.Second):
-		// Timeout occurred, return Transaction ID only
-		c.log.Debug("FT transaction still processing with txn id ", cr.TransactionID)
-
-		msg := fmt.Sprintf("FT Transaction is still processing, with transaction id %v ", cr.TransactionID)
-		resp.Message = msg
-		if strings.Contains(resp.Message, "with transaction id") {
-			if txID := extractTransactionIDFromMessage(resp.Message); txID != "" {
-				resp.Result = txID
+	if c.IsAsyncFTResponse() {
+		select {
+		case result := <-resultChan:
+			// Transaction completed within 20s or failed
+			c.log.Debug("FT transaction completed before 20 secs")
+			return result
+		case <-time.After(20 * time.Second):
+			// Timeout occurred, return Transaction ID only
+			c.log.Debug("FT transaction still processing with txn id ", cr.TransactionID)
+			msg := fmt.Sprintf("FT Transaction is still processing, with transaction id %v ", cr.TransactionID)
+			resp.Message = msg
+			if strings.Contains(resp.Message, "with transaction id") {
+				if txID := extractTransactionIDFromMessage(resp.Message); txID != "" {
+					resp.Result = txID
+				}
 			}
+			resp.Status = true
+			return resp
 		}
-		resp.Status = true
-		return resp
+	} else {
+		// Wait for the transaction to complete, no timeout
+		result := <-resultChan
+		return result
 	}
 }
 
@@ -766,4 +771,9 @@ func (c *Core) UnlockFTs() error {
 	}
 	c.log.Info("Unlocked FT")
 	return nil
+}
+
+// Helper to check config flag
+func (c *Core) IsAsyncFTResponse() bool {
+	return c.cfg.CfgData.AsyncFTResponse
 }

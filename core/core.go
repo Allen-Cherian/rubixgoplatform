@@ -700,3 +700,13 @@ func (c *Core) InitialiseDID(didStr string, didType int) (did.DIDCrypto, error) 
 		return did.InitDIDBasic(didStr, c.didDir, nil), nil
 	}
 }
+
+// GetAsyncFTResponse returns the current value of the async FT response config flag
+func (c *Core) GetAsyncFTResponse() bool {
+	return c.cfg.CfgData.AsyncFTResponse
+}
+
+// SetAsyncFTResponse sets the async FT response config flag at runtime
+func (c *Core) SetAsyncFTResponse(val bool) {
+	c.cfg.CfgData.AsyncFTResponse = val
+}

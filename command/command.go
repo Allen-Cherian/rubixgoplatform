@@ -110,6 +110,8 @@ const (
 	AddUserAPIKeyCmd               string = "adduserapikey"
 	AddPeerDetailsFromExplorer     string = "exppeerdetails"
 	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
+	AsyncFTStatusCmd               string = "asyncftstatus"
+	SetAsyncFTStatusCmd            string = "setasyncftstatus"
 )
 
 var commands = []string{VersionCmd,
@@ -179,6 +181,8 @@ var commands = []string{VersionCmd,
 	AddUserAPIKeyCmd,
 	AddPeerDetailsFromExplorer,
 	GetFTTxnDetailsCmd,
+	AsyncFTStatusCmd,
+	SetAsyncFTStatusCmd,
 }
 
 var commandsHelp = []string{"To get tool version",
@@ -247,6 +251,8 @@ var commandsHelp = []string{"To get tool version",
 	"",
 	"",
 	"This command will get FT transaction details by DID",
+	"This command will check the async FT response status",
+	"This command will set the async FT response status",
 }
 
 type Command struct {
@@ -774,6 +780,19 @@ func Run(args []string) {
 		cmd.addPeerDetailsFromExplorer()
 	case GetFTTxnDetailsCmd:
 		cmd.getFTTxnDetails()
+	case AsyncFTStatusCmd:
+		cmd.asyncFTStatus()
+	case SetAsyncFTStatusCmd:
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: setasyncftstatus <true|false>")
+			return
+		}
+		val := strings.ToLower(os.Args[2])
+		if val != "true" && val != "false" {
+			fmt.Println("Usage: setasyncftstatus <true|false>")
+			return
+		}
+		cmd.setAsyncFTStatus(val == "true")
 	default:
 		cmd.log.Error("Invalid command")
 	}
@@ -818,4 +837,14 @@ func getpassword(msg string) (string, error) {
 		return "", err
 	}
 	return string(bytePassword), nil
+}
+
+func (cmd *Command) asyncFTStatus() {
+	status := cmd.c.GetAsyncFTResponse()
+	fmt.Printf("Async FT Response is currently: %v\n", status)
+}
+
+func (cmd *Command) setAsyncFTStatus(val bool) {
+	cmd.c.SetAsyncFTResponse(val)
+	fmt.Printf("Async FT Response set to: %v\n", val)
 }

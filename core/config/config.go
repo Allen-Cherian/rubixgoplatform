@@ -32,6 +32,13 @@ type ConfigData struct {
 	Services          map[string]string `json:"services"`
 	StorageConfig     StorageConfig     `json:"storage_config"`
 	TestStorageConfig StorageConfig     `json:"test_storage_config"`
+	AsyncFTResponse   bool              `json:"async_ft_response"`
+}
+
+func NewDefaultConfigData() ConfigData {
+	return ConfigData{
+		AsyncFTResponse: true,
+	}
 }
 
 type Config struct {
@@ -50,5 +57,4 @@ type ServiceConfig struct {
 	DBType          string `json:"db_type"`          // DBType is type of database to use
 	DBUserName      string `json:"db_user_name"`     // DBUserName is the user name for the DB
 	DBPassword      string `json:"db_password"`      // DBPassword is the password  for the user
-
 }
