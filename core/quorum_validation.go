@@ -391,12 +391,62 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 		go func(t contract.TokenInfo) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			err, syncIssue := c.validateSingleToken(cr, sc, quorumDID, t, p, address, receiverAddress)
-			results <- tokenValidationResult{
-				Token:     t.Token,
-				Err:       err,
-				SyncIssue: syncIssue,
+
+			// 1. Sync token chain before validation
+			err := c.syncTokenChainFrom(p, t.BlockID, t.Token, t.TokenType)
+			if err != nil {
+				if strings.Contains(err.Error(), "syncer block height discrepency") {
+					c.log.Info("Block height discrepancy detected during sync", "token", t.Token, "err", err)
+					parts := strings.SplitN(err.Error(), "|", 2)
+					blockID := ""
+					if len(parts) > 1 {
+						blockID = parts[1]
+					}
+					// Fetch local latest block
+					localBlk := c.w.GetLatestTokenBlock(t.Token, t.TokenType)
+					if localBlk != nil {
+						localBlockID, _ := localBlk.GetBlockID(t.Token)
+						localBlockHash, _ := localBlk.GetHash()
+						c.log.Debug("Local latest block", "token", t.Token, "blockID", localBlockID, "blockHash", localBlockHash, "owner", localBlk.GetOwner())
+					}
+					// Fetch remote block if possible (from all token blocks)
+					blocks, _, _ := c.w.GetAllTokenBlocks(t.Token, t.TokenType, "")
+					if len(blocks) > 0 && blockID != "" {
+						for _, blkBytes := range blocks {
+							blk := block.InitBlock(blkBytes, nil)
+							if blk != nil {
+								bid, _ := blk.GetBlockID(t.Token)
+								if bid == blockID {
+									blockHash, _ := blk.GetHash()
+									c.log.Debug("Remote block (from all blocks)", "token", t.Token, "blockID", bid, "blockHash", blockHash, "owner", blk.GetOwner())
+								}
+							}
+						}
+					}
+					// Remove latest block and retry sync
+					errRemove := c.w.RemoveTokenChainBlocklatest(t.Token, t.TokenType)
+					if errRemove != nil {
+						c.log.Error("Failed to remove latest block during discrepancy resolution", "token", t.Token, "err", errRemove)
+					}
+					c.log.Info("Retrying syncTokenChainFrom after removing latest block", "token", t.Token)
+					errRetry := c.syncTokenChainFrom(p, t.BlockID, t.Token, t.TokenType)
+					if errRetry != nil {
+						c.log.Error("Retry syncTokenChainFrom failed after discrepancy resolution", "token", t.Token, "err", errRetry)
+						// Commenting out marking as sync issue for further investigation
+						// results <- tokenValidationResult{Token: t.Token, Err: errRetry, SyncIssue: true}
+						results <- tokenValidationResult{Token: t.Token, Err: errRetry, SyncIssue: false}
+						return
+					}
+				} else {
+					c.log.Error("Failed to sync token chain block", "token", t.Token, "err", err)
+					results <- tokenValidationResult{Token: t.Token, Err: err, SyncIssue: true}
+					return
+				}
 			}
+
+			// 2. Validate token as before
+			err, syncIssue := c.validateSingleToken(cr, sc, quorumDID, t, p, address, receiverAddress)
+			results <- tokenValidationResult{Token: t.Token, Err: err, SyncIssue: syncIssue}
 		}(tokenInfo)
 	}
 
@@ -464,6 +514,19 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		// Get the latest block for this token
 		latestBlock := c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
 		if latestBlock == nil {
+			c.log.Debug("DEBUG BLOCK LIST LOG REACHED (quorum/optimized)", "token", tokenInfo.Token)
+			blocks, _, _ := c.w.GetAllTokenBlocks(tokenInfo.Token, tokenInfo.TokenType, "")
+			blockIDs := make([]string, 0, len(blocks))
+			for _, blkBytes := range blocks {
+				blk := block.InitBlock(blkBytes, nil)
+				if blk != nil {
+					bid, err := blk.GetBlockID(tokenInfo.Token)
+					if err == nil {
+						blockIDs = append(blockIDs, bid)
+					}
+				}
+			}
+			c.log.Debug("Token chain block list for token", "token", tokenInfo.Token, "blockIDs", blockIDs)
 			c.log.Error("[validateTokenOwnershipOptimized] Invalid token chain block for token", "token", tokenInfo.Token)
 			return false, fmt.Errorf("[validateTokenOwnershipOptimized] invalid token chain block for %s", tokenInfo.Token), nil
 		}
