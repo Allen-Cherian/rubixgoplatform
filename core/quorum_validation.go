@@ -714,9 +714,22 @@ func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []Tok
 		}
 		qPeerIds = append(qPeerIds, pId)
 	}
+	c.log.Debug("Quorum Peer IDs to remove", qPeerIds)
+	c.log.Debug("List of Peer IDs from DHT", list)
+	c.log.Debug("did in input", did)
+	peerId := c.w.GetPeerID(did)
+	if peerId == "" {
+		c.log.Error("Peer ID not found for DID", did)
+	} else {
+		c.log.Debug("Peer ID found for DID", did, peerId)
+		qPeerIds = append(qPeerIds, peerId)
+	}
+
 	updatedList := c.removeStrings(list, qPeerIds)
+	c.log.Debug("Updated List after removing quorum peer ids", updatedList)
+	c.log.Debug("len of updated list", len(updatedList))
 	//if pin exist abort
-	if len(updatedList) != 0 {
+	if len(updatedList) > 1 {
 		c.log.Debug("Token state is exhausted, Token is being Double spent. Token : ", tokenId)
 		result.Exhausted = true
 		result.Error = nil
