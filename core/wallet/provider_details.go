@@ -1,6 +1,10 @@
 package wallet
 
-import "github.com/rubixchain/rubixgoplatform/core/model"
+import (
+	"strings"
+
+	"github.com/rubixchain/rubixgoplatform/core/model"
+)
 
 // struct definition for Mapping token and reason the did is a provider
 
@@ -28,8 +32,13 @@ func (w *Wallet) AddProviderDetails(tokenProviderMap model.TokenProviderMap) err
 	err := w.s.Read(TokenProvider, &tpm, "token=?", tokenProviderMap.Token)
 	if err != nil || tpm.Token == "" {
 		w.log.Info("Token Details not found: Creating new Record")
-		// create new entry
-		return w.s.Write(TokenProvider, tokenProviderMap)
+		// create new entry, but handle unique constraint error
+		writeErr := w.s.Write(TokenProvider, tokenProviderMap)
+		if writeErr != nil && strings.Contains(writeErr.Error(), "UNIQUE constraint failed") {
+			// Someone else inserted, so update instead
+			return w.s.Update(TokenProvider, tokenProviderMap, "token=?", tokenProviderMap.Token)
+		}
+		return writeErr
 	}
 	return w.s.Update(TokenProvider, tokenProviderMap, "token=?", tokenProviderMap.Token)
 }

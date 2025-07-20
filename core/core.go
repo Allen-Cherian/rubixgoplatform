@@ -625,27 +625,34 @@ func (c *Core) SetupForienDIDQuorum(didStr string, selfDID string) (did.DIDCrypt
 }
 
 func (c *Core) FetchDID(did string) error {
-	_, err := os.Stat(c.didDir + did)
-	if err != nil {
-		err = os.MkdirAll(c.didDir+did, os.ModeDir|os.ModePerm)
+	didDir := c.didDir + did
+	pubKeyPath := didDir + "/pubKey.pem"
+	_, dirErr := os.Stat(didDir)
+	_, pubKeyErr := os.Stat(pubKeyPath)
+
+	if os.IsNotExist(dirErr) || os.IsNotExist(pubKeyErr) {
+		// Directory or pubKey.pem missing, fetch from IPFS
+		err := os.MkdirAll(didDir, os.ModeDir|os.ModePerm)
 		if err != nil {
 			c.log.Error("failed to create directory", "err", err)
 			return err
 		}
-		err = c.ipfs.Get(did, c.didDir+did+"/")
+		err = c.ipfs.Get(did, didDir+"/")
 		if err == nil {
-			_, e := os.Stat(c.didDir + did + "/" + didm.MasterDIDFileName)
+			_, e := os.Stat(didDir + "/" + didm.MasterDIDFileName)
 			// Fetch the master DID also
 			if e == nil {
 				var rb []byte
-				rb, err = ioutil.ReadFile(c.didDir + did + "/" + didm.MasterDIDFileName)
+				rb, err = ioutil.ReadFile(didDir + "/" + didm.MasterDIDFileName)
 				if err == nil {
 					return c.FetchDID(string(rb))
 				}
 			}
 		}
+		return err
 	}
-	return err
+	// Directory and pubKey.pem exist, nothing to do
+	return nil
 }
 
 func (c *Core) GetNFTFromIpfs(nftTokenHash string, nftFolderHash string) error {
