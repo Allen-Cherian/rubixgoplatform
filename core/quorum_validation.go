@@ -226,33 +226,40 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 }
 func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, quorumDID string, ti contract.TokenInfo, p *ipfsport.Peer, address, receiverAddress string) (error, bool) {
 	if ids, err := c.GetDHTddrs(ti.Token); err != nil || len(ids) == 0 {
+		c.log.Debug("Skipping token", "token", ti.Token, "reason", "no DHT entries found")
 		return nil, false // skip token if no DHT entries found
 	}
 
 	if err := c.syncTokenChainFrom(p, ti.BlockID, ti.Token, ti.TokenType); err != nil {
 		if strings.Contains(err.Error(), "syncer block height discrepency") {
+			c.log.Debug("Token has sync issue", "token", ti.Token, "err", err)
 			// logic for handling block height discrepancy if needed
 			return nil, true // mark this token as having a sync issue
 		}
+		c.log.Error("Failed to sync token chain for token", "token", ti.Token, "err", err)
 		return err, true
 	}
 
 	genesisBlock := c.w.GetGenesisTokenBlock(ti.Token, ti.TokenType)
 	if genesisBlock == nil {
+		c.log.Error("Failed to get first token chain block for token", "token", ti.Token)
 		return fmt.Errorf("failed to get first token chain block %v", ti.Token), false
 	}
 
 	if c.TokenType(PartString) == ti.TokenType {
 		parentToken, _, err := genesisBlock.GetParentDetials(ti.Token)
 		if err != nil {
+			c.log.Error("Failed to get parent token for token", "token", ti.Token, "err", err)
 			return err, false
 		}
 		parentTokenType, err := c.syncParentToken(p, parentToken)
 		if err != nil || parentTokenType == -1 {
+			c.log.Error("Failed to sync parent token for token", "token", ti.Token, "err", err)
 			return err, false
 		}
 		_, err = c.w.Pin(parentToken, wallet.ParentTokenPinByQuorumRole, quorumDID, cr.TransactionID, address, receiverAddress, ti.TokenValue)
 		if err != nil {
+			c.log.Error("Failed to pin parent token for token", "token", ti.Token, "err", err)
 			return err, false
 		}
 	}
@@ -260,28 +267,34 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 	if ti.TokenType == token.RBTTokenType {
 		tl, tn, err := genesisBlock.GetTokenDetials(ti.Token)
 		if err != nil {
+			c.log.Error("Failed to get token details for token", "token", ti.Token, "err", err)
 			return err, false
 		}
 		tid, err := IpfsAddWithBackoff(c.ipfs, bytes.NewBufferString(token.GetTokenString(tl, tn)), ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 		if err != nil {
+			c.log.Error("Failed to pin token hash for token", "token", ti.Token, "err", err)
 			return err, false
 		}
 		if tid != ti.Token {
+			c.log.Error("Invalid token hash for token", "token", ti.Token, "expected", tid, "actual", ti.Token)
 			return fmt.Errorf("Invalid token hash for %s", ti.Token), false
 		}
 	}
 
 	b := c.w.GetLatestTokenBlock(ti.Token, ti.TokenType)
 	if b == nil {
+		c.log.Error("Invalid token chain block for token", "token", ti.Token)
 		return fmt.Errorf("Invalid token chain block for %s", ti.Token), false
 	}
 
 	if b.GetPinningNodeDID() != "" && b.GetOwner() != sc.GetSenderDID() {
+		c.log.Error("Invalid token owner for token", "token", ti.Token, "expected", sc.GetSenderDID(), "actual", b.GetOwner())
 		return fmt.Errorf("invalid token owner: token pinned as service, token %s", ti.Token), false
 	}
 
 	valid, err := c.validateSigner(b, quorumDID, p)
 	if !valid || err != nil {
+		c.log.Error("Failed to validate token signer for token", "token", ti.Token, "err", err)
 		return fmt.Errorf("failed to validate token signer for %s", ti.Token), false
 	}
 
@@ -299,6 +312,7 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 		}, 10, 100*time.Millisecond)
 		<-dbWriteSem
 		if err != nil {
+			c.log.Error("Failed to create token for token", "token", ti.Token, "err", err)
 			return err, false
 		}
 	}
@@ -313,6 +327,7 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 	}, 10, 100*time.Millisecond)
 	<-dbWriteSem
 	if err != nil {
+		c.log.Error("Failed to update token for token", "token", ti.Token, "err", err)
 		return err, false
 	}
 
@@ -386,6 +401,181 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 	}
 
 	return true, nil, nil
+}
+
+// BlockValidationResult represents the result of validating a specific block
+// Used for optimized token validation
+type BlockValidationResult struct {
+	BlockHash string
+	Block     *block.Block
+	Tokens    []string // List of tokens that share this block
+	IsValid   bool
+	Error     error
+	SyncIssue bool
+}
+
+// validateTokenOwnershipOptimized groups tokens by their latest block and validates each unique block only once
+func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract.Contract, quorumDID string) (bool, error, []string) {
+	var ti []contract.TokenInfo
+	var address string
+
+	if cr.Mode == SmartContractDeployMode || cr.Mode == NFTDeployMode {
+		ti = sc.GetCommitedTokensInfo()
+		address = cr.DeployerPeerID + "." + sc.GetDeployerDID()
+	} else {
+		ti = sc.GetTransTokenInfo()
+		address = cr.SenderPeerID + "." + sc.GetSenderDID()
+	}
+
+	p, err := c.getPeer(address)
+	if err != nil {
+		c.log.Error("Failed to get peer", "err", err)
+		return false, err, nil
+	}
+	defer p.Close()
+
+	// Step 1: Group tokens by their latest block hash
+	blockGroups := make(map[string]*BlockValidationResult)
+
+	c.log.Info("Starting optimized token validation", "totalTokens", len(ti))
+
+	c.log.Debug("Grouping tokens by their latest blocks", "totalTokens", len(ti))
+
+	for _, tokenInfo := range ti {
+		// Get the latest block for this token
+		latestBlock := c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
+		if latestBlock == nil {
+			c.log.Error("Invalid token chain block for token", "token", tokenInfo.Token)
+			return false, fmt.Errorf("invalid token chain block for %s", tokenInfo.Token), nil
+		}
+
+		// Get block hash as the grouping key
+		blockHash, err := latestBlock.GetHash()
+		if err != nil {
+			c.log.Error("Failed to get block hash for token", "token", tokenInfo.Token, "err", err)
+			return false, fmt.Errorf("failed to get block hash for token %s: %v", tokenInfo.Token, err), nil
+		}
+
+		// Group tokens by block hash
+		if result, exists := blockGroups[blockHash]; exists {
+			result.Tokens = append(result.Tokens, tokenInfo.Token)
+		} else {
+			blockGroups[blockHash] = &BlockValidationResult{
+				BlockHash: blockHash,
+				Block:     latestBlock,
+				Tokens:    []string{tokenInfo.Token},
+			}
+		}
+	}
+
+	c.log.Info("Token grouping completed", "totalTokens", len(ti), "uniqueBlocks", len(blockGroups))
+	c.log.Info("Beginning batch block validation", "uniqueBlocks", len(blockGroups))
+
+	// Log optimization statistics
+	c.logOptimizationStats(len(ti), len(blockGroups))
+
+	// Log grouping statistics
+	for blockHash, result := range blockGroups {
+		c.log.Debug("Block group", "blockHash", blockHash, "tokenCount", len(result.Tokens))
+	}
+
+	// Step 2: Validate each unique block
+	var wg sync.WaitGroup
+	results := make(chan *BlockValidationResult, len(blockGroups))
+
+	// Limit concurrency
+	numCores := runtime.NumCPU()
+	maxWorkers := numCores * 2
+	sem := make(chan struct{}, maxWorkers)
+
+	for _, blockResult := range blockGroups {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(br *BlockValidationResult) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			c.log.Debug("Validating unique block", "blockHash", br.BlockHash, "tokenCount", len(br.Tokens))
+
+			// Validate this block
+			valid, err := c.validateSigner(br.Block, quorumDID, p)
+			br.IsValid = valid
+			br.Error = err
+
+			// Check for sync issues
+			if err != nil && strings.Contains(err.Error(), "syncer block height discrepency") {
+				br.SyncIssue = true
+			}
+
+			results <- br
+		}(blockResult)
+	}
+
+	wg.Wait()
+	close(results)
+
+	// Step 3: Process results and identify failed tokens
+	var syncIssueTokens []string
+	var failedTokens []string
+
+	for result := range results {
+		if !result.IsValid || result.Error != nil {
+			c.log.Error("Block validation failed", "blockHash", result.BlockHash, "error", result.Error, "tokenCount", len(result.Tokens))
+
+			if result.SyncIssue {
+				// All tokens sharing this block have sync issues
+				syncIssueTokens = append(syncIssueTokens, result.Tokens...)
+			} else {
+				// All tokens sharing this block failed validation
+				failedTokens = append(failedTokens, result.Tokens...)
+				// Return immediately on first validation failure
+				return false, fmt.Errorf("failed to validate token signer for block %s: %v", result.BlockHash, result.Error), nil
+			}
+		} else {
+			c.log.Debug("Block validation successful", "blockHash", result.BlockHash, "tokenCount", len(result.Tokens))
+		}
+	}
+
+	// Step 4: Handle sync issues
+	if len(syncIssueTokens) > 0 {
+		return false, fmt.Errorf("failed to sync tokenchain Token: issueType: %v", TokenChainNotSynced), syncIssueTokens
+	}
+
+	c.log.Info("Optimized token validation completed successfully", "totalTokens", len(ti), "uniqueBlocks", len(blockGroups))
+	return true, nil, nil
+}
+
+// validateTokenOwnershipWrapper chooses between optimized and regular validation based on configuration
+func (c *Core) validateTokenOwnershipWrapper(cr *ConensusRequest, sc *contract.Contract, quorumDID string) (bool, error, []string) {
+	// Check if optimized validation is enabled (you can add this to config later)
+	useOptimizedValidation := true // TODO: Make this configurable
+
+	if useOptimizedValidation {
+		c.log.Debug("Using optimized token validation")
+		return c.validateTokenOwnershipOptimized(cr, sc, quorumDID)
+	} else {
+		c.log.Debug("Using regular token validation")
+		return c.validateTokenOwnership(cr, sc, quorumDID)
+	}
+}
+
+// logOptimizationStats logs statistics about the optimization
+func (c *Core) logOptimizationStats(totalTokens int, uniqueBlocks int) {
+	reduction := float64(totalTokens-uniqueBlocks) / float64(totalTokens) * 100
+	c.log.Info("Token validation optimization stats",
+		"totalTokens", totalTokens,
+		"uniqueBlocks", uniqueBlocks,
+		"reductionPercent", fmt.Sprintf("%.2f%%", reduction),
+		"reducedValidations", totalTokens-uniqueBlocks)
+
+	if reduction > 50 {
+		c.log.Info("🚀 Significant optimization achieved!", "reduction", fmt.Sprintf("%.2f%%", reduction))
+	} else if reduction > 20 {
+		c.log.Info("⚡ Moderate optimization achieved", "reduction", fmt.Sprintf("%.2f%%", reduction))
+	} else {
+		c.log.Info("📊 Minimal optimization", "reduction", fmt.Sprintf("%.2f%%", reduction))
+	}
 }
 
 func (c *Core) validateSignature(dc did.DIDCrypto, h string, s string) bool {
