@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"runtime"
+	"sync"
+
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/contract"
 	"github.com/rubixchain/rubixgoplatform/core/model"
@@ -80,7 +83,6 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		c.log.Error("Failed to fetch whole token for FT creation")
 		return err
 	}
-	//TODO: Need to test and verify whether tokens are getiing unlocked if there is an error in creating FT.
 	defer c.w.ReleaseTokens(wholeTokens)
 	fractionalValue, err := c.GetPresiceFractionalValue(int(numWholeTokens), numFTs)
 	if err != nil {
@@ -88,109 +90,152 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		return err
 	}
 
-	newFTs := make([]wallet.FTToken, 0, numFTs)
-	var newFTTokenIDs []string
-
 	var parentTokenIDsArray []string
 	for _, token := range wholeTokens {
 		parentTokenIDsArray = append(parentTokenIDsArray, token.TokenID)
 	}
 	parentTokenIDs := strings.Join(parentTokenIDsArray, ",")
-	for i := ftNumStartIndex; i < ftNumStartIndex+numFTs; i++ {
-		racType := &rac.RacType{
-			Type:        c.RACFTType(),
-			DID:         did,
-			TokenNumber: uint64(i),
-			TotalSupply: 1,
-			TimeStamp:   time.Now().String(),
-			FTInfo: &rac.RacFTInfo{
-				Parents: parentTokenIDs,
-				FTNum:   i,
-				FTName:  FTName,
-				FTValue: fractionalValue,
-			},
-		}
 
-		// Create the RAC block
-		racBlocks, err := rac.CreateRac(racType)
-		if err != nil {
-			c.log.Error("Failed to create RAC block", "err", err)
-			return err
-		}
+	type ftJob struct {
+		Index int
+	}
+	type ftResult struct {
+		FTToken wallet.FTToken
+		FTID    string
+		Err     error
+	}
 
-		if len(racBlocks) != 1 {
-			return fmt.Errorf("failed to create RAC block")
-		}
+	numWorkers := runtime.NumCPU()
+	jobs := make(chan ftJob, numFTs)
+	results := make(chan ftResult, numFTs)
+	var wg sync.WaitGroup
 
-		// Update the signature of the RAC block
-		err = racBlocks[0].UpdateSignature(dc)
-		if err != nil {
-			c.log.Error("Failed to update DID signature", "err", err)
-			return err
-		}
+	worker := func() {
+		defer wg.Done()
+		for job := range jobs {
+			i := job.Index
+			racType := &rac.RacType{
+				Type:        c.RACFTType(),
+				DID:         did,
+				TokenNumber: uint64(i),
+				TotalSupply: 1,
+				TimeStamp:   time.Now().String(),
+				FTInfo: &rac.RacFTInfo{
+					Parents: parentTokenIDs,
+					FTNum:   i,
+					FTName:  FTName,
+					FTValue: fractionalValue,
+				},
+			}
 
-		ftnumString := strconv.Itoa(i)
-		parts := []string{FTName, ftnumString, did}
-		result := strings.Join(parts, " ")
-		byteArray := []byte(result)
-		ftBuffer := bytes.NewBuffer(byteArray)
-		ftID, err := c.w.Add(ftBuffer, did, wallet.AddFunc)
-		if err != nil {
-			c.log.Error("Failed to create FT, Failed to add token to IPFS", "err", err)
-			return err
-		}
-		c.log.Info("FT created: " + ftID + " FT Num: " + ftnumString)
-		newFTTokenIDs = append(newFTTokenIDs, ftID)
+			// Create the RAC block
+			racBlocks, err := rac.CreateRac(racType)
+			if err != nil {
+				results <- ftResult{Err: err}
+				continue
+			}
+			if len(racBlocks) != 1 {
+				results <- ftResult{Err: fmt.Errorf("failed to create RAC block")}
+				continue
+			}
+			err = racBlocks[0].UpdateSignature(dc)
+			if err != nil {
+				results <- ftResult{Err: err}
+				continue
+			}
 
-		bti := &block.TransInfo{
-			Tokens: []block.TransTokens{
-				{
+			ftnumString := strconv.Itoa(i)
+			parts := []string{FTName, ftnumString, did}
+			result := strings.Join(parts, " ")
+			byteArray := []byte(result)
+			ftBuffer := bytes.NewBuffer(byteArray)
+			ftID, err := c.w.Add(ftBuffer, did, wallet.AddFunc)
+			if err != nil {
+				results <- ftResult{Err: err}
+				continue
+			}
+			c.log.Info("FT created: " + ftID + " FT Num: " + ftnumString)
+
+			bti := &block.TransInfo{
+				Tokens: []block.TransTokens{{
 					Token:     ftID,
 					TokenType: c.TokenType(FTString),
-				},
-			},
-			Comment: "FT generated at : " + time.Now().String() + " for FT Name : " + FTName,
-		}
-		tcb := &block.TokenChainBlock{
-			TransactionType: block.TokenGeneratedType,
-			TokenOwner:      did,
-			TransInfo:       bti,
-			GenesisBlock: &block.GenesisBlock{
-				Info: []block.GenesisTokenInfo{
-					{
+				}},
+				Comment: "FT generated at : " + time.Now().String() + " for FT Name : " + FTName,
+			}
+			tcb := &block.TokenChainBlock{
+				TransactionType: block.TokenGeneratedType,
+				TokenOwner:      did,
+				TransInfo:       bti,
+				GenesisBlock: &block.GenesisBlock{
+					Info: []block.GenesisTokenInfo{{
 						Token:       ftID,
 						ParentID:    parentTokenIDs,
 						TokenNumber: i,
-					},
+					}},
 				},
-			},
-			TokenValue: fractionalValue,
+				TokenValue: fractionalValue,
+			}
+			ctcb := make(map[string]*block.Block)
+			ctcb[ftID] = nil
+			blockObj := block.CreateNewBlock(ctcb, tcb)
+			if blockObj == nil {
+				results <- ftResult{Err: fmt.Errorf("failed to create new block")}
+				continue
+			}
+			err = blockObj.UpdateSignature(dc)
+			if err != nil {
+				results <- ftResult{Err: err}
+				continue
+			}
+			err = c.w.AddTokenBlock(ftID, blockObj)
+			if err != nil {
+				results <- ftResult{Err: err}
+				continue
+			}
+			ft := wallet.FTToken{
+				TokenID:     ftID,
+				FTName:      FTName,
+				TokenStatus: wallet.TokenIsFree,
+				TokenValue:  fractionalValue,
+				DID:         did,
+			}
+			results <- ftResult{FTToken: ft, FTID: ftID}
 		}
-		ctcb := make(map[string]*block.Block)
-		ctcb[ftID] = nil
-		block := block.CreateNewBlock(ctcb, tcb)
-		if block == nil {
-			return fmt.Errorf("failed to create new block")
+	}
+
+	// Start workers
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go worker()
+	}
+
+	// Enqueue jobs
+	for i := ftNumStartIndex; i < ftNumStartIndex+numFTs; i++ {
+		jobs <- ftJob{Index: i}
+	}
+	close(jobs)
+
+	// Collect results
+	newFTs := make([]wallet.FTToken, 0, numFTs)
+	var newFTTokenIDs []string
+	var firstErr error
+	for i := 0; i < numFTs; i++ {
+		res := <-results
+		if res.Err != nil && firstErr == nil {
+			firstErr = res.Err
 		}
-		err = block.UpdateSignature(dc)
-		if err != nil {
-			c.log.Error("FT creation failed, failed to update signature", "err", err)
-			return err
+		if res.FTID != "" {
+			newFTTokenIDs = append(newFTTokenIDs, res.FTID)
 		}
-		err = c.w.AddTokenBlock(ftID, block)
-		if err != nil {
-			c.log.Error("Failed to create FT, failed to add token chain block", "err", err)
-			return err
+		if res.FTToken.TokenID != "" {
+			newFTs = append(newFTs, res.FTToken)
 		}
-		// Create the new token
-		ft := &wallet.FTToken{
-			TokenID:     ftID,
-			FTName:      FTName,
-			TokenStatus: wallet.TokenIsFree,
-			TokenValue:  fractionalValue,
-			DID:         did,
-		}
-		newFTs = append(newFTs, *ft)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return firstErr
 	}
 
 	for i := range wholeTokens {
@@ -245,16 +290,21 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	}
 
 	for i := range newFTs {
-		tt := c.TokenType(FTString)
-		blk := c.w.GetGenesisTokenBlock(newFTs[i].TokenID, tt)
-		if blk == nil {
-			c.log.Error("failed to get gensis block for Parent DID updation, invalid token chain")
-			return err
+		// Assign directly if DID is known and trusted
+		if newFTs[i].DID == did {
+			newFTs[i].CreatorDID = did
+		} else {
+			// Fallback: fetch from genesis block if needed
+			tt := c.TokenType(FTString)
+			blk := c.w.GetGenesisTokenBlock(newFTs[i].TokenID, tt)
+			if blk == nil {
+				c.log.Error("failed to get genesis block for Parent DID updation, invalid token chain")
+				return err
+			}
+			FTOwner := blk.GetOwner()
+			newFTs[i].CreatorDID = FTOwner
 		}
-		FTOwner := blk.GetOwner()
-		ft := &newFTs[i]
-		ft.CreatorDID = FTOwner
-		err = c.w.CreateFT(ft)
+		err = c.w.CreateFT(&newFTs[i])
 		if err != nil {
 			c.log.Error("Failed to write FT details in FT tokens table", "err", err)
 			return err
@@ -262,7 +312,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	}
 	updateFTTableErr := c.updateFTTable()
 	if updateFTTableErr != nil {
-		c.log.Error("Failed to update FT table after FT creation", "err", err)
+		c.log.Error("Failed to update FT table after FT creation", "err", updateFTTableErr)
 		return updateFTTableErr
 	}
 	return nil
