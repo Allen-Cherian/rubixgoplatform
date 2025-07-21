@@ -289,27 +289,30 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		release = false
 	}
 
+	// --- Batch Write FTs to Storage using WriteBatch ---
+	var batch []*wallet.StorageType
 	for i := range newFTs {
-		// Assign directly if DID is known and trusted
 		if newFTs[i].DID == did {
 			newFTs[i].CreatorDID = did
 		} else {
-			// Fallback: fetch from genesis block if needed
 			tt := c.TokenType(FTString)
 			blk := c.w.GetGenesisTokenBlock(newFTs[i].TokenID, tt)
 			if blk == nil {
 				c.log.Error("failed to get genesis block for Parent DID updation, invalid token chain")
-				return err
+				return fmt.Errorf("failed to get genesis block for Parent DID updation, invalid token chain")
 			}
 			FTOwner := blk.GetOwner()
 			newFTs[i].CreatorDID = FTOwner
 		}
-		err = c.w.CreateFT(&newFTs[i])
-		if err != nil {
-			c.log.Error("Failed to write FT details in FT tokens table", "err", err)
-			return err
-		}
+		batch = append(batch, &wallet.StorageType{Key: newFTs[i].TokenID, Value: newFTs[i]})
 	}
+	batchSize := 1000 // or tune as needed
+	err = c.w.S().WriteBatch(wallet.FTTokenStorage, batch, batchSize)
+	if err != nil {
+		c.log.Error("Failed to batch write FT tokens", "err", err)
+		return err
+	}
+
 	updateFTTableErr := c.updateFTTable()
 	if updateFTTableErr != nil {
 		c.log.Error("Failed to update FT table after FT creation", "err", updateFTTableErr)

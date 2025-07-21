@@ -158,7 +158,6 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 		w.log.Error("Failed to initialize FT storage", "err", err)
 	}
 
-
 	smartcontracTokenchainstorageDB, err := leveldb.OpenFile(dir+SmartContractTokenChainStorage, op)
 	if err != nil {
 		w.log.Error("failed to configure token chain block storage", "err", err)
@@ -189,4 +188,13 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 
 func (w *Wallet) SetupWallet(ipfs *ipfsnode.Shell) {
 	w.ipfs = ipfs
+}
+
+// Re-export StorageType for convenience
+// StorageType is used for batch writes (Key, Value)
+type StorageType = storage.StorageType
+
+// S returns the storage interface (for batch writes)
+func (w *Wallet) S() storage.Storage {
+	return w.s
 }
