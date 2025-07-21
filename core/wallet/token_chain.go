@@ -415,8 +415,8 @@ func (w *Wallet) addBlock(token string, b *block.Block) error {
 					return err
 				}
 			} else {
-				w.log.Error("Invalid block number, sequence missing", "lbn", lbn, "bn", bn)
-				return fmt.Errorf("invalid block number, sequence missing")
+				w.log.Error("Invalid block number, sequence missing..", "lbn", lbn, "bn", bn)
+				return fmt.Errorf("invalid block number, sequence missing..")
 			}
 		}
 	}

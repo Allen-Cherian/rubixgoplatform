@@ -423,7 +423,6 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 			errMsg := fmt.Sprintf("Error occured while adding transaction details: %v", err)
 			c.log.Error(errMsg)
 			resp.Message = errMsg
-
 			return
 		}
 		etrans := &ExplorerRBTTrans{

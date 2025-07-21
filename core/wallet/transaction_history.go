@@ -21,6 +21,8 @@ func (w *Wallet) AddTransactionHistory(td *model.TransactionDetails) error {
 	if err != nil {
 		w.log.Error("Failed to store transaction history", "err", err)
 		return err
+	} else {
+		w.log.Info("Transaction history added", "transaction_id", td.TransactionID)
 	}
 	return nil
 }

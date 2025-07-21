@@ -523,7 +523,8 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 
 	for _, tokenInfo := range ti {
 		// Sync the token chain for this token
-		c.log.Info("Syncing token chain before validation", "token", tokenInfo.Token, "blockID", tokenInfo.BlockID, "peerID", p.GetPeerID(), "peerDID", p.GetPeerDID())
+		//c.log.Info("Syncing token chain before validation", "token", tokenInfo.Token, "blockID", tokenInfo.BlockID, "peerID", p.GetPeerID(), "peerDID", p.GetPeerDID())
+		c.log.Debug("Syncing token chain before validation", "token", tokenInfo.Token)
 		err, syncResp := c.syncTokenChainFrom(p, tokenInfo.BlockID, tokenInfo.Token, tokenInfo.TokenType)
 		if err != nil {
 			c.log.Error(

@@ -539,26 +539,23 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 	for {
 		var trep TCBSyncReply
 		err = p.SendJSONRequest("POST", APISyncTokenChain, nil, &syncReq, &trep, false)
-		c.log.Debug("syncTokenChainFrom: Sent sync request", "request", syncReq)
+		//c.log.Debug("syncTokenChainFrom: Sent sync request", "request", syncReq)
 		if err != nil {
 			c.log.Error("Failed to sync token chain block", "err", err)
 			return err, &trep
 		}
-		c.log.Debug("syncTokenChainFrom: Received response", "response", trep)
+		//c.log.Debug("syncTokenChainFrom: Received response", "response", trep)
 		if !trep.Status {
 			c.log.Error("Failed to sync token chain block", "msg", trep.Message)
 			return fmt.Errorf(trep.Message), &trep
 		}
 		if len(trep.TCBlock) > 0 {
-			for i, bb := range trep.TCBlock {
+			for _, bb := range trep.TCBlock {
 				blk := block.InitBlock(bb, nil)
 				if blk == nil {
 					c.log.Error("Failed to add token chain block, invalid block, sync failed", "err", err)
 					return fmt.Errorf("failed to add token chain block, invalid block, sync failed"), &trep
 				}
-				blockID, _ := blk.GetBlockID(token)
-				blockHash, _ := blk.GetHash()
-				c.log.Debug("syncTokenChainFrom: Block received", "index", i, "blockID", blockID, "blockHash", blockHash, "owner", blk.GetOwner())
 				err = c.w.AddTokenBlock(token, blk)
 				if err != nil {
 					c.log.Error("Failed to add token chain block, syncing failed", "err", err)

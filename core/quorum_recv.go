@@ -1138,7 +1138,10 @@ func (c *Core) updateReceiverToken(
 		if td.Epoch == 0 {
 			td.Epoch = time.Now().Unix()
 		}
-		c.w.AddTransactionHistory(td)
+		err = c.w.AddTransactionHistory(td)
+		if err != nil {
+			c.log.Error("failed to add transaction history on the receiver", "err", err)
+		}
 	}
 
 	//Adding quorums to DIDPeerTable of receiver
@@ -1364,7 +1367,10 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 		if td.Epoch == 0 {
 			td.Epoch = time.Now().Unix()
 		}
-		c.w.AddTransactionHistory(td)
+		err = c.w.AddTransactionHistory(td)
+		if err != nil {
+			c.log.Error("failed to add transaction history on the receiver", "err", err)
+		}
 	}
 	//Adding quorums to DIDPeerTable of receiver
 	for _, qrm := range quorumInfo {
