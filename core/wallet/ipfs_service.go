@@ -31,8 +31,12 @@ const (
 )
 
 // modified pin method that pins token and update in DB with role of the machine pinning
-func (w *Wallet) Pin(hash string, role int, did string, transactionId string, sender string, receiver string, tokenValue float64) (bool, error) {
+// If skipProviderDetails is true, do not call AddProviderDetails (for batch flows)
+func (w *Wallet) Pin(hash string, role int, did string, transactionId string, sender string, receiver string, tokenValue float64, skipProviderDetails ...bool) (bool, error) {
 	w.ipfs.Pin(hash)
+	if len(skipProviderDetails) > 0 && skipProviderDetails[0] {
+		return true, nil
+	}
 	err := w.AddProviderDetails(model.TokenProviderMap{Token: hash, Role: role, DID: did, FuncID: PinFunc, TransactionID: transactionId, Sender: sender, Receiver: receiver, TokenValue: tokenValue})
 	if err != nil {
 		w.log.Info("Error addding provider details to DB", "error", err)

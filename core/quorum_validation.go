@@ -16,6 +16,7 @@ import (
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/contract"
 	"github.com/rubixchain/rubixgoplatform/core/ipfsport"
+	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
 	"github.com/rubixchain/rubixgoplatform/did"
 	"github.com/rubixchain/rubixgoplatform/rac"
@@ -858,12 +859,14 @@ func (c *Core) pinTokenState(
 		completed        int32
 		lastLoggedPct    int32
 		mu               sync.Mutex // Protects shared slice `ids`
+		providerMapMutex sync.Mutex // Protects providerMaps
 		wg               sync.WaitGroup
 		errOnce          sync.Once
 		firstErr         error
 		numWorkers       = runtime.NumCPU()
 		tasks            = make(chan int, total)
 		cancelableCtx, _ = context.WithCancel(ctx) // In case you want to cancel all on first error
+		providerMaps     = make([]model.TokenProviderMap, 0, total)
 	)
 
 	if total == 0 {
@@ -886,16 +889,23 @@ func (c *Core) pinTokenState(
 				data := tokenStateCheckResult[i].tokenIDTokenStateData
 
 				var tokenIDTokenStateHash string
+				var tpm model.TokenProviderMap
 				var err error
 
-				// Retry block for Add
+				// Retry block for AddWithProviderMap
 				err = retry(func() error {
 					var retryErr error
-					tokenIDTokenStateHash, retryErr = c.w.Add(
+					tokenIDTokenStateHash, tpm, retryErr = c.w.AddWithProviderMap(
 						bytes.NewBuffer([]byte(data)),
 						did,
 						wallet.QuorumPinRole,
 					)
+					// Fill in extra fields for pinning
+					tpm.FuncID = wallet.PinFunc
+					tpm.TransactionID = transactionId
+					tpm.Sender = sender
+					tpm.Receiver = receiver
+					tpm.TokenValue = tokenValue
 					return retryErr
 				})
 				if err != nil {
@@ -909,29 +919,25 @@ func (c *Core) pinTokenState(
 				ids = append(ids, tokenIDTokenStateHash)
 				mu.Unlock()
 
-				// Retry block for Pin
+				// Retry block for Pin (but skip AddProviderDetails inside Pin)
 				err = retry(func() error {
-					_, retryErr := c.w.Pin(
-						tokenIDTokenStateHash,
-						wallet.QuorumPinRole,
-						did,
-						transactionId,
-						sender,
-						receiver,
-						tokenValue,
-					)
+					_, retryErr := c.w.Pin(tokenIDTokenStateHash, wallet.QuorumPinRole, did, transactionId, sender, receiver, tokenValue, true)
 					return retryErr
 				})
 				if err != nil {
 					c.log.Error("Failed to pin token state after retries", "index", i, "err", err)
 					recordFirstError(&firstErr, err, &errOnce)
-
 					// Optionally unpin already pinned
 					if unpinErr := c.unPinTokenState(ids, did); unpinErr != nil {
 						c.log.Warn("Failed to unpin token states after pin failure", "err", unpinErr)
 					}
 					return
 				}
+
+				// Collect provider map for batch
+				providerMapMutex.Lock()
+				providerMaps = append(providerMaps, tpm)
+				providerMapMutex.Unlock()
 
 				newCount := atomic.AddInt32(&completed, 1)
 				currentPct := int32(math.Floor(float64(newCount*100) / float64(total)))
@@ -958,7 +964,17 @@ func (c *Core) pinTokenState(
 		return fmt.Errorf("pinning failed: %w", firstErr)
 	}
 
-	return nil
+	// Batch write provider details with retry/backoff
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := c.w.AddProviderDetailsBatch(providerMaps)
+		if err == nil {
+			return nil
+		}
+		c.log.Error("Batch AddProviderDetails failed, retrying", "attempt", attempt+1, "err", err)
+		time.Sleep(backoff(attempt))
+	}
+	return fmt.Errorf("failed to batch add provider details after retries")
 }
 
 func (c *Core) unPinTokenState(ids []string, did string) error {
