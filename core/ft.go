@@ -13,6 +13,7 @@ import (
 
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/contract"
@@ -110,6 +111,9 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	results := make(chan ftResult, numFTs)
 	var wg sync.WaitGroup
 
+	var completed int32
+	var lastLoggedPercent int32
+
 	worker := func() {
 		defer wg.Done()
 		for job := range jobs {
@@ -154,7 +158,14 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 				results <- ftResult{Err: err}
 				continue
 			}
-			c.log.Info("FT created: " + ftID + " FT Num: " + ftnumString)
+			// Progress logging (remove per-token log)
+			newCount := atomic.AddInt32(&completed, 1)
+			currentPercent := int32(math.Floor(float64(newCount*100) / float64(numFTs)))
+			if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
+				if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
+					c.log.Info(fmt.Sprintf("FT creation progress: %d%% (%d/%d created)", currentPercent, newCount, numFTs))
+				}
+			}
 
 			bti := &block.TransInfo{
 				Tokens: []block.TransTokens{{
@@ -307,10 +318,47 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		batch = append(batch, &newFTs[i])
 	}
 	batchSize := 1000 // or tune as needed
+	// 1. Write to SQL DB first
 	err = c.w.S().WriteBatch(wallet.FTTokenStorage, batch, batchSize)
 	if err != nil {
-		c.log.Error("Failed to batch write FT tokens", "err", err)
+		c.log.Error("Failed to batch write FT tokens (SQL phase)", "err", err)
 		return err
+	}
+
+	// 2. Write all token chain blocks to LevelDB in a batch
+	var blockPairs []struct {
+		Token string
+		Block *block.Block
+	}
+	for i := range newFTs {
+		ft := &newFTs[i]
+		blockObj := c.w.GetLatestTokenBlock(ft.TokenID, c.TokenType(FTString))
+		if blockObj == nil {
+			c.log.Error("Failed to get latest token block for FT", "token_id", ft.TokenID)
+			// Rollback SQL writes
+			for _, rollbackFT := range newFTs {
+				errDel := c.w.S().Delete(wallet.FTTokenStorage, &rollbackFT, "token_id=?", rollbackFT.TokenID)
+				if errDel != nil {
+					c.log.Error("Rollback failed: could not delete FT from SQL after LevelDB failure", "token_id", rollbackFT.TokenID, "err", errDel)
+				}
+			}
+			return fmt.Errorf("failed to get latest token block for FT %s", ft.TokenID)
+		}
+		blockPairs = append(blockPairs, struct {
+			Token string
+			Block *block.Block
+		}{Token: ft.TokenID, Block: blockObj})
+	}
+	if err := c.w.BatchAddTokenBlocksFT(blockPairs); err != nil {
+		c.log.Error("Failed to batch add token blocks to LevelDB after SQL write", "err", err)
+		// Rollback SQL writes
+		for _, rollbackFT := range newFTs {
+			errDel := c.w.S().Delete(wallet.FTTokenStorage, &rollbackFT, "token_id=?", rollbackFT.TokenID)
+			if errDel != nil {
+				c.log.Error("Rollback failed: could not delete FT from SQL after LevelDB failure", "token_id", rollbackFT.TokenID, "err", errDel)
+			}
+		}
+		return fmt.Errorf("failed to batch add token blocks to LevelDB: %v", err)
 	}
 
 	updateFTTableErr := c.updateFTTable()

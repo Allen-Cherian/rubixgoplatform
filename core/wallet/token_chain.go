@@ -8,6 +8,7 @@ import (
 	"github.com/rubixchain/rubixgoplatform/block"
 	tkn "github.com/rubixchain/rubixgoplatform/token"
 	ut "github.com/rubixchain/rubixgoplatform/util"
+	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
@@ -704,4 +705,60 @@ func (w *Wallet) removeTokenChainBlockLatest(token string, tokenType int) error 
 	}
 
 	return nil
+}
+
+// BatchAddTokenBlocks writes multiple token blocks to LevelDB in a single batch for any token type
+func (w *Wallet) BatchAddTokenBlocks(pairs []struct {
+	Token     string
+	Block     *block.Block
+	TokenType int
+}) error {
+	if len(pairs) == 0 {
+		return nil
+	}
+	// Assume all pairs are for the same token type (enforced by caller)
+	tt := pairs[0].TokenType
+	db := w.getChainDB(tt)
+	if db == nil {
+		return fmt.Errorf("failed to get chain DB for token type %d", tt)
+	}
+	batch := new(leveldb.Batch)
+	for _, pair := range pairs {
+		if pair.Block == nil {
+			return fmt.Errorf("nil block for token %s", pair.Token)
+		}
+		bid, err := pair.Block.GetBlockID(pair.Token)
+		if err != nil {
+			return fmt.Errorf("failed to get block ID for token %s: %v", pair.Token, err)
+		}
+		key := tcsKey(tt, pair.Token, bid)
+		batch.Put([]byte(key), pair.Block.GetBlock())
+	}
+	db.l.Lock()
+	err := db.DB.Write(batch, nil)
+	db.l.Unlock()
+	return err
+}
+
+// BatchAddTokenBlocksFT is a thin wrapper for FT tokens
+func (w *Wallet) BatchAddTokenBlocksFT(pairs []struct {
+	Token string
+	Block *block.Block
+}) error {
+	if len(pairs) == 0 {
+		return nil
+	}
+	var genericPairs []struct {
+		Token     string
+		Block     *block.Block
+		TokenType int
+	}
+	for _, p := range pairs {
+		genericPairs = append(genericPairs, struct {
+			Token     string
+			Block     *block.Block
+			TokenType int
+		}{Token: p.Token, Block: p.Block, TokenType: tkn.FTTokenType})
+	}
+	return w.BatchAddTokenBlocks(genericPairs)
 }
