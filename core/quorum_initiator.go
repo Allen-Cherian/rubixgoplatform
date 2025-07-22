@@ -1458,6 +1458,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("unable to fetch previous quorum's DIDs for token: %v, err: %v", cr.SmartContractToken, err)
 		}
+		peerInfoCache := make(map[string]*wallet.DIDPeerMap)
 
 		//Create tokechain for the smart contract token and add genesys block
 		err = c.w.AddTokenBlock(cr.SmartContractToken, nb)
@@ -1517,7 +1518,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		if errIpfsAdd != nil {
 			return nil, nil, nil, fmt.Errorf("unable to get previous token state hash for token: %v, err: %v", cr.SmartContractToken, errIpfsAdd)
 		}
-
 		for _, previousQuorumDID := range previousQuorumDIDs {
 			// fetch previous quorum's peer Id with local cache
 			var previousQuorumInfo *wallet.DIDPeerMap
@@ -1614,6 +1614,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("unable to fetch previous quorum's DIDs for token: %v, err: %v", cr.NFT, err)
 		}
+		peerInfoCache := make(map[string]*wallet.DIDPeerMap)
 
 		err = c.w.AddTokenBlock(cr.NFT, nb)
 		if err != nil {
