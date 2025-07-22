@@ -118,6 +118,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	providerMaps := make([]model.TokenProviderMap, 0, numFTs)
 	// Mutex for providerMaps slice
 	var providerMapMutex sync.Mutex
+	c.log.Info("Initializing FT creation: progress logging")
 
 	worker := func() {
 		defer wg.Done()
@@ -170,7 +171,6 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 			providerMapMutex.Unlock()
 			// Progress logging (remove per-token log)
 			newCount := atomic.AddInt32(&completed, 1)
-			c.log.Info("Initializing FT creation: progress logging")
 			currentPercent := int32(math.Floor(float64(newCount*100) / float64(numFTs)))
 			if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
 				if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
