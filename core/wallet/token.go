@@ -1312,3 +1312,8 @@ func (w *Wallet) GetLockedFTs() ([]FTToken, error) {
 	}
 	return ftTokens, nil
 }
+
+// CatFTTokenContent fetches the FT token content from IPFS using the token ID (CID) and DID
+func (w *Wallet) CatFTTokenContent(tokenID, did string) (string, error) {
+	return w.Cat(tokenID, OwnerRole, did)
+}

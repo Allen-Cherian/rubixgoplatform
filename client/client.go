@@ -144,3 +144,31 @@ func (c *Client) SetAsyncFTResponse(val bool) {
 	// TODO: Implement REST call to server if needed
 	fmt.Printf("[WARN] SetAsyncFTResponse(%v) is not implemented for remote client. This only works in-process.\n", val)
 }
+
+func (c *Client) GetLatestFTNumber(ftName, did string) (int, error) {
+	m := map[string]string{"ft_name": ftName, "did": did}
+	var resp struct {
+		Status  bool                   `json:"status"`
+		Message string                 `json:"message"`
+		Result  map[string]interface{} `json:"result"`
+	}
+	err := c.sendJSONRequest("GET", "/api/get-latest-ft-number", m, nil, &resp)
+	if err != nil {
+		return -1, err
+	}
+	if !resp.Status {
+		return -1, fmt.Errorf(resp.Message)
+	}
+	if resp.Result == nil {
+		return -1, nil
+	}
+	if n, ok := resp.Result["latest_ft_number"]; ok {
+		switch v := n.(type) {
+		case float64:
+			return int(v), nil
+		case int:
+			return v, nil
+		}
+	}
+	return -1, nil
+}

@@ -15,6 +15,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"crypto/sha256"
+
+	"github.com/mr-tron/base58"
+	"github.com/multiformats/go-multihash"
+
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/contract"
 	"github.com/rubixchain/rubixgoplatform/core/model"
@@ -23,6 +28,16 @@ import (
 	"github.com/rubixchain/rubixgoplatform/util"
 	"github.com/rubixchain/rubixgoplatform/wrapper/uuid"
 )
+
+// ComputeCIDv0 returns the IPFS CIDv0 (Qm...) for the given data
+func ComputeCIDv0(data []byte) (string, error) {
+	hash := sha256.Sum256(data)
+	mh, err := multihash.Encode(hash[:], multihash.SHA2_256)
+	if err != nil {
+		return "", err
+	}
+	return base58.Encode(mh), nil
+}
 
 func (c *Core) CreateFTs(reqID string, did string, ftcount int, ftname string, wholeToken int, ftNumStartIndex int) {
 	err := c.createFTs(reqID, ftname, ftcount, wholeToken, did, ftNumStartIndex)
@@ -96,6 +111,30 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		parentTokenIDsArray = append(parentTokenIDsArray, token.TokenID)
 	}
 	parentTokenIDs := strings.Join(parentTokenIDsArray, ",")
+
+	// Precompute all FT token CIDs for the requested range
+	precomputedCIDs := make([]string, 0, numFTs)
+	for i := ftNumStartIndex; i < ftNumStartIndex+numFTs; i++ {
+		ftnumString := strconv.Itoa(i)
+		parts := []string{FTName, ftnumString, did}
+		result := strings.Join(parts, " ")
+		cid, err := ComputeCIDv0([]byte(result))
+		if err != nil {
+			return fmt.Errorf("Failed to precompute FT token CID: %v", err)
+		}
+		precomputedCIDs = append(precomputedCIDs, cid)
+	}
+	// Batch check for existing tokens in DB
+	var duplicates []string
+	for _, cid := range precomputedCIDs {
+		ft, err := c.w.ReadFTToken(cid)
+		if err == nil && ft != nil && ft.TokenID != "" {
+			duplicates = append(duplicates, cid)
+		}
+	}
+	if len(duplicates) > 0 {
+		return fmt.Errorf("Aborting FT creation: %d tokens already exist (e.g. %s). Please choose a different range.", len(duplicates), strings.Join(duplicates[:min(5, len(duplicates))], ", "))
+	}
 
 	type ftJob struct {
 		Index int
@@ -895,4 +934,41 @@ func (c *Core) UnlockFTs() error {
 // Helper to check config flag
 func (c *Core) IsAsyncFTResponse() bool {
 	return c.cfg.CfgData.AsyncFTResponse
+}
+
+// min helper for error message
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// GetLatestFTNumber returns the highest FT number (i) for a given FTName and DID, or -1 if none found
+func (c *Core) GetLatestFTNumber(ftName, did string) (int, error) {
+	fts, err := c.w.GetFreeFTsByNameAndDID(ftName, did)
+	if err != nil {
+		return -1, err
+	}
+	maxNum := -1
+	for _, ft := range fts {
+		// The FT token content is FTName + " " + strconv.Itoa(i) + " " + did
+		// To get i, we need to retrieve the content from IPFS using the token ID (CID)
+		content, err := c.w.CatFTTokenContent(ft.TokenID, did)
+		if err != nil {
+			continue // skip if can't fetch
+		}
+		parts := strings.Split(content, " ")
+		if len(parts) != 3 {
+			continue
+		}
+		ftNum, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		if ftNum > maxNum {
+			maxNum = ftNum
+		}
+	}
+	return maxNum, nil
 }

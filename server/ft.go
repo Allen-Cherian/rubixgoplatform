@@ -115,3 +115,25 @@ func (s *Server) APIGetFTInfo(req *ensweb.Request) *ensweb.Result {
 	}
 	return s.RenderJSON(req, ac, http.StatusOK)
 }
+
+// @Summary      Get latest FT number
+// @Description  Returns the latest FT number for a given FT name and DID
+// @Tags         FT
+// @Accept       json
+// @Produce      json
+// @Param        ft_name query string true "FT Name"
+// @Param        did query string true "DID"
+// @Success      200  {object}  map[string]interface{}
+// @Router       /api/get-latest-ft-number [get]
+func (s *Server) APIGetLatestFTNumber(req *ensweb.Request) *ensweb.Result {
+	ftName := s.GetQuerry(req, "ft_name")
+	did := s.GetQuerry(req, "did")
+	if ftName == "" || did == "" {
+		return s.BasicResponse(req, false, "ft_name and did are required", nil)
+	}
+	num, err := s.c.GetLatestFTNumber(ftName, did)
+	if err != nil {
+		return s.BasicResponse(req, false, err.Error(), nil)
+	}
+	return s.BasicResponse(req, true, "success", map[string]interface{}{"latest_ft_number": num})
+}

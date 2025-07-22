@@ -793,6 +793,8 @@ func Run(args []string) {
 			return
 		}
 		cmd.setAsyncFTStatus(val == "true")
+	case "get-latest-ft-number":
+		cmd.getLatestFTNumber()
 	default:
 		cmd.log.Error("Invalid command")
 	}
