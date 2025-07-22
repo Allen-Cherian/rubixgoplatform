@@ -43,7 +43,6 @@ func (c *Core) CreateFTs(reqID string, did string, ftcount int, ftname string, w
 }
 
 func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens int, did string, ftNumStartIndex int) error {
-	c.log.Info(fmt.Sprintf("FT minting initiated: FTName=%s, Count=%d, DID=%s", FTName, numFTs, did))
 	if did == "" {
 		c.log.Error("DID is empty")
 		return fmt.Errorf("DID is empty")
@@ -367,7 +366,6 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 		c.log.Error("Failed to update FT table after FT creation", "err", updateFTTableErr)
 		return updateFTTableErr
 	}
-	c.log.Info(fmt.Sprintf("FT minting completed: FTName=%s, Count=%d, DID=%s", FTName, numFTs, did))
 	return nil
 }
 
