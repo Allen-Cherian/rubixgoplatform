@@ -31,7 +31,7 @@ func (w *Wallet) AddProviderDetails(tokenProviderMap model.TokenProviderMap) err
 	var tpm model.TokenProviderMap
 	err := w.s.Read(TokenProvider, &tpm, "token=?", tokenProviderMap.Token)
 	if err != nil || tpm.Token == "" {
-		w.log.Info("Token Details not found: Creating new Record")
+		w.log.Debug("Token Details not found: Creating new Record")
 		// create new entry, but handle unique constraint error
 		writeErr := w.s.Write(TokenProvider, tokenProviderMap)
 		if writeErr != nil && strings.Contains(writeErr.Error(), "UNIQUE constraint failed") {
