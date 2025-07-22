@@ -163,20 +163,3 @@ func (cmd *Command) getFTinfo() {
 		}
 	}
 }
-
-func (cmd *Command) getLatestFTNumber() {
-	if cmd.ftName == "" || cmd.did == "" {
-		cmd.log.Error("ftName and did are required")
-		return
-	}
-	num, err := cmd.c.GetLatestFTNumber(cmd.ftName, cmd.did)
-	if err != nil {
-		cmd.log.Error("Failed to get latest FT number", "err", err)
-		return
-	}
-	if num == -1 {
-		fmt.Printf("No FT tokens found for %s and DID %s\n", cmd.ftName, cmd.did)
-	} else {
-		fmt.Printf("Latest FT number for %s and DID %s is %d\n", cmd.ftName, cmd.did, num)
-	}
-}
