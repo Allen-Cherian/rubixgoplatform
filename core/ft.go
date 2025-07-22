@@ -114,6 +114,11 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	var completed int32
 	var lastLoggedPercent int32
 
+	// Prepare to collect provider details for batch write
+	providerMaps := make([]model.TokenProviderMap, 0, numFTs)
+	// Mutex for providerMaps slice
+	var providerMapMutex sync.Mutex
+
 	worker := func() {
 		defer wg.Done()
 		for job := range jobs {
@@ -153,11 +158,16 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 			result := strings.Join(parts, " ")
 			byteArray := []byte(result)
 			ftBuffer := bytes.NewBuffer(byteArray)
-			ftID, err := c.w.Add(ftBuffer, did, wallet.AddFunc)
+			ftID, tpm, err := c.w.AddWithProviderMap(ftBuffer, did, wallet.AddFunc)
 			if err != nil {
 				results <- ftResult{Err: err}
 				continue
 			}
+			// Collect provider map for batch
+			// Use mutex to avoid race condition
+			providerMapMutex.Lock()
+			providerMaps = append(providerMaps, tpm)
+			providerMapMutex.Unlock()
 			// Progress logging (remove per-token log)
 			newCount := atomic.AddInt32(&completed, 1)
 			c.log.Info("Initializing FT creation: progress logging")
@@ -360,6 +370,13 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 			}
 		}
 		return fmt.Errorf("failed to batch add token blocks to LevelDB: %v", err)
+	}
+
+	// After all workers finish, batch add provider details
+	err = c.w.AddProviderDetailsBatch(providerMaps)
+	if err != nil {
+		c.log.Error("Failed to batch add provider details for FTs", "err", err)
+		return err
 	}
 
 	updateFTTableErr := c.updateFTTable()

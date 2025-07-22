@@ -43,6 +43,29 @@ func (w *Wallet) AddProviderDetails(tokenProviderMap model.TokenProviderMap) err
 	return w.s.Update(TokenProvider, tokenProviderMap, "token=?", tokenProviderMap.Token)
 }
 
+// Method to add provider details to DB in batch during ipfs ops
+// Accepts a slice of TokenProviderMap and writes/updates them efficiently
+func (w *Wallet) AddProviderDetailsBatch(tokenProviderMaps []model.TokenProviderMap) error {
+	if len(tokenProviderMaps) == 0 {
+		return nil
+	}
+	// If WriteBatch is available, use it for efficiency
+	if batchWriter, ok := interface{}(w.s).(interface {
+		WriteBatch(table string, values interface{}, batchSize int) error
+	}); ok {
+		return batchWriter.WriteBatch(TokenProvider, tokenProviderMaps, 1000)
+	}
+	// Fallback: loop and call AddProviderDetails for each
+	for _, tpm := range tokenProviderMaps {
+		err := w.AddProviderDetails(tpm)
+		if err != nil {
+			w.log.Error("Failed to add provider details in batch", "token", tpm.Token, "did", tpm.DID, "err", err)
+			return err
+		}
+	}
+	return nil
+}
+
 // Method deletes entry ffrom DB during unpin op
 func (w *Wallet) RemoveProviderDetails(token string, did string) error {
 	return w.s.Delete(TokenProvider, nil, "did=? AND token=?", did, token)

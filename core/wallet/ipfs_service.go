@@ -94,3 +94,19 @@ func (w *Wallet) Add(r io.Reader, did string, role int) (string, error) {
 	}
 	return result, err
 }
+
+// AddWithProviderMap adds to IPFS and returns the hash and TokenProviderMap for later batching
+func (w *Wallet) AddWithProviderMap(r io.Reader, did string, role int) (string, model.TokenProviderMap, error) {
+	result, err := w.ipfs.Add(r)
+	if err != nil {
+		w.log.Error("Error adding file to ipfs", "error", err)
+		return "", model.TokenProviderMap{}, err
+	}
+	tpm := model.TokenProviderMap{
+		Token:  result,
+		Role:   role,
+		DID:    did,
+		FuncID: AddFunc,
+	}
+	return result, tpm, nil
+}
