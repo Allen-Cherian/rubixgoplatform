@@ -638,6 +638,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		// }
 
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
+		// Optimization: Local cache for previousQuorumDID -> PeerInfo
+		peerInfoCache := make(map[string]*wallet.DIDPeerMap)
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
 
@@ -676,10 +678,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
-				// fetch previous quorum's peer Id
-				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" || err != nil {
-					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+				// fetch previous quorum's peer Id with local cache
+				var previousQuorumInfo *wallet.DIDPeerMap
+				var ok bool
+				if previousQuorumInfo, ok = peerInfoCache[previousQuorumDID]; !ok {
+					previousQuorumInfo, err = c.GetPeerDIDInfo(previousQuorumDID)
+					if previousQuorumInfo.PeerID == "" || err != nil {
+						return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+					}
+					peerInfoCache[previousQuorumDID] = previousQuorumInfo
 				}
 
 				previousQuorumAddress := previousQuorumInfo.PeerID + "." + previousQuorumDID
@@ -873,8 +880,21 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		// }
 
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
+		// Optimization: Local cache for previousQuorumDID -> PeerInfo
+		peerInfoCache := make(map[string]*wallet.DIDPeerMap)
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
+
+			blockHeight, err := b.GetBlockNumber(tokeninfo.Token)
+			if err != nil {
+				c.log.Error("failed to get latest block height of token ", tokeninfo.Token)
+			}
+
+			// if latest block is genesis block of a whole token, then the signer(s) is(are) advisory node(s), not quorum(s)
+			// this is the case of all migrated RBTs
+			if blockHeight == 0 && tokeninfo.TokenValue == 1.0 {
+				continue
+			}
 			previousQuorumDIDs, err := b.GetSigner()
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("unable to fetch previous quorum's DIDs for token: %v, err: %v", tokeninfo.Token, err)
@@ -900,10 +920,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
-				// fetch previous quorum's peer Id
-				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" || err != nil {
-					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+				// fetch previous quorum's peer Id with local cache
+				var previousQuorumInfo *wallet.DIDPeerMap
+				var ok bool
+				if previousQuorumInfo, ok = peerInfoCache[previousQuorumDID]; !ok {
+					previousQuorumInfo, err = c.GetPeerDIDInfo(previousQuorumDID)
+					if previousQuorumInfo.PeerID == "" || err != nil {
+						return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+					}
+					peerInfoCache[previousQuorumDID] = previousQuorumInfo
 				}
 
 				previousQuorumAddress := previousQuorumInfo.PeerID + "." + previousQuorumDID
@@ -911,11 +936,11 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				if errGetPeer != nil {
 					return nil, nil, nil, fmt.Errorf("unable to retrieve peer information for %v, err: %v", previousQuorumInfo.PeerID, errGetPeer)
 				}
+
 				updateTokenHashDetailsQuery := make(map[string]string)
 				updateTokenHashDetailsQuery["tokenIDTokenStateHash"] = prevtokenIDTokenStateHash
 				previousQuorumPeer.SendJSONRequest("POST", APIUpdateTokenHashDetails, updateTokenHashDetailsQuery, nil, nil, true)
 				previousQuorumPeer.Close()
-
 			}
 		}
 		err = c.w.FTTokensTransffered(sc.GetSenderDID(), ti, nb, rp.IsLocal())
@@ -1072,8 +1097,21 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
+		// Optimization: Local cache for previousQuorumDID -> PeerInfo
+		peerInfoCache := make(map[string]*wallet.DIDPeerMap)
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
+
+			blockHeight, err := b.GetBlockNumber(tokeninfo.Token)
+			if err != nil {
+				c.log.Error("failed to get latest block height of token ", tokeninfo.Token)
+			}
+
+			// if latest block is genesis block of a whole token, then the signer(s) is(are) advisory node(s), not quorum(s)
+			// this is the case of all migrated RBTs
+			if blockHeight == 0 && tokeninfo.TokenValue == 1.0 {
+				continue
+			}
 			previousQuorumDIDs, err := b.GetSigner()
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("unable to fetch previous quorum's DIDs for token: %v, err: %v", tokeninfo.Token, err)
@@ -1099,10 +1137,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			}
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
-				// fetch previous quorum's peer Id
-				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" || err != nil {
-					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+				// fetch previous quorum's peer Id with local cache
+				var previousQuorumInfo *wallet.DIDPeerMap
+				var ok bool
+				if previousQuorumInfo, ok = peerInfoCache[previousQuorumDID]; !ok {
+					previousQuorumInfo, err = c.GetPeerDIDInfo(previousQuorumDID)
+					if previousQuorumInfo.PeerID == "" || err != nil {
+						return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+					}
+					peerInfoCache[previousQuorumDID] = previousQuorumInfo
 				}
 
 				previousQuorumAddress := previousQuorumInfo.PeerID + "." + previousQuorumDID
@@ -1115,7 +1158,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				updateTokenHashDetailsQuery["tokenIDTokenStateHash"] = prevtokenIDTokenStateHash
 				previousQuorumPeer.SendJSONRequest("POST", APIUpdateTokenHashDetails, updateTokenHashDetailsQuery, nil, nil, true)
 				previousQuorumPeer.Close()
-
 			}
 		}
 
@@ -1210,8 +1252,21 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		//Checking prev block details (i.e. the latest block before transferring) by sender. Sender will connect with old quorums, and update about the exhausted token state hashes to quorums for them to unpledge their tokens.
+		// Optimization: Local cache for previousQuorumDID -> PeerInfo
+		peerInfoCache := make(map[string]*wallet.DIDPeerMap)
 		for _, tokeninfo := range ti {
 			b := c.w.GetLatestTokenBlock(tokeninfo.Token, tokeninfo.TokenType)
+
+			blockHeight, err := b.GetBlockNumber(tokeninfo.Token)
+			if err != nil {
+				c.log.Error("failed to get latest block height of token ", tokeninfo.Token)
+			}
+
+			// if latest block is genesis block of a whole token, then the signer(s) is(are) advisory node(s), not quorum(s)
+			// this is the case of all migrated RBTs
+			if blockHeight == 0 && tokeninfo.TokenValue == 1.0 {
+				continue
+			}
 			previousQuorumDIDs, err := b.GetSigner()
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("unable to fetch previous quorum's DIDs for token: %v, err: %v", tokeninfo.Token, err)
@@ -1240,10 +1295,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 			//send this exhausted hash to old quorums to unpledge
 			for _, previousQuorumDID := range previousQuorumDIDs {
-				// fetch previous quorum's peer Id
-				previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
-				if previousQuorumInfo.PeerID == "" || err != nil {
-					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+				// fetch previous quorum's peer Id with local cache
+				var previousQuorumInfo *wallet.DIDPeerMap
+				var ok bool
+				if previousQuorumInfo, ok = peerInfoCache[previousQuorumDID]; !ok {
+					previousQuorumInfo, err = c.GetPeerDIDInfo(previousQuorumDID)
+					if previousQuorumInfo.PeerID == "" || err != nil {
+						return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+					}
+					peerInfoCache[previousQuorumDID] = previousQuorumInfo
 				}
 
 				previousQuorumAddress := previousQuorumInfo.PeerID + "." + previousQuorumDID
@@ -1459,10 +1519,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		for _, previousQuorumDID := range previousQuorumDIDs {
-			// fetch previous quorum's peer Id
-			previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
-			if previousQuorumInfo.PeerID == "" || err != nil {
-				return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+			// fetch previous quorum's peer Id with local cache
+			var previousQuorumInfo *wallet.DIDPeerMap
+			var ok bool
+			if previousQuorumInfo, ok = peerInfoCache[previousQuorumDID]; !ok {
+				previousQuorumInfo, err = c.GetPeerDIDInfo(previousQuorumDID)
+				if previousQuorumInfo.PeerID == "" || err != nil {
+					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+				}
+				peerInfoCache[previousQuorumDID] = previousQuorumInfo
 			}
 
 			previousQuorumAddress := previousQuorumInfo.PeerID + "." + previousQuorumDID
@@ -1583,10 +1648,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		for _, previousQuorumDID := range previousQuorumDIDs {
-			// fetch previous quorum's peer Id
-			previousQuorumInfo, err := c.GetPeerDIDInfo(previousQuorumDID)
-			if previousQuorumInfo.PeerID == "" || err != nil {
-				return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+			// fetch previous quorum's peer Id with local cache
+			var previousQuorumInfo *wallet.DIDPeerMap
+			var ok bool
+			if previousQuorumInfo, ok = peerInfoCache[previousQuorumDID]; !ok {
+				previousQuorumInfo, err = c.GetPeerDIDInfo(previousQuorumDID)
+				if previousQuorumInfo.PeerID == "" || err != nil {
+					return nil, nil, nil, fmt.Errorf("unable to get peerID for signer DID: %v. It is likely that either the DID is not created anywhere or ", previousQuorumDID)
+				}
+				peerInfoCache[previousQuorumDID] = previousQuorumInfo
 			}
 
 			previousQuorumAddress := previousQuorumInfo.PeerID + "." + previousQuorumDID
