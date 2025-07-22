@@ -748,15 +748,25 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 	var updatedtokenhashes []string = make([]string, 0)
 	var tokenHashMap map[string]string = make(map[string]string)
 
+	// Prepare to collect provider details for batch write
+	providerMaps := make([]model.TokenProviderMap, 0, len(ti))
+
 	for _, info := range ti {
 		t := info.Token
 		b := w.GetLatestTokenBlock(info.Token, info.TokenType)
 		blockId, _ := b.GetBlockID(t)
 		tokenIDTokenStateData := t + blockId
 		tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
-		tokenIDTokenStateHash, _ := ipfsShell.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+		tokenIDTokenStateHash, tpm, _ := w.AddWithProviderMap(tokenIDTokenStateBuffer, did, OwnerRole)
 		updatedtokenhashes = append(updatedtokenhashes, tokenIDTokenStateHash)
 		tokenHashMap[t] = tokenIDTokenStateHash
+		// Fill in extra fields for pinning
+		tpm.FuncID = PinFunc
+		tpm.TransactionID = b.GetTid()
+		tpm.Sender = senderPeerId + "." + b.GetSenderDID()
+		tpm.Receiver = receiverPeerId + "." + b.GetReceiverDID()
+		tpm.TokenValue = info.TokenValue
+		providerMaps = append(providerMaps, tpm)
 	}
 
 	// Handle each token
@@ -824,17 +834,25 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 		}
 		senderAddress := senderPeerId + "." + b.GetSenderDID()
 		receiverAddress := receiverPeerId + "." + b.GetReceiverDID()
-		//Pinnig the whole tokens and pat tokens
-		ok, err := w.Pin(tokenInfo.Token, role, did, b.GetTid(), senderAddress, receiverAddress, tokenInfo.TokenValue)
+		//Pinnig the whole tokens and pat tokens (skip AddProviderDetails)
+		_, err = w.Pin(tokenInfo.Token, role, did, b.GetTid(), senderAddress, receiverAddress, tokenInfo.TokenValue, true)
 		if err != nil {
 			fmt.Println("failed to pin token ", tokenInfo.Token)
 			return nil, err
 		}
-		if !ok {
-			return nil, fmt.Errorf("failed to pin token")
-		}
 	}
-	return updatedtokenhashes, nil
+
+	// Batch write provider details with retry/backoff
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := w.AddProviderDetailsBatch(providerMaps)
+		if err == nil {
+			return updatedtokenhashes, nil
+		}
+		w.log.Error("Batch AddProviderDetails failed, retrying", "attempt", attempt+1, "err", err)
+		time.Sleep(backoff(attempt))
+	}
+	return nil, fmt.Errorf("failed to batch add provider details after retries")
 }
 
 // need to update in such a way that only for FTs
