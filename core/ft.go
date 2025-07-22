@@ -290,7 +290,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 	}
 
 	// --- Batch Write FTs to Storage using WriteBatch ---
-	var batch []*wallet.StorageType
+	var batch []*wallet.FTToken
 	for i := range newFTs {
 		if newFTs[i].DID == did {
 			newFTs[i].CreatorDID = did
@@ -304,7 +304,7 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 			FTOwner := blk.GetOwner()
 			newFTs[i].CreatorDID = FTOwner
 		}
-		batch = append(batch, &wallet.StorageType{Key: newFTs[i].TokenID, Value: newFTs[i]})
+		batch = append(batch, &newFTs[i])
 	}
 	batchSize := 1000 // or tune as needed
 	err = c.w.S().WriteBatch(wallet.FTTokenStorage, batch, batchSize)
