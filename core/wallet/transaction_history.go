@@ -53,7 +53,7 @@ func (w *Wallet) GetTransactionByComment(comment string) ([]model.TransactionDet
 func (w *Wallet) GetTransactionByReceiver(receiver string) ([]model.TransactionDetails, error) {
 	var td []model.TransactionDetails
 
-	err := w.s.Read(TransactionStorage, &td, "receiver_did=?", receiver)
+	err := w.s.Read(TransactionStorage, &td, "receiver_did=? AND (mode=? OR mode=?)", receiver, SendMode, RecvMode)
 	if err != nil {
 		w.log.Error("Failed to get transaction details with did as Receiver ", "err", err)
 		return nil, err
@@ -64,7 +64,7 @@ func (w *Wallet) GetTransactionByReceiver(receiver string) ([]model.TransactionD
 func (w *Wallet) GetTransactionBySender(sender string) ([]model.TransactionDetails, error) {
 	var td []model.TransactionDetails
 
-	err := w.s.Read(TransactionStorage, &td, "sender_did=?", sender)
+	err := w.s.Read(TransactionStorage, &td, "sender_did=? AND (mode=? OR mode=?)", sender, SendMode, RecvMode)
 	if err != nil {
 		w.log.Error("Failed to get transaction details with did as sender", "err", err)
 		return nil, err
@@ -74,7 +74,7 @@ func (w *Wallet) GetTransactionBySender(sender string) ([]model.TransactionDetai
 
 func (w *Wallet) GetTransactionByDID(did string) ([]model.TransactionDetails, error) {
 	var td []model.TransactionDetails
-	err := w.s.Read(TransactionStorage, &td, "sender_did=? OR receiver_did=?", did, did)
+	err := w.s.Read(TransactionStorage, &td, "(sender_did=? OR receiver_did=?) AND (mode=? OR mode=?)", did, did, SendMode, RecvMode)
 	if err != nil {
 		w.log.Error("Failed to get transaction details with did", did, "err", err)
 		return nil, err
