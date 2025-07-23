@@ -223,30 +223,50 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
-	// The caller function where you spawn goroutines (simplified snippet)
-	var completed int32
-	var lastLoggedPercent int32
-	total := len(ti) // assuming ti is your token slice
+	
+	// Use resource-aware token state validator
+	if len(ti) > 50 {
+		// For large token counts, use the new validator
+		validator := NewTokenStateValidator(c)
+		tokenStateCheckResult = validator.ValidateTokenStates(ti, did, cr.QuorumList)
+	} else {
+		// For small token counts, use original approach with limited workers
+		var completed int32
+		var lastLoggedPercent int32
+		total := len(ti)
+		
+		// Limit concurrent workers
+		maxWorkers := 4
+		if total < maxWorkers {
+			maxWorkers = total
+		}
+		
+		semaphore := make(chan struct{}, maxWorkers)
+		
+		for i := range ti {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				
+				// Acquire semaphore
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
 
-	for i := range ti {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+				// Call without wg parameter, removed from checkTokenState signature
+				c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, cr.QuorumList, ti[i].TokenType)
 
-			// Call without wg parameter, removed from checkTokenState signature
-			c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, cr.QuorumList, ti[i].TokenType)
+				// Update progress counters
+				newCount := atomic.AddInt32(&completed, 1)
+				currentPercent := int32(math.Floor(float64(newCount*100) / float64(total)))
 
-			// Update progress counters
-			newCount := atomic.AddInt32(&completed, 1)
-			currentPercent := int32(math.Floor(float64(newCount*100) / float64(total)))
-
-			// Only log if it's a new 10% milestone
-			if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
-				if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
-					c.log.Debug(fmt.Sprintf("Token state check progress: %d%% (%d/%d completed)", currentPercent, newCount, total))
+				// Only log if it's a new 10% milestone
+				if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
+					if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
+						c.log.Debug(fmt.Sprintf("Token state check progress: %d%% (%d/%d completed)", currentPercent, newCount, total))
+					}
 				}
-			}
-		}(i)
+			}(i)
+		}
 	}
 
 	wg.Wait()
@@ -769,27 +789,48 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	c.log.Debug("Validating token state for FT Consensus")
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
-	var completed int32
-	var lastLoggedPercent int32
-	total := len(ti)
+	
+	// Use resource-aware token state validator for FT consensus
+	if len(ti) > 50 {
+		// For large token counts, use the new validator
+		validator := NewTokenStateValidator(c)
+		tokenStateCheckResult = validator.ValidateTokenStates(ti, did, cr.QuorumList)
+	} else {
+		// For small token counts, use original approach with limited workers
+		var completed int32
+		var lastLoggedPercent int32
+		total := len(ti)
+		
+		// Limit concurrent workers
+		maxWorkers := 4
+		if total < maxWorkers {
+			maxWorkers = total
+		}
+		
+		semaphore := make(chan struct{}, maxWorkers)
 
-	for i := range ti {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		for i := range ti {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				
+				// Acquire semaphore
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
 
-			c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, cr.QuorumList, ti[i].TokenType)
+				c.checkTokenState(ti[i].Token, did, i, tokenStateCheckResult, cr.QuorumList, ti[i].TokenType)
 
-			newCount := atomic.AddInt32(&completed, 1)
-			currentPercent := int32(math.Floor(float64(newCount*100) / float64(total)))
+				newCount := atomic.AddInt32(&completed, 1)
+				currentPercent := int32(math.Floor(float64(newCount*100) / float64(total)))
 
-			// Only log if it's a new 10% milestone
-			if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
-				if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
-					c.log.Debug(fmt.Sprintf("Token state check progress: %d%% (%d/%d completed)", currentPercent, newCount, total))
+				// Only log if it's a new 10% milestone
+				if currentPercent%10 == 0 && atomic.LoadInt32(&lastLoggedPercent) < currentPercent {
+					if atomic.CompareAndSwapInt32(&lastLoggedPercent, lastLoggedPercent, currentPercent) {
+						c.log.Debug(fmt.Sprintf("Token state check progress: %d%% (%d/%d completed)", currentPercent, newCount, total))
+					}
 				}
-			}
-		}(i)
+			}(i)
+		}
 	}
 
 	wg.Wait()
