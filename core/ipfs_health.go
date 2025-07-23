@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"sync"
 	"time"
@@ -268,15 +267,7 @@ func (hm *IPFSHealthManager) checkHealth() bool {
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		hm.log.Debug("Failed to read response body", "err", err)
-	} else {
-		hm.log.Debug("Health check response body", "body", string(body))
-	}
-
-	hm.log.Debug("Health check response", "status", resp.StatusCode, "url", hm.healthCheckURL)
+	//hm.log.Debug("Health check response", "status", resp.StatusCode, "url", hm.healthCheckURL)
 	return resp.StatusCode == 200
 }
 
