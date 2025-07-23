@@ -101,6 +101,9 @@ type Core struct {
 	ipfs                 *ipfsnode.Shell
 	ipfsState            bool
 	ipfsChan             chan bool
+	ipfsHealth           *IPFSHealthManager
+	ipfsRecovery         *IPFSRecoveryManager
+	ipfsOps              *IPFSOperations
 	d                    *did.DID
 	didDir               string
 	pm                   *ipfsport.PeerManager
@@ -403,6 +406,11 @@ func (c *Core) Start() (bool, string) {
 // TODO:: need to add more test
 func (c *Core) NodeStatus() bool {
 	return true
+}
+
+// IPFSOperations returns the IPFS operations wrapper
+func (c *Core) IPFSOperations() *IPFSOperations {
+	return c.ipfsOps
 }
 
 func (c *Core) StopCore() {

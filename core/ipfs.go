@@ -210,6 +210,15 @@ func (c *Core) RunIPFS() error {
 		return fmt.Errorf("failed create ipfs shell")
 	}
 
+	// Initialize IPFS health manager
+	c.ipfsHealth = NewIPFSHealthManager(c.ipfs, c.cfg, c.log)
+
+	// Initialize IPFS recovery manager
+	c.ipfsRecovery = NewIPFSRecoveryManager(c)
+
+	// Initialize IPFS operations wrapper
+	c.ipfsOps = NewIPFSOperations(c)
+
 	idoutput, err := c.ipfs.ID()
 	if err != nil {
 		c.log.Error("unable to get peer id", "err", err)
@@ -239,6 +248,17 @@ func (c *Core) stopIPFS() {
 	if !c.GetIPFSState() {
 		return
 	}
+
+	// Stop health manager first
+	if c.ipfsHealth != nil {
+		c.ipfsHealth.Stop()
+	}
+
+	// Stop recovery manager
+	if c.ipfsRecovery != nil {
+		c.ipfsRecovery.Stop()
+	}
+
 	c.ipfsChan <- true
 	for {
 		if !c.GetIPFSState() {
@@ -281,7 +301,7 @@ func (c *Core) AddBootStrap(peers []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.ipfs.BootstrapAdd(peers)
+	_, err = c.ipfsOps.BootstrapAdd(peers)
 	return err
 }
 
