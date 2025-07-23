@@ -348,7 +348,7 @@ func (c *Core) commitDataToken(reqID string, did string, batchID string) *model.
 }
 
 func (c *Core) CheckDataToken(dt string) bool {
-	err := c.ipfs.Get(dt, c.cfg.DirPath)
+	err := c.ipfsOps.Get(dt, c.cfg.DirPath)
 	if err != nil {
 		c.log.Error("failed to get the data token")
 		return false

@@ -127,7 +127,7 @@ func (c *Core) quorumDTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
 		if dt[k].TokenType == token.DataTokenType {
-			c.ipfs.Pin(dt[k].Token)
+			c.ipfsOps.Pin(dt[k].Token)
 		}
 	}
 	qHash := util.CalculateHash(sc.GetBlock(), "SHA3-256")

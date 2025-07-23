@@ -54,6 +54,7 @@ type ChainDB struct {
 
 type Wallet struct {
 	ipfs                           *ipfsnode.Shell
+	ipfsOps                        IPFSOperations
 	s                              storage.Storage
 	l                              sync.Mutex
 	dtl                            sync.Mutex
@@ -188,6 +189,15 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 
 func (w *Wallet) SetupWallet(ipfs *ipfsnode.Shell) {
 	w.ipfs = ipfs
+	// Default to direct IPFS operations if no health-managed operations are set
+	if w.ipfsOps == nil {
+		w.ipfsOps = NewDirectIPFSOperations(ipfs)
+	}
+}
+
+// SetIPFSOperations sets the IPFS operations interface (for health-managed operations)
+func (w *Wallet) SetIPFSOperations(ops IPFSOperations) {
+	w.ipfsOps = ops
 }
 
 // Re-export StorageType for convenience

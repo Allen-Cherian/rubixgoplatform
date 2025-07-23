@@ -505,7 +505,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			blockId, _ := nb.GetBlockID(t)
 			tokenIDTokenStateData := t + blockId
 			tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
-			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			tokenIDTokenStateHash, _ := c.ipfsOps.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
 		}
 		//calling quorum pledge finality before calling the APISendReceiver Token
@@ -754,7 +754,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			blockId, _ := nb.GetBlockID(t)
 			tokenIDTokenStateData := t + blockId
 			tokenIDTokenStateBuffer := bytes.NewBuffer([]byte(tokenIDTokenStateData))
-			tokenIDTokenStateHash, _ := c.ipfs.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
+			tokenIDTokenStateHash, _ := c.ipfsOps.Add(tokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 			txnTokenHashes = append(txnTokenHashes, tokenIDTokenStateHash)
 		}
 		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum

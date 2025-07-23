@@ -219,7 +219,7 @@ func (c *Core) RunIPFS() error {
 	// Initialize IPFS operations wrapper
 	c.ipfsOps = NewIPFSOperations(c)
 
-	idoutput, err := c.ipfs.ID()
+	idoutput, err := c.ipfsOps.ID()
 	if err != nil {
 		c.log.Error("unable to get peer id", "err", err)
 		return err
@@ -327,12 +327,12 @@ func (c *Core) RemoveBootStrap(peers []string) error {
 		if err != nil {
 			return err
 		}
-		_, err = c.ipfs.BootstrapRmAll()
+		_, err = c.ipfsOps.BootstrapRmAll()
 		if err != nil {
 			return err
 		}
 		if len(c.cfg.CfgData.BootStrap) != 0 {
-			_, err = c.ipfs.BootstrapAdd(c.cfg.CfgData.BootStrap)
+			_, err = c.ipfsOps.BootstrapAdd(c.cfg.CfgData.BootStrap)
 		}
 		return err
 	}
@@ -345,7 +345,7 @@ func (c *Core) RemoveAllBootStrap() error {
 	if err != nil {
 		return err
 	}
-	_, err = c.ipfs.BootstrapRmAll()
+	_, err = c.ipfsOps.BootstrapRmAll()
 	if err != nil {
 		return err
 	}

@@ -178,7 +178,7 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 		Status: false,
 	}
 
-	smartContractTokenJSON, err := c.ipfs.Cat(fetchSmartContractRequest.SmartContractToken)
+	smartContractTokenJSON, err := c.ipfsOps.Cat(fetchSmartContractRequest.SmartContractToken)
 	if err != nil {
 		c.log.Error("Failed to get smart contract from network", "err", err)
 		return basicResponse
@@ -203,7 +203,7 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 	}
 
 	// Fetch and store the binary code file
-	binaryCodeFile, err := c.ipfs.Cat(smartContractToken.BinaryCodeHash)
+	binaryCodeFile, err := c.ipfsOps.Cat(smartContractToken.BinaryCodeHash)
 	if err != nil {
 		c.log.Error("Failed to fetch binary code file from network", "err", err)
 		return basicResponse
@@ -234,7 +234,7 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 	}
 
 	// Fetch and store the raw code file
-	rawCodeFile, err := c.ipfs.Cat(smartContractToken.RawCodeHash)
+	rawCodeFile, err := c.ipfsOps.Cat(smartContractToken.RawCodeHash)
 	if err != nil {
 		c.log.Error("Failed to fetch raw code file from IPFS", "err", err)
 		return basicResponse
@@ -265,7 +265,7 @@ func (c *Core) FetchSmartContract(requestID string, fetchSmartContractRequest *F
 	}
 
 	// Fetch and store the Schema code file
-	schemaCodeFile, err := c.ipfs.Cat(smartContractToken.SchemaCodeHash)
+	schemaCodeFile, err := c.ipfsOps.Cat(smartContractToken.SchemaCodeHash)
 	if err != nil {
 		c.log.Error("Failed to fetch Schema code file from IPFS", "err", err)
 		return basicResponse

@@ -33,7 +33,11 @@ const (
 // modified pin method that pins token and update in DB with role of the machine pinning
 // If skipProviderDetails is true, do not call AddProviderDetails (for batch flows)
 func (w *Wallet) Pin(hash string, role int, did string, transactionId string, sender string, receiver string, tokenValue float64, skipProviderDetails ...bool) (bool, error) {
-	w.ipfs.Pin(hash)
+	err := w.ipfsOps.Pin(hash)
+	if err != nil {
+		w.log.Error("Failed to pin token", "hash", hash, "error", err)
+		return false, err
+	}
 	if len(skipProviderDetails) > 0 && skipProviderDetails[0] {
 		return true, nil
 	}
@@ -47,8 +51,12 @@ func (w *Wallet) Pin(hash string, role int, did string, transactionId string, se
 
 // modifeied unpin method that unpins token and deltes the entry
 func (w *Wallet) UnPin(hash string, role int, did string) (bool, error) {
-	w.ipfs.Unpin(hash)
-	err := w.RemoveProviderDetails(hash, did)
+	err := w.ipfsOps.Unpin(hash)
+	if err != nil {
+		w.log.Error("Failed to unpin token", "hash", hash, "error", err)
+		return false, err
+	}
+	err = w.RemoveProviderDetails(hash, did)
 	if err != nil {
 		w.log.Info("Error removing provider details to DB", "error", err)
 		return false, err
@@ -57,7 +65,7 @@ func (w *Wallet) UnPin(hash string, role int, did string) (bool, error) {
 }
 
 func (w *Wallet) Cat(hash string, role int, did string) (string, error) {
-	data1, err := w.ipfs.Cat(hash)
+	data1, err := w.ipfsOps.Cat(hash)
 	if err != nil {
 		w.log.Error("Error fetching details from ipfs", "error", err)
 		return "", err
@@ -76,7 +84,7 @@ func (w *Wallet) Cat(hash string, role int, did string) (string, error) {
 }
 
 func (w *Wallet) Get(hash string, did string, role int, path string) error {
-	err := w.ipfs.Get(hash, path)
+	err := w.ipfsOps.Get(hash, path)
 	if err != nil {
 		w.log.Error("Error while getting file from ipfs", "error", err)
 		return err
@@ -86,7 +94,7 @@ func (w *Wallet) Get(hash string, did string, role int, path string) error {
 }
 
 func (w *Wallet) Add(r io.Reader, did string, role int) (string, error) {
-	result, err := w.ipfs.Add(r)
+	result, err := w.ipfsOps.Add(r)
 	if err != nil {
 		w.log.Error("Error adding file to ipfs", "error", err)
 		return "", err
@@ -101,7 +109,7 @@ func (w *Wallet) Add(r io.Reader, did string, role int) (string, error) {
 
 // AddWithProviderMap adds to IPFS and returns the hash and TokenProviderMap for later batching
 func (w *Wallet) AddWithProviderMap(r io.Reader, did string, role int) (string, model.TokenProviderMap, error) {
-	result, err := w.ipfs.Add(r)
+	result, err := w.ipfsOps.Add(r)
 	if err != nil {
 		w.log.Error("Error adding file to ipfs", "error", err)
 		return "", model.TokenProviderMap{}, err

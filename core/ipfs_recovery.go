@@ -311,10 +311,17 @@ func (rm *IPFSRecoveryManager) reinitializeIPFS() error {
 		rm.core.ipfsHealth.Stop()
 	}
 	rm.core.ipfsHealth = NewIPFSHealthManager(newShell, rm.cfg, rm.core.log)
+	
+	// Reinitialize IPFS operations wrapper
+	rm.core.ipfsOps = NewIPFSOperations(rm.core)
 
 	// Update wallet IPFS reference if wallet exists
 	if rm.core.w != nil {
 		rm.core.w.SetupWallet(newShell)
+		// Also update with health-managed operations
+		if rm.core.ipfsOps != nil {
+			rm.core.w.SetIPFSOperations(NewWalletIPFSAdapter(rm.core.ipfsOps))
+		}
 	}
 
 	rm.log.Info("IPFS shell and operations reinitialized successfully")

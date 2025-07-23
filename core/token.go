@@ -754,7 +754,7 @@ func (c *Core) syncGenesisAndLatestBlockFrom(p *ipfsport.Peer, syncReq TCBSyncRe
 }
 
 func (c *Core) getFromIPFS(path string) ([]byte, error) {
-	rpt, err := c.ipfs.Cat(path)
+	rpt, err := c.ipfsOps.Cat(path)
 	if err != nil {
 		c.log.Error("failed to get from ipfs", "err", err, "path", path)
 		return nil, err
@@ -1258,7 +1258,7 @@ func (c *Core) ValidateToken(token string) (*model.BasicResponse, error) {
 		return response, fmt.Errorf("validate token is not available in test net")
 	} */
 	// Get token hash from IPFS
-	tokenHashReader, err := c.ipfs.Cat(token)
+	tokenHashReader, err := c.ipfsOps.Cat(token)
 	if err != nil {
 		return response, fmt.Errorf("error getting token hash from IPFS: %v", err)
 	}

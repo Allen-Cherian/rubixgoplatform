@@ -335,6 +335,10 @@ func (c *Core) SetupCore() error {
 		return err
 	}
 	c.w.SetupWallet(c.ipfs)
+	// Set health-managed IPFS operations for the wallet
+	if c.ipfsOps != nil {
+		c.w.SetIPFSOperations(NewWalletIPFSAdapter(c.ipfsOps))
+	}
 	c.PingSetup()
 	c.CheckQuorumStatusSetup()
 	c.GetPeerdidTypeSetup()
@@ -645,7 +649,7 @@ func (c *Core) FetchDID(did string) error {
 			c.log.Error("failed to create directory", "err", err)
 			return err
 		}
-		err = c.ipfs.Get(did, didDir+"/")
+		err = c.ipfsOps.Get(did, didDir+"/")
 		if err == nil {
 			_, e := os.Stat(didDir + "/" + didm.MasterDIDFileName)
 			// Fetch the master DID also
@@ -680,7 +684,7 @@ func (c *Core) GetNFTFromIpfs(nftTokenHash string, nftFolderHash string) error {
 		return err
 	}
 	// Fetch NFT data from IPFS and store in the directory
-	err = c.ipfs.Get(nftFolderHash, dirPath)
+	err = c.ipfsOps.Get(nftFolderHash, dirPath)
 	if err != nil {
 		c.log.Error("failed to get NFT from IPFS", "err", err)
 		return err
