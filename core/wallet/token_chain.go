@@ -410,14 +410,31 @@ func (w *Wallet) addBlock(token string, b *block.Block) error {
 
 		if bn <= lbn {
 			if bn == lbn {
+				// Block already exists, check if it's the same block
+				existingBlock := w.getLatestBlock(tt, token)
+				if existingBlock != nil {
+					existingBlockID, _ := existingBlock.GetBlockID(token)
+					newBlockID, _ := b.GetBlockID(token)
+					if existingBlockID == newBlockID {
+						// Same block, skip adding
+						w.log.Debug("Block already exists, skipping", "token", token, "blockID", newBlockID)
+						return nil
+					}
+				}
+				// Different block with same number, remove existing and add new one
 				err = w.removeTokenChainBlockLatest(token, tt)
 				if err != nil {
 					w.log.Error("Failed to remove latest block of token", token, "err", err)
 					return err
 				}
 			} else {
-				w.log.Error("Invalid block number, sequence missing..", "lbn", lbn, "bn", bn)
-				return fmt.Errorf("invalid block number, sequence missing..")
+				// Check if this is a missing block that we need to insert
+				// This can happen during recovery or sync operations
+				if bn < lbn {
+					w.log.Warn("Attempting to add older block, checking if it's missing", "lbn", lbn, "bn", bn)
+					// Use addMissingBlock instead
+					return w.addMissingBlock(token, b)
+				}
 			}
 		}
 	}
@@ -490,8 +507,10 @@ func (w *Wallet) addMissingBlock(token string, b *block.Block) error {
 			return err
 		}
 		if bn > lbn {
-			w.log.Error("Invalid block number, not from missing blocks sequence", "lbn", lbn, "bn", bn)
-			return fmt.Errorf("invalid block number, not from missing blocks sequence")
+			// This might be a new block that arrived while we were syncing
+			// Try to add it as a regular block instead
+			w.log.Warn("Block number higher than latest, attempting regular add", "lbn", lbn, "bn", bn)
+			return w.addBlock(token, b)
 		}
 	}
 	if b.CheckMultiTokenBlock() {

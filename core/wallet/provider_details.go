@@ -1,6 +1,7 @@
 package wallet
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/rubixchain/rubixgoplatform/core/model"
@@ -49,20 +50,38 @@ func (w *Wallet) AddProviderDetailsBatch(tokenProviderMaps []model.TokenProvider
 	if len(tokenProviderMaps) == 0 {
 		return nil
 	}
-	// If WriteBatch is available, use it for efficiency
-	if batchWriter, ok := interface{}(w.s).(interface {
-		WriteBatch(table string, values interface{}, batchSize int) error
-	}); ok {
-		return batchWriter.WriteBatch(TokenProvider, tokenProviderMaps, 1000)
-	}
-	// Fallback: loop and call AddProviderDetails for each
+	
+	// Process each token provider individually to handle UNIQUE constraints properly
+	// We don't use WriteBatch because it doesn't handle UNIQUE constraint violations
+	var lastErr error
+	successCount := 0
+	
 	for _, tpm := range tokenProviderMaps {
 		err := w.AddProviderDetails(tpm)
 		if err != nil {
-			w.log.Error("Failed to add provider details in batch", "token", tpm.Token, "did", tpm.DID, "err", err)
-			return err
+			// Log the error but continue processing other entries
+			w.log.Warn("Failed to add provider details in batch", "token", tpm.Token, "did", tpm.DID, "err", err)
+			lastErr = err
+			// If it's not a UNIQUE constraint error, it might be more serious
+			if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				w.log.Error("Non-recoverable error in batch provider details", "err", err)
+			}
+		} else {
+			successCount++
 		}
 	}
+	
+	// Log summary
+	w.log.Debug("Batch provider details completed", 
+		"total", len(tokenProviderMaps), 
+		"success", successCount, 
+		"failed", len(tokenProviderMaps)-successCount)
+	
+	// Return error only if all operations failed
+	if successCount == 0 && lastErr != nil {
+		return fmt.Errorf("all provider detail operations failed: %w", lastErr)
+	}
+	
 	return nil
 }
 

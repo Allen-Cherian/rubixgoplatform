@@ -488,6 +488,25 @@ func (c *Core) syncTokenChainFrom(p *ipfsport.Peer, pblkID string, token string,
 	// 	return err
 	// }
 	// defer p.Close()
+	
+	// Use token sync manager to prevent race conditions
+	if !c.tokenSyncManager.AcquireSyncLock(token) {
+		// Another sync is in progress, wait for it to complete
+		c.log.Debug("Token sync already in progress, waiting", "token", token)
+		if err := c.tokenSyncManager.WaitForSync(token, 30*time.Second); err != nil {
+			return err, nil
+		}
+		// Check if we still need to sync after waiting
+		blk := c.w.GetLatestTokenBlock(token, tokenType)
+		if blk != nil {
+			blkID, _ := blk.GetBlockID(token)
+			if blkID == pblkID {
+				return nil, nil // Already synced
+			}
+		}
+	}
+	defer c.tokenSyncManager.ReleaseSyncLock(token)
+	
 	var err error
 	blk := c.w.GetLatestTokenBlock(token, tokenType)
 	if blk != nil {

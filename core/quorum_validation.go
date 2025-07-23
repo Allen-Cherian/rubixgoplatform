@@ -672,11 +672,11 @@ func (c *Core) logOptimizationStats(totalTokens int, uniqueBlocks int) {
 		"reducedValidations", totalTokens-uniqueBlocks)
 
 	if reduction > 50 {
-		c.log.Info("🚀 Significant optimization achieved!", "reduction", fmt.Sprintf("%.2f%%", reduction))
+		c.log.Info("Significant optimization achieved!", "reduction", fmt.Sprintf("%.2f%%", reduction))
 	} else if reduction > 20 {
-		c.log.Info("⚡ Moderate optimization achieved", "reduction", fmt.Sprintf("%.2f%%", reduction))
+		c.log.Info("Moderate optimization achieved", "reduction", fmt.Sprintf("%.2f%%", reduction))
 	} else {
-		c.log.Info("📊 Minimal optimization", "reduction", fmt.Sprintf("%.2f%%", reduction))
+		c.log.Info("Minimal optimization", "reduction", fmt.Sprintf("%.2f%%", reduction))
 	}
 }
 
@@ -965,16 +965,20 @@ func (c *Core) pinTokenState(
 	}
 
 	// Batch write provider details with retry/backoff
-	maxRetries := 3
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := c.w.AddProviderDetailsBatch(providerMaps)
-		if err == nil {
-			return nil
+	// Note: AddProviderDetailsBatch now handles UNIQUE constraints gracefully
+	err := c.w.AddProviderDetailsBatch(providerMaps)
+	if err != nil {
+		// Log the error but don't fail the validation
+		// UNIQUE constraint errors are expected when multiple quorums process the same tokens
+		c.log.Warn("Failed to add some provider details", "err", err, "total_tokens", len(providerMaps))
+		if strings.Contains(err.Error(), "all provider detail operations failed") {
+			// Only fail if ALL operations failed
+			return fmt.Errorf("critical error in provider details: %w", err)
 		}
-		c.log.Error("Batch AddProviderDetails failed, retrying", "attempt", attempt+1, "err", err)
-		time.Sleep(backoff(attempt))
 	}
-	return fmt.Errorf("failed to batch add provider details after retries")
+	
+	c.log.Debug("Provider details batch completed", "total_tokens", len(providerMaps))
+	return nil
 }
 
 func (c *Core) unPinTokenState(ids []string, did string) error {

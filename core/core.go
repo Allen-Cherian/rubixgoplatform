@@ -133,6 +133,7 @@ type Core struct {
 	quorumCount          int
 	noBalanceQuorumCount int
 	defaultSetup         bool
+	tokenSyncManager     *TokenSyncManager
 }
 
 func InitConfig(configFile string, encKey string, node uint16, addr string) error {
@@ -304,6 +305,10 @@ func NewCore(cfg *config.Config, cfgFile string, encKey string, log logger.Logge
 	if c.testNet && c.defaultSetup {
 		c.AddFaucetQuorums()
 	}
+	
+	// Initialize token sync manager
+	c.tokenSyncManager = NewTokenSyncManager(c.log)
+	
 	return c, nil
 }
 
@@ -351,6 +356,10 @@ func (c *Core) SetupCore() error {
 	// c.RestartIncompleteTokenChainSyncs()
 	//c.UnlockFTs()
 	// c.selfTransferService()
+	
+	// Start token sync cleanup routine
+	go c.tokenSyncCleanupRoutine()
+	
 	return nil
 }
 
@@ -741,4 +750,19 @@ func (c *Core) GetAsyncFTResponse() bool {
 // SetAsyncFTResponse sets the async FT response config flag at runtime
 func (c *Core) SetAsyncFTResponse(val bool) {
 	c.cfg.CfgData.AsyncFTResponse = val
+}
+
+// tokenSyncCleanupRoutine periodically cleans up stale token sync entries
+func (c *Core) tokenSyncCleanupRoutine() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			if c.tokenSyncManager != nil {
+				c.tokenSyncManager.CleanupStaleSync(10 * time.Minute)
+			}
+		}
+	}
 }
