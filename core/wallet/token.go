@@ -733,10 +733,10 @@ func (w *Wallet) FTTokensTransffered(did string, ti []contract.TokenInfo, b *blo
 	return nil
 }
 func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Block, senderPeerId string, receiverPeerId string, pinningServiceMode bool, ipfsShell *ipfsnode.Shell) ([]string, error) {
-	// For large transfers, use parallel processing
+	// For large transfers, use optimized processing with batch downloads
 	if len(ti) > 50 {
-		w.log.Info("Using parallel token receiver for large transfer", "token_count", len(ti))
-		return w.ParallelTokensReceived(did, ti, b, senderPeerId, receiverPeerId, pinningServiceMode, ipfsShell)
+		w.log.Info("Using optimized token receiver with batch downloads", "token_count", len(ti))
+		return w.OptimizedTokensReceived(did, ti, b, senderPeerId, receiverPeerId, pinningServiceMode, ipfsShell)
 	}
 	
 	w.l.Lock()
@@ -879,6 +879,14 @@ syncProcessing:
 
 // need to update in such a way that only for FTs
 func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.Block, senderPeerId string, receiverPeerId string, ipfsShell *ipfsnode.Shell, ftInfo FTToken) ([]string, error) {
+	// For large FT transfers, use optimized processing with batch downloads
+	if len(ti) > 50 {
+		w.log.Info("Using optimized FT receiver with batch downloads", 
+			"ft_count", len(ti),
+			"ft_name", ftInfo.FTName)
+		return w.OptimizedFTTokensReceived(did, ti, b, senderPeerId, receiverPeerId, ipfsShell, ftInfo)
+	}
+	
 	w.l.Lock()
 	defer w.l.Unlock()
 	// TODO :: Needs to be address
