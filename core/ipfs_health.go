@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"sync"
 	"time"
@@ -253,20 +254,29 @@ func (hm *IPFSHealthManager) checkHealth() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", hm.healthCheckURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", hm.healthCheckURL, nil)
 	if err != nil {
-		hm.log.Debug("Failed to create health check request", "err", err)
+		hm.log.Debug("Failed to create health check request", "err", err, "url", hm.healthCheckURL)
 		return false
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		hm.log.Debug("Health check failed", "err", err)
+		hm.log.Debug("Health check failed", "err", err, "url", hm.healthCheckURL)
 		return false
 	}
 	defer resp.Body.Close()
 
+	// Read response body
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		hm.log.Debug("Failed to read response body", "err", err)
+	} else {
+		hm.log.Debug("Health check response body", "body", string(body))
+	}
+
+	hm.log.Debug("Health check response", "status", resp.StatusCode, "url", hm.healthCheckURL)
 	return resp.StatusCode == 200
 }
 
@@ -276,6 +286,9 @@ func (hm *IPFSHealthManager) startHealthChecker() {
 	go func() {
 		defer hm.healthCheckerWg.Done()
 
+		// Give IPFS time to fully initialize before starting health checks
+		time.Sleep(3 * time.Second)
+
 		// Use configured interval or default to 2 seconds
 		interval := 2 * time.Second
 		if hm.cfg.CfgData.IPFSRecovery != nil && hm.cfg.CfgData.IPFSRecovery.MonitorInterval > 0 {
@@ -284,6 +297,14 @@ func (hm *IPFSHealthManager) startHealthChecker() {
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+
+		// Do an initial health check
+		healthy := hm.checkHealth()
+		if healthy {
+			hm.markHealthy()
+		} else {
+			hm.markUnhealthy()
+		}
 
 		for {
 			select {
