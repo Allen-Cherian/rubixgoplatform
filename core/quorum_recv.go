@@ -225,10 +225,10 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
 	
 	// Use resource-aware token state validator
-	if len(ti) > 50 {
-		// For large token counts, use the new validator
-		validator := NewTokenStateValidator(c)
-		tokenStateCheckResult = validator.ValidateTokenStates(ti, did, cr.QuorumList)
+	if len(ti) > 100 {
+		// For large token counts, use the optimized validator
+		validator := NewTokenStateValidatorOptimized(c, did, cr.QuorumList)
+		tokenStateCheckResult = validator.ValidateTokenStatesOptimized(ti, did)
 	} else {
 		// For small token counts, use original approach with limited workers
 		var completed int32
@@ -791,10 +791,10 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
 	
 	// Use resource-aware token state validator for FT consensus
-	if len(ti) > 50 {
-		// For large token counts, use the new validator
-		validator := NewTokenStateValidator(c)
-		tokenStateCheckResult = validator.ValidateTokenStates(ti, did, cr.QuorumList)
+	if len(ti) > 100 {
+		// For large token counts, use the optimized validator
+		validator := NewTokenStateValidatorOptimized(c, did, cr.QuorumList)
+		tokenStateCheckResult = validator.ValidateTokenStatesOptimized(ti, did)
 	} else {
 		// For small token counts, use original approach with limited workers
 		var completed int32

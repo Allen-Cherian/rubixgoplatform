@@ -145,6 +145,7 @@ func (c *Core) configIPFS() error {
 // runIPFS will run the IPFS
 func (c *Core) runIPFS() {
 	cmd := exec.Command(c.ipfsApp, "daemon", "--enable-pubsub-experiment")
+	c.ipfsCmd = cmd // Store the command reference
 	c.SetIPFSState(true)
 
 	stdout, err := cmd.StdoutPipe()
@@ -163,6 +164,12 @@ func (c *Core) runIPFS() {
 		c.log.Error("failed to start command", "err", err)
 		panic(err)
 	}
+	
+	// Store the process PID
+	if cmd.Process != nil {
+		c.ipfsPID = cmd.Process.Pid
+		c.log.Info("IPFS daemon started", "pid", c.ipfsPID, "repo", c.cfg.DirPath+".ipfs")
+	}
 
 	go func() {
 		<-c.ipfsChan
@@ -170,13 +177,21 @@ func (c *Core) runIPFS() {
 		
 		// Try graceful shutdown first with interrupt signal
 		if runtime.GOOS == "windows" {
-			// Windows doesn't support interrupt, go straight to kill
-			if err := cmd.Process.Kill(); err != nil {
-				c.log.Error("failed to kill ipfs daemon", "err", err)
+			// Windows: Kill only this specific process
+			if cmd.Process != nil {
+				c.log.Info("Killing IPFS process", "pid", c.ipfsPID)
+				if err := cmd.Process.Kill(); err != nil {
+					c.log.Error("failed to kill ipfs daemon", "err", err, "pid", c.ipfsPID)
+				} else {
+					c.log.Info("Killed IPFS process successfully", "pid", c.ipfsPID)
+				}
 			}
 		} else {
 			// Unix-like systems: try SIGTERM first, then SIGKILL
-			cmd.Process.Signal(os.Interrupt)
+			if cmd.Process != nil {
+				c.log.Info("Sending interrupt to IPFS process", "pid", c.ipfsPID)
+				cmd.Process.Signal(os.Interrupt)
+			}
 			
 			// Give it 5 seconds to shutdown gracefully
 			done := make(chan error, 1)

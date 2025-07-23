@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -101,6 +102,8 @@ type Core struct {
 	ipfs                 *ipfsnode.Shell
 	ipfsState            bool
 	ipfsChan             chan bool
+	ipfsCmd              *exec.Cmd
+	ipfsPID              int
 	ipfsHealth           *IPFSHealthManager
 	ipfsRecovery         *IPFSRecoveryManager
 	ipfsOps              *IPFSOperations
