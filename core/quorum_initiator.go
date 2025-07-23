@@ -54,6 +54,11 @@ const (
 	AdaptiveTimeoutMultiplier = 2.5 // 2.5x the first response time
 	MinAdaptiveTimeout        = 5 * time.Minute
 	MaxAdaptiveTimeout        = 30 * time.Minute
+	
+	// Token-based timeout scaling
+	BaseTokenProcessingTime = 200 * time.Millisecond // Base time per token
+	TokenBatchSize          = 100                    // Tokens processed in parallel
+	MinTokenTimeout         = 30 * time.Second       // Minimum timeout for token processing
 )
 
 type ConensusRequest struct {
@@ -223,6 +228,29 @@ func (c *Core) QuroumSetup() {
 		c.l.AddRoute(APIGetMigratedTokenStatus, "POST", c.getMigratedTokenStatus)
 		c.l.AddRoute(APISyncDIDArbitration, "POST", c.syncDIDArbitration)
 	}
+}
+
+// calculateTokenBasedTimeout calculates timeout based on the number of tokens
+func calculateTokenBasedTimeout(tokenCount int) time.Duration {
+	// Calculate expected processing time based on token count
+	// Assuming tokens are processed in batches
+	batches := (tokenCount + TokenBatchSize - 1) / TokenBatchSize
+	processingTime := time.Duration(batches) * TokenBatchSize * BaseTokenProcessingTime
+	
+	// Add buffer for network delays and consensus
+	totalTimeout := processingTime * 3 // 3x buffer for safety
+	
+	// Apply minimum timeout
+	if totalTimeout < MinTokenTimeout {
+		totalTimeout = MinTokenTimeout
+	}
+	
+	// Apply maximum timeout
+	if totalTimeout > MaxAdaptiveTimeout {
+		totalTimeout = MaxAdaptiveTimeout
+	}
+	
+	return totalTimeout
 }
 
 func (c *Core) SetupQuorum(didStr string, pwd string, pvtKeyPwd string) error {
@@ -434,9 +462,35 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}()
 	c.quorumCount = QuorumRequired - len(cr.QuorumList)
 	c.noBalanceQuorumCount = QuorumRequired - len(cr.QuorumList)
+	// Count tokens for timeout calculation
+	tokenCount := 0
+	switch cr.Mode {
+	case FTTransferMode:
+		// For FT transfers, use the FT count
+		tokenCount = cr.FTinfo.FTCount
+	case RBTTransferMode:
+		ti := sc.GetTransTokenInfo()
+		tokenCount = len(ti)
+	default:
+		// For other modes, check if there are tokens in the contract
+		if sc != nil {
+			ti := sc.GetTransTokenInfo()
+			tokenCount = len(ti)
+		}
+	}
+	
+	// Calculate initial timeout based on token count
+	tokenBasedTimeout := calculateTokenBasedTimeout(tokenCount)
+	baseTimeout := TotalQuorumTimeout
+	if tokenBasedTimeout > baseTimeout {
+		baseTimeout = tokenBasedTimeout
+	}
+	
+	c.log.Debug("Consensus timeout calculation", "tokenCount", tokenCount, "tokenBasedTimeout", tokenBasedTimeout, "baseTimeout", baseTimeout)
+	
 	// Track first response time for adaptive timeout
 	firstResponseTime := time.Now()
-	adaptiveTimeout := TotalQuorumTimeout
+	adaptiveTimeout := baseTimeout
 	firstResponseReceived := false
 	
 	for _, a := range cr.QuorumList {
@@ -445,7 +499,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		//checks the consensus. For type 1 quorums, along with connecting to the quorums, we are checking the balance of the quorum DID
 		//as well. Each quorums should pledge equal amount of tokens and hence, it should have a total of (Transacting RBTs/5) tokens
 		//available for pledging.
-		go c.connectQuorum(cr, a, AlphaQuorumType, sc)
+		go c.connectQuorum(cr, a, AlphaQuorumType, sc, tokenCount)
 	}
 	
 	// Start total timeout timer
@@ -477,6 +531,15 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 					
 					// Calculate adaptive timeout based on first response
 					adaptiveTimeout = time.Duration(float64(responseTime) * AdaptiveTimeoutMultiplier)
+					
+					// For high token counts, use token-based timeout as minimum
+					if tokenCount > 50 {
+						if adaptiveTimeout < tokenBasedTimeout {
+							adaptiveTimeout = tokenBasedTimeout
+							c.log.Debug("Using token-based timeout for high token count", "tokenCount", tokenCount, "timeout", adaptiveTimeout)
+						}
+					}
+					
 					if adaptiveTimeout < MinAdaptiveTimeout {
 						adaptiveTimeout = MinAdaptiveTimeout
 					}
@@ -1946,7 +2009,7 @@ func (c *Core) finishConsensus(id string, qt int, p *ipfsport.Peer, status bool,
 	}
 }
 
-func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contract.Contract) {
+func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contract.Contract, tokenCount int) {
 	c.startConsensus(cr.ReqID, qt)
 	var p *ipfsport.Peer
 	var err error
@@ -1967,8 +2030,18 @@ func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contr
 		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
 		return
 	}
+	// Calculate appropriate timeout based on token count
+	quorumTimeout := IndividualQuorumTimeout
+	if tokenCount > 100 {
+		tokenTimeout := calculateTokenBasedTimeout(tokenCount)
+		if tokenTimeout > quorumTimeout {
+			quorumTimeout = tokenTimeout
+		}
+		c.log.Debug("Using extended timeout for large transaction", "tokenCount", tokenCount, "timeout", quorumTimeout)
+	}
+	
 	var cresp ConensusReply
-	err = p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, IndividualQuorumTimeout)
+	err = p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, quorumTimeout)
 	if err != nil {
 		c.log.Error("Failed to get consensus", "err", err)
 		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)
