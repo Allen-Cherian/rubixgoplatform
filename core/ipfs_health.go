@@ -66,18 +66,25 @@ func (hm *IPFSHealthManager) SetMaxConcurrency(max int) {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 
-	// Create new semaphore with new capacity
-	oldSem := hm.globalSem
+	// Only update if the value actually changed
+	if hm.maxConcurrent == max {
+		return
+	}
+
+	// For now, just update the max value
+	// We cannot safely replace the channel without risking panics
+	// The actual concurrency will be limited by the current channel size
+	oldMax := hm.maxConcurrent
 	hm.maxConcurrent = max
-	hm.globalSem = make(chan struct{}, max)
 
-	// Close old semaphore after a delay to allow existing operations to complete
-	go func() {
-		time.Sleep(5 * time.Second)
-		close(oldSem)
-	}()
-
-	hm.log.Info("Updated IPFS concurrency limit", "max", max)
+	// Log the change but note that it won't take effect until restart
+	hm.log.Info("IPFS concurrency limit updated (will take effect on next restart)", "old", oldMax, "new", max)
+	
+	// TODO: Implement a safer way to resize the semaphore channel
+	// Options:
+	// 1. Use a different concurrency control mechanism (e.g., worker pool)
+	// 2. Implement a versioned semaphore system
+	// 3. Require a restart for concurrency changes
 }
 
 // GetMaxConcurrency returns the current maximum concurrency limit
@@ -117,9 +124,14 @@ func (hm *IPFSHealthManager) AcquireSemaphore(ctx context.Context) error {
 		return fmt.Errorf("IPFS health check failed: %w", err)
 	}
 
+	// Get the current semaphore under lock to avoid race conditions
+	hm.mu.RLock()
+	sem := hm.globalSem
+	hm.mu.RUnlock()
+
 	// Then acquire semaphore
 	select {
-	case hm.globalSem <- struct{}{}:
+	case sem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -128,8 +140,13 @@ func (hm *IPFSHealthManager) AcquireSemaphore(ctx context.Context) error {
 
 // ReleaseSemaphore releases the global IPFS semaphore
 func (hm *IPFSHealthManager) ReleaseSemaphore() {
+	// Get the current semaphore under lock to avoid race conditions
+	hm.mu.RLock()
+	sem := hm.globalSem
+	hm.mu.RUnlock()
+
 	select {
-	case <-hm.globalSem:
+	case <-sem:
 		// Successfully released
 	default:
 		// Semaphore was already empty, this shouldn't happen in normal operation
