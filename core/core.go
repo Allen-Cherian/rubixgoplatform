@@ -105,6 +105,8 @@ type Core struct {
 	ipfsRecovery         *IPFSRecoveryManager
 	ipfsOps              *IPFSOperations
 	ipfsScalability      *IPFSScalabilityManager
+	connRecovery         *ConnectionRecovery
+	p2pReconnect         *P2PReconnectManager
 	d                    *did.DID
 	didDir               string
 	pm                   *ipfsport.PeerManager

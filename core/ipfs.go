@@ -233,6 +233,12 @@ func (c *Core) RunIPFS() error {
 
 	// Initialize IPFS scalability manager
 	c.ipfsScalability = NewIPFSScalabilityManager(c)
+	
+	// Initialize connection recovery manager
+	c.connRecovery = NewConnectionRecovery(c.log)
+	
+	// Initialize P2P reconnect manager
+	c.p2pReconnect = NewP2PReconnectManager(c)
 
 	idoutput, err := c.ipfsOps.ID()
 	if err != nil {

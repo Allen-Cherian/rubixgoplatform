@@ -324,6 +324,12 @@ func (rm *IPFSRecoveryManager) reinitializeIPFS() error {
 		rm.core.ipfsScalability.Stop()
 	}
 	rm.core.ipfsScalability = NewIPFSScalabilityManager(rm.core)
+	
+	// Reinitialize connection recovery manager
+	rm.core.connRecovery = NewConnectionRecovery(rm.core.log)
+	
+	// Reinitialize P2P reconnect manager
+	rm.core.p2pReconnect = NewP2PReconnectManager(rm.core)
 
 	// Update wallet IPFS reference if wallet exists
 	if rm.core.w != nil {

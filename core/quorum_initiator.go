@@ -2074,7 +2074,12 @@ func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contr
 	}
 	
 	var cresp ConensusReply
-	err = p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, quorumTimeout)
+	// Extract peer info for reconnection
+	_, did, _ := util.ParseAddress(addr)
+	qpid := p.GetPeerID()
+	
+	// Use reconnect-aware request wrapper
+	err = c.SendRequestWithReconnect(p, qpid, did, "POST", APIQuorumConsensus, nil, cr, &cresp, true, quorumTimeout)
 	if err != nil {
 		c.log.Error("Failed to get consensus", "err", err)
 		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)

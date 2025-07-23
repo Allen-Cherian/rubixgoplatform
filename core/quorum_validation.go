@@ -853,9 +853,20 @@ func (c *Core) pinTokenState(
 	did, transactionId, sender, receiver string,
 	tokenValue float64,
 ) error {
+	total := len(tokenStateCheckResult)
+	
+	// For very large token counts, add initial delay to let quorums stabilize
+	if total > 500 {
+		stabilizationDelay := time.Duration(total/500) * time.Second
+		c.log.Info("Adding stabilization delay for large transaction", 
+			"tokens", total, 
+			"delay", stabilizationDelay)
+		time.Sleep(stabilizationDelay)
+	}
+	
 	// Set up memory optimization for large operations
 	memOptimizer := NewMemoryOptimizer(c.log)
-	memOptimizer.OptimizeForLargeOperation(len(tokenStateCheckResult))
+	memOptimizer.OptimizeForLargeOperation(total)
 	defer memOptimizer.RestoreDefaults()
 	
 	// Start memory monitoring
@@ -864,7 +875,7 @@ func (c *Core) pinTokenState(
 	defer close(monitorDone)
 	
 	// Start periodic GC for large operations
-	if len(tokenStateCheckResult) > 100 {
+	if total > 100 {
 		gcDone := make(chan struct{})
 		go memOptimizer.PeriodicGC(gcDone, 30*time.Second)
 		defer close(gcDone)
@@ -872,7 +883,6 @@ func (c *Core) pinTokenState(
 	
 	var (
 		ids              []string
-		total            = len(tokenStateCheckResult)
 		completed        int32
 		lastLoggedPct    int32
 		mu               sync.Mutex // Protects shared slice `ids`
@@ -977,6 +987,23 @@ func (c *Core) pinTokenState(
 				}
 
 				c.log.Debug("Token state pinned", "hash", tokenIDTokenStateHash)
+				
+				// Add processing rate control for large batches
+				if total > 100 {
+					// Calculate delay based on worker count and progress
+					var processingDelay time.Duration
+					if numWorkers <= 2 {
+						processingDelay = 200 * time.Millisecond // Slow rate for few workers
+					} else if numWorkers <= 4 {
+						processingDelay = 100 * time.Millisecond // Medium rate
+					} else {
+						processingDelay = 50 * time.Millisecond  // Faster rate for many workers
+					}
+					
+					// Add jitter to prevent thundering herd
+					jitter := time.Duration(i%10) * 10 * time.Millisecond
+					time.Sleep(processingDelay + jitter)
+				}
 			}
 		}()
 	}
