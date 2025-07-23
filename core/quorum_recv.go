@@ -480,92 +480,34 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 		//in deploy mode pin token state of commited RBT tokens
 		tokenStateCheckResult = make([]TokenStateCheckResult, len(commitedTokenInfo))
 		
-		// Process in batches for large transactions
-		if len(commitedTokenInfo) > 1000 {
-			c.log.Info("Large transaction detected, processing in batches", 
-				"total_tokens", len(commitedTokenInfo))
-			
-			// Process in batches of 1000
-			batchSize := 1000
-			maxConcurrent := 10 // Same as for 1000 tokens
-			
-			for start := 0; start < len(commitedTokenInfo); start += batchSize {
-				end := start + batchSize
-				if end > len(commitedTokenInfo) {
-					end = len(commitedTokenInfo)
-				}
-				
-				batch := commitedTokenInfo[start:end]
-				c.log.Info("Processing token batch", 
-					"batch_start", start,
-					"batch_end", end,
-					"batch_size", len(batch),
-					"progress", fmt.Sprintf("%d/%d", end, len(commitedTokenInfo)))
-				
-				// Process this batch with same resources as 1000 tokens
-				semaphore := make(chan struct{}, maxConcurrent)
-				
-				for i := start; i < end; i++ {
-					ti := commitedTokenInfo[i]
-					wg.Add(1)
-					go func(token string, idx int, tokenType int) {
-						defer wg.Done()
-						
-						// Acquire semaphore
-						semaphore <- struct{}{}
-						defer func() { <-semaphore }()
-						
-						// Add small delay
-						time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-						
-						c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
-					}(ti.Token, i, ti.TokenType)
-				}
-				
-				// Wait for this batch to complete
-				wg.Wait()
-				
-				// Log batch completion
-				c.log.Info("Batch completed", 
-					"batch", fmt.Sprintf("%d-%d", start, end),
-					"remaining", len(commitedTokenInfo)-end)
-				
-				// Pause between batches to let IPFS recover
-				if end < len(commitedTokenInfo) {
-					c.log.Info("Pausing between batches for IPFS stability")
-					time.Sleep(5 * time.Second)
-				}
-			}
-		} else {
-			// Original logic for <= 1000 tokens
-			maxConcurrent := 20 // Normal concurrent operations
-			if len(commitedTokenInfo) > 500 {
-				maxConcurrent = 10 // Reduce for larger counts
-			}
-			semaphore := make(chan struct{}, maxConcurrent)
-			
-			c.log.Info("Starting token state validation", 
-				"total_tokens", len(commitedTokenInfo),
-				"max_concurrent", maxConcurrent)
-			
-			for i, ti := range commitedTokenInfo {
-				t := ti.Token
-				wg.Add(1)
-				go func(token string, idx int, tokenType int) {
-					defer wg.Done()
-					
-					// Acquire semaphore
-					semaphore <- struct{}{}
-					defer func() { <-semaphore }()
-					
-					// Add small delay to prevent thundering herd
-					time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-					
-					c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
-				}(t, i, ti.TokenType)
-			}
-			wg.Wait()
+		// Original logic for all token counts
+		maxConcurrent := 20 // Normal concurrent operations
+		if len(commitedTokenInfo) > 500 {
+			maxConcurrent = 10 // Reduce for larger counts
 		}
+		semaphore := make(chan struct{}, maxConcurrent)
+		
+		c.log.Info("Starting token state validation", 
+			"total_tokens", len(commitedTokenInfo),
+			"max_concurrent", maxConcurrent)
+		
+		for i, ti := range commitedTokenInfo {
+			t := ti.Token
+			wg.Add(1)
+			go func(token string, idx int, tokenType int) {
+				defer wg.Done()
+				
+				// Acquire semaphore
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
+				
+				// Add small delay to prevent thundering herd
+				time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
+				
+				c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
+			}(t, i, ti.TokenType)
+		}
+		wg.Wait()
 
 	} else {
 		//sync the smartcontract tokenchain
@@ -719,92 +661,34 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		//in deploy mode pin token state of commited RBT tokens
 		tokenStateCheckResult = make([]TokenStateCheckResult, len(commitedTokenInfo))
 		
-		// Process in batches for large transactions
-		if len(commitedTokenInfo) > 1000 {
-			c.log.Info("Large transaction detected, processing in batches", 
-				"total_tokens", len(commitedTokenInfo))
-			
-			// Process in batches of 1000
-			batchSize := 1000
-			maxConcurrent := 10 // Same as for 1000 tokens
-			
-			for start := 0; start < len(commitedTokenInfo); start += batchSize {
-				end := start + batchSize
-				if end > len(commitedTokenInfo) {
-					end = len(commitedTokenInfo)
-				}
-				
-				batch := commitedTokenInfo[start:end]
-				c.log.Info("Processing token batch", 
-					"batch_start", start,
-					"batch_end", end,
-					"batch_size", len(batch),
-					"progress", fmt.Sprintf("%d/%d", end, len(commitedTokenInfo)))
-				
-				// Process this batch with same resources as 1000 tokens
-				semaphore := make(chan struct{}, maxConcurrent)
-				
-				for i := start; i < end; i++ {
-					ti := commitedTokenInfo[i]
-					wg.Add(1)
-					go func(token string, idx int, tokenType int) {
-						defer wg.Done()
-						
-						// Acquire semaphore
-						semaphore <- struct{}{}
-						defer func() { <-semaphore }()
-						
-						// Add small delay
-						time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-						
-						c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
-					}(ti.Token, i, ti.TokenType)
-				}
-				
-				// Wait for this batch to complete
-				wg.Wait()
-				
-				// Log batch completion
-				c.log.Info("Batch completed", 
-					"batch", fmt.Sprintf("%d-%d", start, end),
-					"remaining", len(commitedTokenInfo)-end)
-				
-				// Pause between batches to let IPFS recover
-				if end < len(commitedTokenInfo) {
-					c.log.Info("Pausing between batches for IPFS stability")
-					time.Sleep(5 * time.Second)
-				}
-			}
-		} else {
-			// Original logic for <= 1000 tokens
-			maxConcurrent := 20 // Normal concurrent operations
-			if len(commitedTokenInfo) > 500 {
-				maxConcurrent = 10 // Reduce for larger counts
-			}
-			semaphore := make(chan struct{}, maxConcurrent)
-			
-			c.log.Info("Starting token state validation", 
-				"total_tokens", len(commitedTokenInfo),
-				"max_concurrent", maxConcurrent)
-			
-			for i, ti := range commitedTokenInfo {
-				t := ti.Token
-				wg.Add(1)
-				go func(token string, idx int, tokenType int) {
-					defer wg.Done()
-					
-					// Acquire semaphore
-					semaphore <- struct{}{}
-					defer func() { <-semaphore }()
-					
-					// Add small delay to prevent thundering herd
-					time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-					
-					c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
-				}(t, i, ti.TokenType)
-			}
-			wg.Wait()
+		// Original logic for all token counts
+		maxConcurrent := 20 // Normal concurrent operations
+		if len(commitedTokenInfo) > 500 {
+			maxConcurrent = 10 // Reduce for larger counts
 		}
+		semaphore := make(chan struct{}, maxConcurrent)
+		
+		c.log.Info("Starting token state validation", 
+			"total_tokens", len(commitedTokenInfo),
+			"max_concurrent", maxConcurrent)
+		
+		for i, ti := range commitedTokenInfo {
+			t := ti.Token
+			wg.Add(1)
+			go func(token string, idx int, tokenType int) {
+				defer wg.Done()
+				
+				// Acquire semaphore
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
+				
+				// Add small delay to prevent thundering herd
+				time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
+				
+				c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
+			}(t, i, ti.TokenType)
+		}
+		wg.Wait()
 	} else {
 		//sync the nft tokenchain
 		address := consensusRequest.ExecuterPeerID + "." + consensusContract.GetExecutorDID()

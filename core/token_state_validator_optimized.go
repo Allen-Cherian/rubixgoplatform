@@ -121,10 +121,7 @@ func (tsv *TokenStateValidatorOptimized) ValidateTokenStatesOptimized(
 	}
 	
 	// Override default batch size with optimal
-	if total > 1000 {
-		tsv.batchSize = minInt(100, optimalBatchSize)
-		tsv.log.Info("Optimized batch size for 1000+ tokens", "batch_size", tsv.batchSize, "workers", workers)
-	} else if total > 500 {
+	if total > 500 {
 		tsv.batchSize = minInt(75, optimalBatchSize)
 	} else if total > 250 {
 		tsv.batchSize = minInt(50, optimalBatchSize)
@@ -382,31 +379,36 @@ func (tsv *TokenStateValidatorOptimized) validateSingleTokenOptimized(
 		}
 	}
 	
-	// Check DHT (this cannot be easily cached as it changes)
-	list, err := tsv.core.GetDHTddrs(tokenIDTokenStateHash)
-	if err != nil {
-		tsv.log.Error("Error fetching content for tokenstate hash", 
-			"hash", tokenIDTokenStateHash, 
-			"error", err)
-		result.Exhausted = true
-		result.Message = "Error fetching content for tokenstate hash: " + tokenIDTokenStateHash
-		resultArray[index] = result
-		return cacheHits
-	}
-	
-	// Use pre-cached quorum peers
-	qPeerIds := tsv.getQuorumPeers()
-	
-	// Remove quorum peers from DHT list
-	updatedList := tsv.removeStrings(list, qPeerIds)
-	
-	// If pin exists elsewhere, token is exhausted
-	if len(updatedList) > 1 {
-		tsv.log.Debug("Token state exhausted", "token", tokenId)
-		result.Exhausted = true
-		result.Message = "Token state is exhausted, Token being Double spent: " + tokenId
-		resultArray[index] = result
-		return cacheHits
+	// Skip DHT check in trusted network mode
+	if tsv.core.cfg.CfgData.TrustedNetwork {
+		tsv.log.Debug("Skipping DHT check in trusted network mode", "token", tokenId)
+	} else {
+		// Check DHT (this cannot be easily cached as it changes)
+		list, err := tsv.core.GetDHTddrs(tokenIDTokenStateHash)
+		if err != nil {
+			tsv.log.Error("Error fetching content for tokenstate hash", 
+				"hash", tokenIDTokenStateHash, 
+				"error", err)
+			result.Exhausted = true
+			result.Message = "Error fetching content for tokenstate hash: " + tokenIDTokenStateHash
+			resultArray[index] = result
+			return cacheHits
+		}
+		
+		// Use pre-cached quorum peers
+		qPeerIds := tsv.getQuorumPeers()
+		
+		// Remove quorum peers from DHT list
+		updatedList := tsv.removeStrings(list, qPeerIds)
+		
+		// If pin exists elsewhere, token is exhausted
+		if len(updatedList) > 1 {
+			tsv.log.Debug("Token state exhausted", "token", tokenId)
+			result.Exhausted = true
+			result.Message = "Token state is exhausted, Token being Double spent: " + tokenId
+			resultArray[index] = result
+			return cacheHits
+		}
 	}
 	
 	// Token state is free
@@ -462,12 +464,6 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 		tokenBasedWorkers = minInt(10, maxWorkersByMemory) // At least 10 for 100
 	} else if tokenCount <= 200 {
 		tokenBasedWorkers = minInt(15, maxWorkersByMemory) // At least 15 for 150-200
-	} else if tokenCount > 1000 {
-		// Cap resources for very large transactions - use same as 1000
-		tokenBasedWorkers = minInt(100, maxWorkersByMemory) // Cap at 100 workers
-		tsv.log.Info("Capping workers for large transaction", 
-			"token_count", tokenCount,
-			"capped_workers", tokenBasedWorkers)
 	}
 	
 	// Use the minimum of memory-based, token-based, and max workers

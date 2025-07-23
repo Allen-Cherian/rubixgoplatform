@@ -238,51 +238,56 @@ func (tsv *TokenStateValidator) validateSingleToken(
 		return
 	}
 	
-	// Check DHT to see if any pin exists
-	list, err := tsv.core.GetDHTddrs(tokenIDTokenStateHash)
-	if err != nil {
-		tsv.log.Error("Error fetching content for tokenstate hash", 
-			"hash", tokenIDTokenStateHash, 
-			"error", err)
-		result.Exhausted = true
-		result.Message = "Error fetching content for tokenstate hash: " + tokenIDTokenStateHash
-		resultArray[index] = result
-		return
-	}
-	
-	// Remove quorum peer IDs from list
-	qPeerIds := make([]string, 0)
-	for i := range quorumList {
-		pId, _, ok := util.ParseAddress(quorumList[i])
-		if !ok {
-			result.Error = fmt.Errorf("error parsing address")
-			result.Message = "Error parsing address"
+	// Skip DHT check in trusted network mode
+	if tsv.core.cfg.CfgData.TrustedNetwork {
+		tsv.log.Debug("Skipping DHT check in trusted network mode", "token", tokenId)
+	} else {
+		// Check DHT to see if any pin exists
+		list, err := tsv.core.GetDHTddrs(tokenIDTokenStateHash)
+		if err != nil {
+			tsv.log.Error("Error fetching content for tokenstate hash", 
+				"hash", tokenIDTokenStateHash, 
+				"error", err)
+			result.Exhausted = true
+			result.Message = "Error fetching content for tokenstate hash: " + tokenIDTokenStateHash
 			resultArray[index] = result
 			return
 		}
-		qPeerIds = append(qPeerIds, pId)
-	}
-	
-	// Add sender's peer ID
-	peerId := tsv.core.w.GetPeerID(did)
-	if peerId != "" {
-		qPeerIds = append(qPeerIds, peerId)
-	}
-	
-	// Remove quorum peers from DHT list
-	updatedList := tsv.removeStrings(list, qPeerIds)
-	tsv.log.Debug("DHT check results", 
-		"original_list", len(list),
-		"excluded_peers", len(qPeerIds),
-		"remaining_peers", len(updatedList))
-	
-	// If pin exists elsewhere, token is exhausted
-	if len(updatedList) > 1 {
-		tsv.log.Debug("Token state exhausted", "token", tokenId)
-		result.Exhausted = true
-		result.Message = "Token state is exhausted, Token being Double spent: " + tokenId
-		resultArray[index] = result
-		return
+		
+		// Remove quorum peer IDs from list
+		qPeerIds := make([]string, 0)
+		for i := range quorumList {
+			pId, _, ok := util.ParseAddress(quorumList[i])
+			if !ok {
+				result.Error = fmt.Errorf("error parsing address")
+				result.Message = "Error parsing address"
+				resultArray[index] = result
+				return
+			}
+			qPeerIds = append(qPeerIds, pId)
+		}
+		
+		// Add sender's peer ID
+		peerId := tsv.core.w.GetPeerID(did)
+		if peerId != "" {
+			qPeerIds = append(qPeerIds, peerId)
+		}
+		
+		// Remove quorum peers from DHT list
+		updatedList := tsv.removeStrings(list, qPeerIds)
+		tsv.log.Debug("DHT check results", 
+			"original_list", len(list),
+			"excluded_peers", len(qPeerIds),
+			"remaining_peers", len(updatedList))
+		
+		// If pin exists elsewhere, token is exhausted
+		if len(updatedList) > 1 {
+			tsv.log.Debug("Token state exhausted", "token", tokenId)
+			result.Exhausted = true
+			result.Message = "Token state is exhausted, Token being Double spent: " + tokenId
+			resultArray[index] = result
+			return
+		}
 	}
 	
 	// Token state is free

@@ -44,6 +44,7 @@ type ConfigData struct {
 	TestStorageConfig StorageConfig      `json:"test_storage_config"`
 	AsyncFTResponse   bool               `json:"async_ft_response"`
 	IPFSRecovery      *IPFSRecoveryConfig `json:"ipfs_recovery"`
+	TrustedNetwork    bool               `json:"trusted_network"` // Skip DHT/pin checks for trusted networks
 }
 
 func NewDefaultConfigData() ConfigData {

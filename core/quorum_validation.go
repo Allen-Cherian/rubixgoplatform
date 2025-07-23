@@ -226,9 +226,12 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 	return tt, nil
 }
 func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, quorumDID string, ti contract.TokenInfo, p *ipfsport.Peer, address, receiverAddress string) (error, bool) {
-	if ids, err := c.GetDHTddrs(ti.Token); err != nil || len(ids) == 0 {
-		c.log.Debug("Skipping token", "token", ti.Token, "reason", "no DHT entries found")
-		return nil, false // skip token if no DHT entries found
+	// Skip DHT check in trusted network mode
+	if !c.cfg.CfgData.TrustedNetwork {
+		if ids, err := c.GetDHTddrs(ti.Token); err != nil || len(ids) == 0 {
+			c.log.Debug("Skipping token", "token", ti.Token, "reason", "no DHT entries found")
+			return nil, false // skip token if no DHT entries found
+		}
 	}
 
 	err, syncResponse := c.syncTokenChainFrom(p, ti.BlockID, ti.Token, ti.TokenType)
@@ -791,53 +794,58 @@ func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []Tok
 		return
 	}
 
-	//check dht to see if any pin exist
-	list, err1 := c.GetDHTddrs(tokenIDTokenStateHash)
-	//try to call ipfs cat to check if any one has pinned the state i.e \
-	if err1 != nil {
-		c.log.Error("Error fetching content for the tokenstate ipfs hash :", tokenIDTokenStateHash, "Error", err)
-		result.Exhausted = true
-		result.Error = nil
-		result.Message = "Error fetching content for the tokenstate ipfs hash : " + tokenIDTokenStateHash
-		resultArray[index] = result
-		return
-	}
-	//remove ql peer ids from list
-	qPeerIds := make([]string, 0)
-
-	for i := range quorumList {
-		pId, _, ok := util.ParseAddress(quorumList[i])
-		if !ok {
-			c.log.Error("Error parsing addressing")
-			result.Error = err
-			result.Message = "Error parsing addressing"
+	// Skip DHT check in trusted network mode
+	if c.cfg.CfgData.TrustedNetwork {
+		c.log.Debug("Skipping DHT check in trusted network mode", "token", tokenId)
+	} else {
+		//check dht to see if any pin exist
+		list, err1 := c.GetDHTddrs(tokenIDTokenStateHash)
+		//try to call ipfs cat to check if any one has pinned the state i.e \
+		if err1 != nil {
+			c.log.Error("Error fetching content for the tokenstate ipfs hash :", tokenIDTokenStateHash, "Error", err)
+			result.Exhausted = true
+			result.Error = nil
+			result.Message = "Error fetching content for the tokenstate ipfs hash : " + tokenIDTokenStateHash
 			resultArray[index] = result
 			return
 		}
-		qPeerIds = append(qPeerIds, pId)
-	}
-	c.log.Debug("Quorum Peer IDs to remove", qPeerIds)
-	c.log.Debug("List of Peer IDs from DHT", list)
-	c.log.Debug("did in input", did)
-	peerId := c.w.GetPeerID(did)
-	if peerId == "" {
-		c.log.Error("Peer ID not found for DID", did)
-	} else {
-		c.log.Debug("Peer ID found for DID", did, peerId)
-		qPeerIds = append(qPeerIds, peerId)
-	}
+		//remove ql peer ids from list
+		qPeerIds := make([]string, 0)
 
-	updatedList := c.removeStrings(list, qPeerIds)
-	c.log.Debug("Updated List after removing quorum peer ids", updatedList)
-	c.log.Debug("len of updated list", len(updatedList))
-	//if pin exist abort
-	if len(updatedList) > 1 {
-		c.log.Debug("Token state is exhausted, Token is being Double spent. Token : ", tokenId)
-		result.Exhausted = true
-		result.Error = nil
-		result.Message = "Token state is exhausted, Token is being Double spent. Token : " + tokenId
-		resultArray[index] = result
-		return
+		for i := range quorumList {
+			pId, _, ok := util.ParseAddress(quorumList[i])
+			if !ok {
+				c.log.Error("Error parsing addressing")
+				result.Error = err
+				result.Message = "Error parsing addressing"
+				resultArray[index] = result
+				return
+			}
+			qPeerIds = append(qPeerIds, pId)
+		}
+		c.log.Debug("Quorum Peer IDs to remove", qPeerIds)
+		c.log.Debug("List of Peer IDs from DHT", list)
+		c.log.Debug("did in input", did)
+		peerId := c.w.GetPeerID(did)
+		if peerId == "" {
+			c.log.Error("Peer ID not found for DID", did)
+		} else {
+			c.log.Debug("Peer ID found for DID", did, peerId)
+			qPeerIds = append(qPeerIds, peerId)
+		}
+
+		updatedList := c.removeStrings(list, qPeerIds)
+		c.log.Debug("Updated List after removing quorum peer ids", updatedList)
+		c.log.Debug("len of updated list", len(updatedList))
+		//if pin exist abort
+		if len(updatedList) > 1 {
+			c.log.Debug("Token state is exhausted, Token is being Double spent. Token : ", tokenId)
+			result.Exhausted = true
+			result.Error = nil
+			result.Message = "Token state is exhausted, Token is being Double spent. Token : " + tokenId
+			resultArray[index] = result
+			return
+		}
 	}
 
 	c.log.Debug("Token state is not exhausted, Unique Txn")
