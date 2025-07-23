@@ -225,7 +225,7 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
 	
 	// Use resource-aware token state validator
-	if len(ti) > 100 {
+	if len(ti) > 50 {
 		// For large token counts, use the optimized validator
 		validator := NewTokenStateValidatorOptimized(c, did, cr.QuorumList)
 		tokenStateCheckResult = validator.ValidateTokenStatesOptimized(ti, did)

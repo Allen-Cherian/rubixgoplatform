@@ -31,27 +31,27 @@ func NewTokenStateValidator(core *Core) *TokenStateValidator {
 	rm := &ResourceMonitor{}
 	totalMB, availableMB := rm.GetMemoryStats()
 	
-	// Optimized approach: 1 worker per 1GB of available memory
-	maxWorkers := int(availableMB / 1024)
-	if maxWorkers < 2 {
-		maxWorkers = 2 // Minimum 2 workers for reasonable performance
+	// Aggressive approach: 1 worker per 512MB of available memory
+	maxWorkers := int(availableMB / 512)
+	if maxWorkers < 4 {
+		maxWorkers = 4 // Minimum 4 workers for better performance
 	}
-	if maxWorkers > 16 {
-		maxWorkers = 16 // Cap at 16 workers for very high-memory systems
+	if maxWorkers > 32 {
+		maxWorkers = 32 // Increased cap for high-memory systems
 	}
 	
-	// For very large token counts, reduce workers further
+	// Allow 2x CPU count for I/O bound operations
 	cpuCount := runtime.NumCPU()
-	if cpuCount < maxWorkers {
-		maxWorkers = cpuCount
+	if cpuCount*2 < maxWorkers {
+		maxWorkers = cpuCount * 2
 	}
 	
 	return &TokenStateValidator{
 		core:        core,
 		log:         core.log.Named("TokenStateValidator"),
 		maxWorkers:  maxWorkers,
-		batchSize:   20, // Process 20 tokens per batch for better throughput
-		memoryLimit: totalMB * 80 / 100, // Use max 80% of total memory
+		batchSize:   40, // Process 40 tokens per batch for better throughput
+		memoryLimit: totalMB * 95 / 100, // Use max 95% of total memory
 		gcInterval:  5 * time.Second,
 	}
 }

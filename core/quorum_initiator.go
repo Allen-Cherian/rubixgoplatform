@@ -55,8 +55,8 @@ const (
 	MinAdaptiveTimeout        = 5 * time.Minute
 	MaxAdaptiveTimeout        = 30 * time.Minute
 	
-	// Token-based timeout scaling
-	BaseTokenProcessingTime = 200 * time.Millisecond // Base time per token
+	// Token-based timeout scaling (optimized for aggressive settings)
+	BaseTokenProcessingTime = 150 * time.Millisecond // Reduced from 200ms with better performance
 	TokenBatchSize          = 100                    // Tokens processed in parallel
 	MinTokenTimeout         = 30 * time.Second       // Minimum timeout for token processing
 )
@@ -240,18 +240,17 @@ func calculateTokenBasedTimeout(tokenCount int) time.Duration {
 	// Tokens are distributed among workers
 	tokensPerWorker := (tokenCount + workerCount - 1) / workerCount
 	
-	// Processing time increases with tokens per worker
-	// Base: 200ms per token, but slower with fewer workers due to overhead
+	// Processing time with aggressive settings - more workers = better performance
 	var effectiveProcessingTime time.Duration
-	if workerCount <= 2 {
-		// With 1-2 workers, add 50% overhead
-		effectiveProcessingTime = time.Duration(float64(BaseTokenProcessingTime) * 1.5)
-	} else if workerCount <= 4 {
-		// With 3-4 workers, add 25% overhead
+	if workerCount <= 4 {
+		// With minimum 4 workers, add 25% overhead
 		effectiveProcessingTime = time.Duration(float64(BaseTokenProcessingTime) * 1.25)
+	} else if workerCount <= 8 {
+		// With 5-8 workers, add 10% overhead
+		effectiveProcessingTime = time.Duration(float64(BaseTokenProcessingTime) * 1.1)
 	} else {
-		// With 5+ workers, use base time
-		effectiveProcessingTime = BaseTokenProcessingTime
+		// With 9+ workers, use 90% of base time (better parallelism)
+		effectiveProcessingTime = time.Duration(float64(BaseTokenProcessingTime) * 0.9)
 	}
 	
 	// Calculate total processing time

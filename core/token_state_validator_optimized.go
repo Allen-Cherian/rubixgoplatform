@@ -45,27 +45,33 @@ func NewTokenStateValidatorOptimized(core *Core, did string, quorumList []string
 	rm := &ResourceMonitor{}
 	totalMB, availableMB := rm.GetMemoryStats()
 	
-	// Optimized approach: 1 worker per 1GB of available memory
-	maxWorkers := int(availableMB / 1024)
-	if maxWorkers < 2 {
-		maxWorkers = 2 // Minimum 2 workers for reasonable performance
+	// Aggressive approach: 1 worker per 512MB of available memory
+	maxWorkers := int(availableMB / 512)
+	if maxWorkers < 4 {
+		maxWorkers = 4 // Minimum 4 workers for better performance
 	}
-	if maxWorkers > 16 {
-		maxWorkers = 16 // Cap at 16 workers for very high-memory systems
+	if maxWorkers > 32 {
+		maxWorkers = 32 // Increased cap for high-memory systems
 	}
 	
-	// For very large token counts, reduce workers further
+	// Allow 2x CPU count for I/O bound operations
 	cpuCount := runtime.NumCPU()
-	if cpuCount < maxWorkers {
-		maxWorkers = cpuCount
+	if cpuCount*2 < maxWorkers {
+		maxWorkers = cpuCount * 2
+	}
+	
+	// Aggressive batch sizing
+	batchSize := 50 // Increased default
+	if len(quorumList) > 0 { // Rough estimate of token count from quorum size
+		batchSize = 75 // Larger batches for better throughput
 	}
 	
 	tsv := &TokenStateValidatorOptimized{
 		core:        core,
 		log:         core.log.Named("TokenStateValidatorOpt"),
 		maxWorkers:  maxWorkers,
-		batchSize:   25, // Increased batch size
-		memoryLimit: totalMB * 80 / 100,
+		batchSize:   batchSize,
+		memoryLimit: totalMB * 95 / 100, // Use up to 95% of total memory
 		gcInterval:  5 * time.Second,
 	}
 	
@@ -102,6 +108,22 @@ func (tsv *TokenStateValidatorOptimized) ValidateTokenStatesOptimized(
 	did string,
 ) []TokenStateCheckResult {
 	total := len(ti)
+	
+	// Aggressive batch sizing for large transactions
+	if total > 1000 {
+		tsv.batchSize = 100 // Process 100 tokens per batch
+		tsv.log.Info("Using large batch size for 1000+ tokens", "batch_size", tsv.batchSize)
+	} else if total > 500 {
+		tsv.batchSize = 75 // Process 75 tokens per batch
+	} else if total > 250 {
+		tsv.batchSize = 50
+	}
+	
+	// Already at 95%, no need to increase further
+	if total > 2000 {
+		tsv.log.Warn("Very large transaction, ensure sufficient memory", "tokens", total)
+	}
+	
 	tsv.log.Info("Starting optimized token validation", 
 		"total_tokens", total,
 		"max_workers", tsv.maxWorkers,
@@ -395,11 +417,11 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 	rm := &ResourceMonitor{}
 	_, availableMB := rm.GetMemoryStats()
 	
-	// Estimate memory per token operation
-	memPerWorker := uint64(25 * tsv.batchSize)
+	// Aggressive memory estimation: lower per-worker requirement
+	memPerWorker := uint64(10 * tsv.batchSize)
 	maxWorkersByMemory := int(availableMB / memPerWorker)
-	if maxWorkersByMemory < 2 {
-		maxWorkersByMemory = 2
+	if maxWorkersByMemory < 4 {
+		maxWorkersByMemory = 4
 	}
 	
 	// Token-based limits
@@ -408,17 +430,19 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 	case tokenCount <= 50:
 		maxWorkersByTokens = tsv.maxWorkers
 	case tokenCount <= 100:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 8)
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 16)
 	case tokenCount <= 250:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 6)
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 12)
 	case tokenCount <= 500:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 5)
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 10)
 	case tokenCount <= 1000:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 4)
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 8)
+	case tokenCount <= 1500:
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 6)
 	case tokenCount <= 2000:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 3)
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 5)
 	default:
-		maxWorkersByTokens = 2
+		maxWorkersByTokens = 4
 	}
 	
 	// Use the most conservative limit
@@ -446,7 +470,7 @@ func (tsv *TokenStateValidatorOptimized) monitorMemoryUsage(ctx context.Context)
 			stats := rm.GetResourceStats()
 			usagePct := stats["memory_usage_pct"].(float64)
 			
-			if usagePct > 95 {
+			if usagePct > 98 {
 				criticalCount++
 				tsv.log.Error("CRITICAL: Memory usage too high", 
 					"usage_pct", usagePct,
@@ -460,7 +484,7 @@ func (tsv *TokenStateValidatorOptimized) monitorMemoryUsage(ctx context.Context)
 				if criticalCount >= 2 {
 					tsv.clearCaches()
 				}
-			} else if usagePct > 85 {
+			} else if usagePct > 95 {
 				tsv.log.Warn("High memory usage during token validation", "usage_pct", usagePct)
 				runtime.GC()
 				criticalCount = 0
