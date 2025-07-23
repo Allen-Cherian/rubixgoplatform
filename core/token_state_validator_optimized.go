@@ -45,13 +45,13 @@ func NewTokenStateValidatorOptimized(core *Core, did string, quorumList []string
 	rm := &ResourceMonitor{}
 	totalMB, availableMB := rm.GetMemoryStats()
 	
-	// Aggressive approach: 1 worker per 512MB of available memory
-	maxWorkers := int(availableMB / 512)
-	if maxWorkers < 8 {
-		maxWorkers = 8 // Minimum 8 workers for better parallelism
+	// Balanced approach: 1 worker per 2GB of available memory
+	maxWorkers := int(availableMB / 2048)
+	if maxWorkers < 3 {
+		maxWorkers = 3 // Minimum 3 workers for reasonable performance
 	}
-	if maxWorkers > 64 {
-		maxWorkers = 64 // Cap at 64 workers
+	if maxWorkers > 32 {
+		maxWorkers = 32 // Cap at 32 workers
 	}
 	
 	// Allow 1.5x CPU count for I/O bound operations with higher memory
@@ -61,10 +61,10 @@ func NewTokenStateValidatorOptimized(core *Core, did string, quorumList []string
 		maxWorkers = maxCPUWorkers
 	}
 	
-	// Aggressive batch sizing for maximum throughput
-	batchSize := 200 // Large batches for better efficiency
-	if len(quorumList) > 0 { // Rough estimate of token count from quorum size
-		batchSize = 250 // Very large batches for parallel processing
+	// Larger batch sizing for 2GB workers
+	batchSize := 100 // Default batch size for 2GB workers
+	if len(quorumList) > 5 { // Larger transactions typically have more quorums
+		batchSize = 150 // Large batch size for 2GB workers
 	}
 	
 	tsv := &TokenStateValidatorOptimized{
@@ -110,14 +110,26 @@ func (tsv *TokenStateValidatorOptimized) ValidateTokenStatesOptimized(
 ) []TokenStateCheckResult {
 	total := len(ti)
 	
-	// Very aggressive batch sizing for large transactions
+	// Optimize batch size based on worker count and token count
+	workers := tsv.calculateOptimalWorkers(total)
+	optimalBatchSize := total / workers
+	if optimalBatchSize < 10 {
+		optimalBatchSize = 10 // Minimum batch size
+	}
+	if optimalBatchSize > 100 {
+		optimalBatchSize = 100 // Maximum batch size to prevent memory issues
+	}
+	
+	// Override default batch size with optimal
 	if total > 1000 {
-		tsv.batchSize = 300 // Process 300 tokens per batch for 1000+
-		tsv.log.Info("Using very large batch size for 1000+ tokens", "batch_size", tsv.batchSize)
+		tsv.batchSize = minInt(100, optimalBatchSize)
+		tsv.log.Info("Optimized batch size for 1000+ tokens", "batch_size", tsv.batchSize, "workers", workers)
 	} else if total > 500 {
-		tsv.batchSize = 250 // Process 250 tokens per batch
+		tsv.batchSize = minInt(75, optimalBatchSize)
 	} else if total > 250 {
-		tsv.batchSize = 200 // Keep large batches even for medium transactions
+		tsv.batchSize = minInt(50, optimalBatchSize)
+	} else {
+		tsv.batchSize = optimalBatchSize
 	}
 	
 	// Already at 95%, no need to increase further
@@ -136,9 +148,8 @@ func (tsv *TokenStateValidatorOptimized) ValidateTokenStatesOptimized(
 	// Group tokens by type for better cache hit rate
 	tokensByType := tsv.groupTokensByType(ti)
 	
-	// Adjust workers based on token count
-	workers := tsv.calculateOptimalWorkers(total)
-	tsv.log.Debug("Calculated optimal workers", "workers", workers, "tokens", total)
+	// Workers already calculated above for batch size optimization
+	tsv.log.Debug("Using optimized workers", "workers", workers, "tokens", total, "batch_size", tsv.batchSize)
 	
 	// Create channels for work distribution
 	workChan := make(chan workItem, workers*2)
@@ -166,12 +177,24 @@ func (tsv *TokenStateValidatorOptimized) ValidateTokenStatesOptimized(
 				
 				// Process batch when full or channel is empty
 				if len(batch) >= tsv.batchSize || len(workChan) == 0 {
+					batchStart := time.Now()
 					hits := tsv.processBatchOptimized(batch, did, tokenStateCheckResult)
 					atomic.AddInt32(&cacheHits, int32(hits))
 					
 					// Update progress
 					newCount := atomic.AddInt32(&completed, int32(len(batch)))
 					tsv.logProgress(newCount, int32(total), &lastLoggedPercent)
+					
+					// Log slow batches
+					batchDuration := time.Since(batchStart)
+					if batchDuration > 5*time.Second {
+						tsv.log.Warn("Slow batch processing", 
+							"worker", workerID,
+							"batch_size", len(batch),
+							"duration", batchDuration,
+							"completed", newCount,
+							"total", total)
+					}
 					
 					// Clear batch
 					batch = batch[:0]
@@ -425,9 +448,24 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 		maxWorkersByMemory = 3
 	}
 	
-	// Simply use the memory-based limit up to our max
-	// No artificial token-based restrictions
-	workers := minInt(maxWorkersByMemory, tsv.maxWorkers)
+	// Calculate workers based on tokens to avoid over-parallelization
+	// Rule: At least 10 tokens per worker for efficiency
+	tokenBasedWorkers := tokenCount / 10
+	if tokenBasedWorkers < 1 {
+		tokenBasedWorkers = 1
+	}
+	
+	// For small token counts, still use reasonable workers
+	if tokenCount <= 50 {
+		tokenBasedWorkers = minInt(5, maxWorkersByMemory) // At least 5 for small
+	} else if tokenCount <= 100 {
+		tokenBasedWorkers = minInt(10, maxWorkersByMemory) // At least 10 for 100
+	} else if tokenCount <= 200 {
+		tokenBasedWorkers = minInt(15, maxWorkersByMemory) // At least 15 for 150-200
+	}
+	
+	// Use the minimum of memory-based, token-based, and max workers
+	workers := minInt(minInt(maxWorkersByMemory, tokenBasedWorkers), tsv.maxWorkers)
 	if workers < 1 {
 		workers = 1
 	}
