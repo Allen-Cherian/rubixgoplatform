@@ -230,15 +230,48 @@ func (c *Core) QuroumSetup() {
 	}
 }
 
-// calculateTokenBasedTimeout calculates timeout based on the number of tokens
+// calculateTokenBasedTimeout calculates timeout based on the number of tokens and workers
 func calculateTokenBasedTimeout(tokenCount int) time.Duration {
-	// Calculate expected processing time based on token count
-	// Assuming tokens are processed in batches
-	batches := (tokenCount + TokenBatchSize - 1) / TokenBatchSize
-	processingTime := time.Duration(batches) * TokenBatchSize * BaseTokenProcessingTime
+	// Get actual worker count that will be used
+	rm := &ResourceMonitor{}
+	workerCount := rm.CalculateDynamicWorkers(tokenCount)
 	
-	// Add buffer for network delays and consensus
-	totalTimeout := processingTime * 3 // 3x buffer for safety
+	// Calculate expected processing time based on token count and workers
+	// Tokens are distributed among workers
+	tokensPerWorker := (tokenCount + workerCount - 1) / workerCount
+	
+	// Processing time increases with tokens per worker
+	// Base: 200ms per token, but slower with fewer workers due to overhead
+	var effectiveProcessingTime time.Duration
+	if workerCount <= 2 {
+		// With 1-2 workers, add 50% overhead
+		effectiveProcessingTime = time.Duration(float64(BaseTokenProcessingTime) * 1.5)
+	} else if workerCount <= 4 {
+		// With 3-4 workers, add 25% overhead
+		effectiveProcessingTime = time.Duration(float64(BaseTokenProcessingTime) * 1.25)
+	} else {
+		// With 5+ workers, use base time
+		effectiveProcessingTime = BaseTokenProcessingTime
+	}
+	
+	// Calculate total processing time
+	processingTime := time.Duration(tokensPerWorker) * effectiveProcessingTime
+	
+	// Add buffer for network delays, consensus, and IPFS operations
+	// More buffer needed with fewer workers due to sequential operations
+	var bufferMultiplier float64
+	switch {
+	case workerCount == 1:
+		bufferMultiplier = 5.0 // 5x buffer for single worker
+	case workerCount <= 3:
+		bufferMultiplier = 4.0 // 4x buffer for few workers
+	case workerCount <= 6:
+		bufferMultiplier = 3.0 // 3x buffer for moderate workers
+	default:
+		bufferMultiplier = 2.5 // 2.5x buffer for many workers
+	}
+	
+	totalTimeout := time.Duration(float64(processingTime) * bufferMultiplier)
 	
 	// Apply minimum timeout
 	if totalTimeout < MinTokenTimeout {

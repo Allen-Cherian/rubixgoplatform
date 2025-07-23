@@ -853,6 +853,23 @@ func (c *Core) pinTokenState(
 	did, transactionId, sender, receiver string,
 	tokenValue float64,
 ) error {
+	// Set up memory optimization for large operations
+	memOptimizer := NewMemoryOptimizer(c.log)
+	memOptimizer.OptimizeForLargeOperation(len(tokenStateCheckResult))
+	defer memOptimizer.RestoreDefaults()
+	
+	// Start memory monitoring
+	monitorDone := make(chan struct{})
+	go memOptimizer.MonitorMemoryPressure(monitorDone)
+	defer close(monitorDone)
+	
+	// Start periodic GC for large operations
+	if len(tokenStateCheckResult) > 100 {
+		gcDone := make(chan struct{})
+		go memOptimizer.PeriodicGC(gcDone, 30*time.Second)
+		defer close(gcDone)
+	}
+	
 	var (
 		ids              []string
 		total            = len(tokenStateCheckResult)
@@ -863,11 +880,23 @@ func (c *Core) pinTokenState(
 		wg               sync.WaitGroup
 		errOnce          sync.Once
 		firstErr         error
-		numWorkers       = runtime.NumCPU()
 		tasks            = make(chan int, total)
 		cancelableCtx, _ = context.WithCancel(ctx) // In case you want to cancel all on first error
 		providerMaps     = make([]model.TokenProviderMap, 0, total)
 	)
+
+	// Use dynamic worker sizing based on available resources
+	rm := &ResourceMonitor{}
+	numWorkers := rm.CalculateDynamicWorkers(total)
+	
+	// Log resource stats for monitoring
+	stats := rm.GetResourceStats()
+	c.log.Info("Resource-based worker pool sizing", 
+		"tokens", total, 
+		"workers", numWorkers,
+		"memory_available_mb", stats["memory_available_mb"],
+		"memory_usage_pct", stats["memory_usage_pct"],
+		"goroutines", stats["goroutines"])
 
 	if total == 0 {
 		c.log.Warn("No token states to pin")
