@@ -41,7 +41,7 @@ func (w *Wallet) Pin(hash string, role int, did string, transactionId string, se
 	if len(skipProviderDetails) > 0 && skipProviderDetails[0] {
 		return true, nil
 	}
-	err := w.AddProviderDetails(model.TokenProviderMap{Token: hash, Role: role, DID: did, FuncID: PinFunc, TransactionID: transactionId, Sender: sender, Receiver: receiver, TokenValue: tokenValue})
+	err = w.AddProviderDetails(model.TokenProviderMap{Token: hash, Role: role, DID: did, FuncID: PinFunc, TransactionID: transactionId, Sender: sender, Receiver: receiver, TokenValue: tokenValue})
 	if err != nil {
 		w.log.Info("Error addding provider details to DB", "error", err)
 		return false, err
