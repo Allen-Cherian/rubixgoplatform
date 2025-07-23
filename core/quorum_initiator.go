@@ -42,6 +42,20 @@ const (
 	GammaQuorumType
 )
 
+// Timeout configuration for quorum operations
+const (
+	// Individual quorum timeout - how long to wait for each quorum response
+	IndividualQuorumTimeout = 3 * time.Minute
+
+	// Total timeout - maximum time to wait for all quorum responses
+	TotalQuorumTimeout = 5 * time.Minute
+
+	// Adaptive timeout multipliers
+	AdaptiveTimeoutMultiplier = 2.0 // 2x the first response time
+	MinAdaptiveTimeout        = 2 * time.Minute
+	MaxAdaptiveTimeout        = 10 * time.Minute
+)
+
 type ConensusRequest struct {
 	ReqID              string       `json:"req_id"`
 	Type               int          `json:"type"`
@@ -420,6 +434,11 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	}()
 	c.quorumCount = QuorumRequired - len(cr.QuorumList)
 	c.noBalanceQuorumCount = QuorumRequired - len(cr.QuorumList)
+	// Track first response time for adaptive timeout
+	firstResponseTime := time.Now()
+	adaptiveTimeout := TotalQuorumTimeout
+	firstResponseReceived := false
+	
 	for _, a := range cr.QuorumList {
 		//This part of code is trying to connect to the quorums in quorum list, where various functions are called to pledge the tokens
 		//and checking of transaction by the quorum i.e. consensus for the transaction. Once the quorum is connected, it pledges and
@@ -428,28 +447,58 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		//available for pledging.
 		go c.connectQuorum(cr, a, AlphaQuorumType, sc)
 	}
+	
+	// Start total timeout timer
+	totalTimeout := time.After(adaptiveTimeout)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	
 	loop := true
 	var err error
 	err = nil
-	for {
-		time.Sleep(time.Second)
-		c.qlock.Lock()
-		cs, ok := c.quorumRequest[cr.ReqID]
-		if !ok {
+	
+	for loop {
+		select {
+		case <-totalTimeout:
 			loop = false
-			err = fmt.Errorf("invalid request")
-		} else {
-			if cs.Result.SuccessCount >= MinConsensusRequired {
+			err = fmt.Errorf("consensus timeout after %v", adaptiveTimeout)
+			c.log.Error("Consensus timeout", "timeout", adaptiveTimeout)
+		case <-ticker.C:
+			c.qlock.Lock()
+			cs, ok := c.quorumRequest[cr.ReqID]
+			if !ok {
 				loop = false
-			} else if cs.Result.RunningCount == 0 {
-				loop = false
-				err = fmt.Errorf("consensus failed, retry transaction after sometime")
-				c.log.Error("Consensus failed, retry transaction after sometime")
+				err = fmt.Errorf("invalid request")
+			} else {
+				// Check if this is the first response
+				if !firstResponseReceived && (cs.Result.SuccessCount > 0 || cs.Result.FailedCount > 0) {
+					firstResponseReceived = true
+					responseTime := time.Since(firstResponseTime)
+					
+					// Calculate adaptive timeout based on first response
+					adaptiveTimeout = time.Duration(float64(responseTime) * AdaptiveTimeoutMultiplier)
+					if adaptiveTimeout < MinAdaptiveTimeout {
+						adaptiveTimeout = MinAdaptiveTimeout
+					}
+					if adaptiveTimeout > MaxAdaptiveTimeout {
+						adaptiveTimeout = MaxAdaptiveTimeout
+					}
+					
+					// Update the total timeout
+					totalTimeout = time.After(adaptiveTimeout)
+					c.log.Debug("Adaptive timeout set", "firstResponseTime", responseTime, "adaptiveTimeout", adaptiveTimeout)
+				}
+				
+				if cs.Result.SuccessCount >= MinConsensusRequired {
+					loop = false
+					c.log.Info("Consensus achieved", "successCount", cs.Result.SuccessCount)
+				} else if cs.Result.RunningCount == 0 {
+					loop = false
+					err = fmt.Errorf("consensus failed, retry transaction after sometime")
+					c.log.Error("Consensus failed, retry transaction after sometime")
+				}
 			}
-		}
-		c.qlock.Unlock()
-		if !loop {
-			break
+			c.qlock.Unlock()
 		}
 	}
 	if err != nil {
@@ -1919,7 +1968,7 @@ func (c *Core) connectQuorum(cr *ConensusRequest, addr string, qt int, sc *contr
 		return
 	}
 	var cresp ConensusReply
-	err = p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, 60*time.Minute)
+	err = p.SendJSONRequest("POST", APIQuorumConsensus, nil, cr, &cresp, true, IndividualQuorumTimeout)
 	if err != nil {
 		c.log.Error("Failed to get consensus", "err", err)
 		c.finishConsensus(cr.ReqID, qt, p, false, "", nil, nil)

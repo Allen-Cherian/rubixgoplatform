@@ -170,6 +170,11 @@ func (c *Core) runIPFS() {
 			c.log.Error("failed to kill ipfs daemon", "err", err)
 		}
 		c.log.Info("IPFS daemon requested to close")
+		// Wait for the process to actually exit
+		if err := cmd.Wait(); err != nil {
+			// It's normal to get an error here since we killed the process
+			c.log.Debug("IPFS process wait error (expected)", "err", err)
+		}
 		c.log.Info("IPFS daemon finished")
 		c.SetIPFSState(false)
 	}()
@@ -226,6 +231,9 @@ func (c *Core) RunIPFS() error {
 	// Initialize IPFS operations wrapper
 	c.ipfsOps = NewIPFSOperations(c)
 
+	// Initialize IPFS scalability manager
+	c.ipfsScalability = NewIPFSScalabilityManager(c)
+
 	idoutput, err := c.ipfsOps.ID()
 	if err != nil {
 		c.log.Error("unable to get peer id", "err", err)
@@ -256,7 +264,12 @@ func (c *Core) stopIPFS() {
 		return
 	}
 
-	// Stop health manager first
+	// Stop scalability manager first
+	if c.ipfsScalability != nil {
+		c.ipfsScalability.Stop()
+	}
+
+	// Stop health manager
 	if c.ipfsHealth != nil {
 		c.ipfsHealth.Stop()
 	}
@@ -267,11 +280,21 @@ func (c *Core) stopIPFS() {
 	}
 
 	c.ipfsChan <- true
+	// Wait for IPFS to stop with a timeout
+	timeout := time.After(10 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	
 	for {
-		if !c.GetIPFSState() {
-			break
-		} else {
-			time.Sleep(10 * time.Millisecond)
+		select {
+		case <-timeout:
+			c.log.Error("Timeout waiting for IPFS to stop")
+			return
+		case <-ticker.C:
+			if !c.GetIPFSState() {
+				c.log.Info("IPFS stopped successfully")
+				return
+			}
 		}
 	}
 }

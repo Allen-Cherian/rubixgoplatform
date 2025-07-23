@@ -18,6 +18,22 @@ func NewIPFSOperations(core *Core) *IPFSOperations {
 	return &IPFSOperations{core: core}
 }
 
+// executeWithMetrics executes an operation with health checks and performance metrics
+func (ops *IPFSOperations) executeWithMetrics(ctx context.Context, operation func() error) error {
+	start := time.Now()
+	
+	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, operation)
+	
+	// Update metrics if scalability manager exists
+	if ops.core.ipfsScalability != nil {
+		responseTime := time.Since(start)
+		success := err == nil
+		ops.core.ipfsScalability.UpdateMetrics(responseTime, success)
+	}
+	
+	return err
+}
+
 // Add adds data to IPFS with health checks and retry logic
 func (ops *IPFSOperations) Add(data io.Reader, opts ...ipfsnode.AddOpts) (string, error) {
 	var result string
@@ -26,7 +42,7 @@ func (ops *IPFSOperations) Add(data io.Reader, opts ...ipfsnode.AddOpts) (string
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, func() error {
 		hash, err := ops.core.ipfs.Add(data, opts...)
 		if err != nil {
 			operationErr = err
@@ -51,7 +67,7 @@ func (ops *IPFSOperations) AddDir(path string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, func() error {
 		hash, err := ops.core.ipfs.AddDir(path)
 		if err != nil {
 			operationErr = err
@@ -76,7 +92,7 @@ func (ops *IPFSOperations) Cat(hash string) (io.ReadCloser, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, func() error {
 		reader, err := ops.core.ipfs.Cat(hash)
 		if err != nil {
 			operationErr = err
@@ -131,7 +147,7 @@ func (ops *IPFSOperations) ID() (*ipfsnode.IdOutput, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, func() error {
 		id, err := ops.core.ipfs.ID()
 		if err != nil {
 			operationErr = err
@@ -156,7 +172,7 @@ func (ops *IPFSOperations) BootstrapAdd(peers []string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, func() error {
 		added, err := ops.core.ipfs.BootstrapAdd(peers)
 		if err != nil {
 			operationErr = err
@@ -181,7 +197,7 @@ func (ops *IPFSOperations) BootstrapRmAll() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, func() error {
 		removed, err := ops.core.ipfs.BootstrapRmAll()
 		if err != nil {
 			operationErr = err
@@ -200,7 +216,7 @@ func (ops *IPFSOperations) BootstrapRmAll() ([]string, error) {
 
 // SwarmConnect connects to a peer with health checks
 func (ops *IPFSOperations) SwarmConnect(ctx context.Context, addr string) error {
-	return ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	return ops.executeWithMetrics(ctx, func() error {
 		return ops.core.ipfs.SwarmConnect(ctx, addr)
 	})
 }

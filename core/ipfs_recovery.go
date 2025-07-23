@@ -318,6 +318,12 @@ func (rm *IPFSRecoveryManager) reinitializeIPFS() error {
 	
 	// Reinitialize IPFS operations wrapper
 	rm.core.ipfsOps = NewIPFSOperations(rm.core)
+	
+	// Reinitialize scalability manager
+	if rm.core.ipfsScalability != nil {
+		rm.core.ipfsScalability.Stop()
+	}
+	rm.core.ipfsScalability = NewIPFSScalabilityManager(rm.core)
 
 	// Update wallet IPFS reference if wallet exists
 	if rm.core.w != nil {
@@ -389,6 +395,6 @@ func (rm *IPFSRecoveryManager) SetRestartDelay(delay time.Duration) {
 func (rm *IPFSRecoveryManager) Stop() {
 	rm.recoveryCancel()
 	rm.recoveryWg.Wait()
-	rm.stopIPFSProcess()
+	// Don't stop IPFS process here - let the main shutdown handle it
 	rm.log.Info("IPFS recovery manager stopped")
 }

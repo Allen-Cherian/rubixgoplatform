@@ -104,6 +104,7 @@ type Core struct {
 	ipfsHealth           *IPFSHealthManager
 	ipfsRecovery         *IPFSRecoveryManager
 	ipfsOps              *IPFSOperations
+	ipfsScalability      *IPFSScalabilityManager
 	d                    *did.DID
 	didDir               string
 	pm                   *ipfsport.PeerManager
@@ -415,6 +416,25 @@ func (c *Core) NodeStatus() bool {
 // IPFSOperations returns the IPFS operations wrapper
 func (c *Core) IPFSOperations() *IPFSOperations {
 	return c.ipfsOps
+}
+
+// GetIPFSStats returns IPFS health and scalability statistics
+func (c *Core) GetIPFSStats() map[string]interface{} {
+	stats := make(map[string]interface{})
+	
+	if c.ipfsHealth != nil {
+		stats["health"] = c.ipfsHealth.GetStats()
+	}
+	
+	if c.ipfsScalability != nil {
+		stats["scalability"] = c.ipfsScalability.GetScalabilityStats()
+	}
+	
+	if c.ipfsRecovery != nil {
+		stats["recovery"] = c.ipfsRecovery.GetRecoveryStats()
+	}
+	
+	return stats
 }
 
 func (c *Core) StopCore() {
