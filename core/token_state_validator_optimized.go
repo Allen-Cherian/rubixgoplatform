@@ -462,6 +462,12 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 		tokenBasedWorkers = minInt(10, maxWorkersByMemory) // At least 10 for 100
 	} else if tokenCount <= 200 {
 		tokenBasedWorkers = minInt(15, maxWorkersByMemory) // At least 15 for 150-200
+	} else if tokenCount > 1000 {
+		// Cap resources for very large transactions - use same as 1000
+		tokenBasedWorkers = minInt(100, maxWorkersByMemory) // Cap at 100 workers
+		tsv.log.Info("Capping workers for large transaction", 
+			"token_count", tokenCount,
+			"capped_workers", tokenBasedWorkers)
 	}
 	
 	// Use the minimum of memory-based, token-based, and max workers
