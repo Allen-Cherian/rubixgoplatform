@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/rubixchain/rubixgoplatform/block"
