@@ -39,7 +39,7 @@ func (ops *IPFSOperations) Add(data io.Reader, opts ...ipfsnode.AddOpts) (string
 	var result string
 	var operationErr error
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	err := ops.executeWithMetrics(ctx, func() error {
@@ -64,7 +64,7 @@ func (ops *IPFSOperations) AddDir(path string) (string, error) {
 	var result string
 	var operationErr error
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
 	err := ops.executeWithMetrics(ctx, func() error {
@@ -111,7 +111,7 @@ func (ops *IPFSOperations) Cat(hash string) (io.ReadCloser, error) {
 
 // Get retrieves a file from IPFS with health checks
 func (ops *IPFSOperations) Get(hash, path string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	return ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {

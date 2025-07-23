@@ -45,15 +45,15 @@ const (
 // Timeout configuration for quorum operations
 const (
 	// Individual quorum timeout - how long to wait for each quorum response
-	IndividualQuorumTimeout = 3 * time.Minute
+	IndividualQuorumTimeout = 10 * time.Minute
 
 	// Total timeout - maximum time to wait for all quorum responses
-	TotalQuorumTimeout = 5 * time.Minute
+	TotalQuorumTimeout = 15 * time.Minute
 
 	// Adaptive timeout multipliers
-	AdaptiveTimeoutMultiplier = 2.0 // 2x the first response time
-	MinAdaptiveTimeout        = 2 * time.Minute
-	MaxAdaptiveTimeout        = 10 * time.Minute
+	AdaptiveTimeoutMultiplier = 2.5 // 2.5x the first response time
+	MinAdaptiveTimeout        = 5 * time.Minute
+	MaxAdaptiveTimeout        = 30 * time.Minute
 )
 
 type ConensusRequest struct {
