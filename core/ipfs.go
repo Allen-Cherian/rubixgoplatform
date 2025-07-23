@@ -54,12 +54,15 @@ func (c *Core) initIPFS(ipfsdir string) error {
 			c.log.Error("failed to read ipfs config file", "err", err)
 			return err
 		}
-		port := fmt.Sprintf("%d", c.cfg.CfgData.Ports.SwarmPort)
-		configData = []byte(strings.Replace(string(configData), "4001", port, -1))
-		port = fmt.Sprintf("%d", c.cfg.CfgData.Ports.IPFSPort)
-		configData = []byte(strings.Replace(string(configData), "5001", port, -1))
-		port = fmt.Sprintf("%d", c.cfg.CfgData.Ports.IPFSAPIPort)
-		configData = []byte(strings.Replace(string(configData), "8080", port, -1))
+		// Replace ports more precisely to avoid unintended replacements
+		swarmPort := fmt.Sprintf("%d", c.cfg.CfgData.Ports.SwarmPort)
+		configData = []byte(strings.Replace(string(configData), "/tcp/4001", "/tcp/"+swarmPort, -1))
+		
+		apiPort := fmt.Sprintf("%d", c.cfg.CfgData.Ports.IPFSPort)
+		configData = []byte(strings.Replace(string(configData), "/tcp/5001", "/tcp/"+apiPort, -1))
+		
+		gatewayPort := fmt.Sprintf("%d", c.cfg.CfgData.Ports.IPFSAPIPort)
+		configData = []byte(strings.Replace(string(configData), "/tcp/8080", "/tcp/"+gatewayPort, -1))
 		f, err := os.OpenFile(ipfsConfigFile,
 			os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
