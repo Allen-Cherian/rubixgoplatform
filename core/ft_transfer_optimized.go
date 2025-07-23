@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,9 +25,16 @@ func (c *Core) OptimizedFTTransferLocking(ftsForTxn []wallet.FTToken, did string
 	
 	// Process tokens in parallel batches
 	batchSize := 100
-	numWorkers := 10
-	if len(ftsForTxn) < 1000 {
-		numWorkers = 5
+	// Use CPU-based worker count for better system adaptation
+	numWorkers := runtime.NumCPU()
+	// Limit workers for SQLite to avoid database locking
+	if numWorkers > 4 {
+		numWorkers = 4 // SQLite performs better with limited concurrent writes
+	}
+	if len(ftsForTxn) < 100 {
+		numWorkers = 1 // Small transfers don't need parallelism
+	} else if len(ftsForTxn) < 500 {
+		numWorkers = 2
 	}
 	
 	c.log.Info("Starting optimized FT token locking", 

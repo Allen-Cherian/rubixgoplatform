@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -348,6 +349,7 @@ type Command struct {
 	nftValue                     float64
 	ftNumStartIndex              int
 	enableTrustedNetwork         bool
+	backupDB                     bool
 }
 
 func showVersion() {
@@ -366,6 +368,137 @@ func showHelp() {
 	for i := range commands {
 		fmt.Printf("     %20s : %s\n\n", commands[i], commandsHelp[i])
 	}
+}
+
+// backupDatabase creates a timestamped backup of the database
+func (cmd *Command) backupDatabase() error {
+	// Determine database path based on config
+	var dbPath string
+	if cmd.cfg.CfgData.StorageConfig.DBType == "sqlite3" || cmd.cfg.CfgData.StorageConfig.DBType == "" {
+		// For SQLite, DBAddress contains the file path
+		dbPath = cmd.cfg.CfgData.StorageConfig.DBAddress
+		if dbPath == "" {
+			// Default SQLite database path
+			dbPath = filepath.Join(cmd.runDir, "rubixdata.db")
+		}
+	} else {
+		// For other database types, we can't do file-based backup
+		cmd.log.Info("Database backup is only supported for SQLite databases")
+		return nil
+	}
+	
+	// Check if database file exists
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		cmd.log.Info("No database file found to backup", "path", dbPath)
+		return nil
+	}
+	
+	// Create backup directory
+	backupDir := filepath.Join(cmd.runDir, "db_backups")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return fmt.Errorf("failed to create backup directory: %w", err)
+	}
+	
+	// Generate backup filename with timestamp
+	timestamp := time.Now().Format("20060102_150405")
+	backupFileName := fmt.Sprintf("rubixdata_backup_%s.db", timestamp)
+	backupPath := filepath.Join(backupDir, backupFileName)
+	
+	// Copy database file
+	sourceFile, err := os.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open source database: %w", err)
+	}
+	defer sourceFile.Close()
+	
+	destFile, err := os.Create(backupPath)
+	if err != nil {
+		return fmt.Errorf("failed to create backup file: %w", err)
+	}
+	defer destFile.Close()
+	
+	// Copy the file
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return fmt.Errorf("failed to copy database: %w", err)
+	}
+	
+	// Also backup WAL and SHM files if they exist (for SQLite WAL mode)
+	walPath := dbPath + "-wal"
+	if _, err := os.Stat(walPath); err == nil {
+		if err := cmd.copyFile(walPath, backupPath+"-wal"); err != nil {
+			cmd.log.Warn("Failed to backup WAL file", "err", err)
+		}
+	}
+	
+	shmPath := dbPath + "-shm"
+	if _, err := os.Stat(shmPath); err == nil {
+		if err := cmd.copyFile(shmPath, backupPath+"-shm"); err != nil {
+			cmd.log.Warn("Failed to backup SHM file", "err", err)
+		}
+	}
+	
+	cmd.log.Info("Database backup completed successfully", "backup_path", backupPath)
+	
+	// Clean up old backups (keep only last 10)
+	if err := cmd.cleanupOldBackups(backupDir); err != nil {
+		cmd.log.Warn("Failed to cleanup old backups", "err", err)
+	}
+	
+	return nil
+}
+
+// copyFile is a helper function to copy a file
+func (cmd *Command) copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+	
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+	
+	_, err = io.Copy(destFile, sourceFile)
+	return err
+}
+
+// cleanupOldBackups removes old backup files, keeping only the most recent ones
+func (cmd *Command) cleanupOldBackups(backupDir string) error {
+	files, err := os.ReadDir(backupDir)
+	if err != nil {
+		return err
+	}
+	
+	// Filter backup files
+	var backupFiles []os.DirEntry
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), "rubixdata_backup_") && strings.HasSuffix(file.Name(), ".db") {
+			backupFiles = append(backupFiles, file)
+		}
+	}
+	
+	// If we have more than 10 backups, remove the oldest ones
+	if len(backupFiles) > 10 {
+		// Files are already sorted by name (which includes timestamp)
+		for i := 0; i < len(backupFiles)-10; i++ {
+			oldBackup := filepath.Join(backupDir, backupFiles[i].Name())
+			if err := os.Remove(oldBackup); err != nil {
+				cmd.log.Warn("Failed to remove old backup", "file", oldBackup, "err", err)
+			} else {
+				cmd.log.Info("Removed old backup", "file", oldBackup)
+			}
+			
+			// Also remove associated WAL and SHM files if they exist
+			os.Remove(oldBackup + "-wal")
+			os.Remove(oldBackup + "-shm")
+		}
+	}
+	
+	return nil
 }
 
 // Get preferred outbound ip of this machine
@@ -397,6 +530,14 @@ func (cmd *Command) runApp() {
 
 	// Override directory path
 	cmd.cfg.DirPath = cmd.runDir
+	
+	// Backup database if flag is set
+	if cmd.backupDB {
+		if err := cmd.backupDatabase(); err != nil {
+			cmd.log.Error("Failed to backup database", "err", err)
+			return
+		}
+	}
 	
 	// Override trusted network setting if flag is provided
 	if cmd.enableTrustedNetwork {
@@ -578,6 +719,7 @@ func Run(args []string) {
 	flag.Float64Var(&cmd.nftValue, "nftValue", 0.0, "Value of the NFT")
 	flag.IntVar(&cmd.ftNumStartIndex, "ftStartIndex", 0, "Start index of the FTs to be created")
 	flag.BoolVar(&cmd.enableTrustedNetwork, "enableTrustedNetwork", false, "Enable trusted network mode (skips DHT checks)")
+	flag.BoolVar(&cmd.backupDB, "backupDB", false, "Create backup of database before starting node")
 
 	if len(os.Args) < 2 {
 		fmt.Println("Invalid Command")
