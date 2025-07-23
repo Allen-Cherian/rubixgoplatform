@@ -45,25 +45,26 @@ func NewTokenStateValidatorOptimized(core *Core, did string, quorumList []string
 	rm := &ResourceMonitor{}
 	totalMB, availableMB := rm.GetMemoryStats()
 	
-	// Aggressive approach: 1 worker per 512MB of available memory
-	maxWorkers := int(availableMB / 512)
-	if maxWorkers < 4 {
-		maxWorkers = 4 // Minimum 4 workers for better performance
+	// Balanced approach: 1 worker per 2GB of available memory
+	maxWorkers := int(availableMB / 2048)
+	if maxWorkers < 3 {
+		maxWorkers = 3 // Minimum 3 workers for reasonable performance
 	}
-	if maxWorkers > 32 {
-		maxWorkers = 32 // Increased cap for high-memory systems
+	if maxWorkers > 12 {
+		maxWorkers = 12 // Cap at 12 workers (24GB RAM)
 	}
 	
-	// Allow 2x CPU count for I/O bound operations
+	// Allow 1.5x CPU count for I/O bound operations with higher memory
 	cpuCount := runtime.NumCPU()
-	if cpuCount*2 < maxWorkers {
-		maxWorkers = cpuCount * 2
+	maxCPUWorkers := int(float64(cpuCount) * 1.5)
+	if maxCPUWorkers < maxWorkers {
+		maxWorkers = maxCPUWorkers
 	}
 	
-	// Aggressive batch sizing
-	batchSize := 50 // Increased default
+	// Large batch sizing with 2GB per worker
+	batchSize := 100 // Increased default for 2GB workers
 	if len(quorumList) > 0 { // Rough estimate of token count from quorum size
-		batchSize = 75 // Larger batches for better throughput
+		batchSize = 150 // Much larger batches with more memory
 	}
 	
 	tsv := &TokenStateValidatorOptimized{
@@ -417,11 +418,11 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 	rm := &ResourceMonitor{}
 	_, availableMB := rm.GetMemoryStats()
 	
-	// Aggressive memory estimation: lower per-worker requirement
-	memPerWorker := uint64(10 * tsv.batchSize)
+	// Balanced memory estimation: 2GB per worker with larger batches
+	memPerWorker := uint64(2048) // 2GB per worker
 	maxWorkersByMemory := int(availableMB / memPerWorker)
-	if maxWorkersByMemory < 4 {
-		maxWorkersByMemory = 4
+	if maxWorkersByMemory < 3 {
+		maxWorkersByMemory = 3
 	}
 	
 	// Token-based limits
@@ -430,19 +431,19 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 	case tokenCount <= 50:
 		maxWorkersByTokens = tsv.maxWorkers
 	case tokenCount <= 100:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 16)
-	case tokenCount <= 250:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 12)
-	case tokenCount <= 500:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 10)
-	case tokenCount <= 1000:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 8)
-	case tokenCount <= 1500:
 		maxWorkersByTokens = minInt(tsv.maxWorkers, 6)
-	case tokenCount <= 2000:
+	case tokenCount <= 250:
 		maxWorkersByTokens = minInt(tsv.maxWorkers, 5)
+	case tokenCount <= 500:
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 4)
+	case tokenCount <= 1000:
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 4)
+	case tokenCount <= 1500:
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 3)
+	case tokenCount <= 2000:
+		maxWorkersByTokens = minInt(tsv.maxWorkers, 3)
 	default:
-		maxWorkersByTokens = 4
+		maxWorkersByTokens = 2
 	}
 	
 	// Use the most conservative limit

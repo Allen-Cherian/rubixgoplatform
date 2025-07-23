@@ -749,6 +749,12 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		crep.Result = syncIssueTokens
 	}
 	c.log.Debug("Token ownership validation completed. Checking for errors")
+	
+	// Log progress: 1st phase complete (ownership validation)
+	if len(ti) > 50 {
+		c.log.Info("Progress: Token ownership validation", "phase", "1/3", "status", "completed", "tokens", len(ti))
+	}
+	
 	if err != nil {
 		validateTokenOwnershipErrorString := fmt.Sprint(err)
 		if strings.Contains(validateTokenOwnershipErrorString, "parent token is not in burnt stage") {
@@ -787,6 +793,12 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	*/
 
 	c.log.Debug("Validating token state for FT Consensus")
+	
+	// Log progress: 2nd phase starting (token state validation)
+	if len(ti) > 50 {
+		c.log.Info("Progress: Token state validation", "phase", "2/3", "status", "starting", "tokens", len(ti))
+	}
+	
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
 	
@@ -851,6 +863,13 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		}
 		c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
 	}
+	
+	// Log progress: 3rd phase starting (token pinning)
+	if len(ti) > 50 {
+		c.log.Info("Progress: Token state validation", "phase", "2/3", "status", "completed", "tokens", len(ti))
+		c.log.Info("Progress: Token pinning", "phase", "3/3", "status", "starting", "tokens", len(ti))
+	}
+	
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
@@ -865,6 +884,33 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
 
+	// Print comprehensive progress summary
+	totalTokens := len(ti)
+	var validTokens, exhaustedTokens, errorTokens int
+	for _, result := range tokenStateCheckResult {
+		if result.Error != nil {
+			errorTokens++
+		} else if result.Exhausted {
+			exhaustedTokens++
+		} else {
+			validTokens++
+		}
+	}
+	
+	// Log final phase completion
+	if totalTokens > 50 {
+		c.log.Info("Progress: Token pinning", "phase", "3/3", "status", "completed", "tokens", totalTokens)
+	}
+	
+	c.log.Info("Token validation summary",
+		"total_tokens", totalTokens,
+		"valid_tokens", validTokens,
+		"exhausted_tokens", exhaustedTokens,
+		"error_tokens", errorTokens,
+		"valid_percentage", fmt.Sprintf("%.1f%%", float64(validTokens)*100/float64(totalTokens)),
+		"exhausted_percentage", fmt.Sprintf("%.1f%%", float64(exhaustedTokens)*100/float64(totalTokens)),
+		"error_percentage", fmt.Sprintf("%.1f%%", float64(errorTokens)*100/float64(totalTokens)))
+	
 	c.log.Debug("Finished FT Tokenstate check")
 
 	qHash := util.CalculateHash(sc.GetBlock(), "SHA3-256")
