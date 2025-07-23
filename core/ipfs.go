@@ -166,17 +166,47 @@ func (c *Core) runIPFS() {
 
 	go func() {
 		<-c.ipfsChan
-		if err := cmd.Process.Kill(); err != nil {
-			c.log.Error("failed to kill ipfs daemon", "err", err)
+		c.log.Info("IPFS daemon shutdown requested")
+		
+		// Try graceful shutdown first with interrupt signal
+		if runtime.GOOS == "windows" {
+			// Windows doesn't support interrupt, go straight to kill
+			if err := cmd.Process.Kill(); err != nil {
+				c.log.Error("failed to kill ipfs daemon", "err", err)
+			}
+		} else {
+			// Unix-like systems: try SIGTERM first, then SIGKILL
+			cmd.Process.Signal(os.Interrupt)
+			
+			// Give it 5 seconds to shutdown gracefully
+			done := make(chan error, 1)
+			go func() {
+				done <- cmd.Wait()
+			}()
+			
+			select {
+			case <-done:
+				// Process exited gracefully
+				c.log.Info("IPFS daemon stopped gracefully")
+			case <-time.After(5 * time.Second):
+				// Force kill after timeout
+				c.log.Warn("IPFS daemon didn't stop gracefully, forcing kill")
+				if err := cmd.Process.Kill(); err != nil {
+					c.log.Error("failed to kill ipfs daemon", "err", err)
+				}
+				// Wait for the process to actually exit
+				if err := cmd.Wait(); err != nil {
+					c.log.Debug("IPFS process wait error (expected after kill)", "err", err)
+				}
+			}
 		}
-		c.log.Info("IPFS daemon requested to close")
-		// Wait for the process to actually exit
-		if err := cmd.Wait(); err != nil {
-			// It's normal to get an error here since we killed the process
-			c.log.Debug("IPFS process wait error (expected)", "err", err)
-		}
-		c.log.Info("IPFS daemon finished")
+		
+		c.log.Info("IPFS daemon process terminated")
 		c.SetIPFSState(false)
+		
+		// Close stdin/stdout to release any blocked reads
+		stdin.Close()
+		stdout.Close()
 	}()
 
 	scanner := bufio.NewScanner(stdout)

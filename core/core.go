@@ -107,6 +107,7 @@ type Core struct {
 	ipfsScalability      *IPFSScalabilityManager
 	connRecovery         *ConnectionRecovery
 	p2pReconnect         *P2PReconnectManager
+	shutdownMgr          *ShutdownManager
 	d                    *did.DID
 	didDir               string
 	pm                   *ipfsport.PeerManager
@@ -449,20 +450,16 @@ func (c *Core) GetIPFSStats() map[string]interface{} {
 }
 
 func (c *Core) StopCore() {
-	// exp := model.ExploreModel{
-	// 	Cmd:    ExpPeerStatusCmd,
-	// 	PeerID: c.peerID,
-	// 	Status: "Off",
-	// }
-	// err := c.PublishExplorer(&exp)
-	// if err != nil {
-	// 	c.log.Error("Failed to publish explorer model", "err", err)
-	// 	return
-	// }
-	time.Sleep(time.Second)
-	c.stopIPFS()
-	if c.l != nil {
-		c.l.Shutdown()
+	// Initialize shutdown manager if not already done
+	if c.shutdownMgr == nil {
+		c.shutdownMgr = NewShutdownManager(c)
+	}
+	
+	// Perform graceful shutdown
+	if err := c.shutdownMgr.Shutdown(); err != nil {
+		c.log.Error("Shutdown completed with errors", "error", err)
+	} else {
+		c.log.Info("Shutdown completed successfully")
 	}
 }
 
