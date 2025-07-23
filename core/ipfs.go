@@ -80,7 +80,7 @@ func (c *Core) initIPFS(ipfsdir string) error {
 		}
 		time.Sleep(1 * time.Second)
 		c.runIPFS()
-		c.ipfs = ipfsnode.NewLocalShell()
+		c.ipfs = ipfsnode.NewShell(fmt.Sprintf("localhost:%d", c.cfg.CfgData.Ports.IPFSPort))
 		if c.ipfs == nil {
 			c.log.Error("failed create ipfs shell")
 			return fmt.Errorf("failed create ipfs shell")
@@ -188,7 +188,8 @@ func (c *Core) runIPFS() {
 		c.log.Info(m)
 	}
 
-	//time.Sleep(15 * time.Second)
+	// Wait for IPFS to be ready before continuing
+	time.Sleep(5 * time.Second)
 }
 
 // RunIPFS will run the IPFS daemon
@@ -203,7 +204,10 @@ func (c *Core) RunIPFS() error {
 
 	c.runIPFS()
 
-	c.ipfs = ipfsnode.NewLocalShell()
+	// Wait for IPFS daemon to be ready
+	time.Sleep(5 * time.Second)
+
+	c.ipfs = ipfsnode.NewShell(fmt.Sprintf("localhost:%d", c.cfg.CfgData.Ports.IPFSPort))
 
 	if c.ipfs == nil {
 		c.log.Error("failed create ipfs shell")

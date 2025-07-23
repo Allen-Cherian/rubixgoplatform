@@ -271,6 +271,10 @@ func (rm *IPFSRecoveryManager) restartIPFS() error {
 	rm.core.ipfsLock.Unlock()
 
 	rm.log.Info("IPFS daemon started, waiting for readiness")
+	
+	// Wait for IPFS daemon to initialize
+	time.Sleep(5 * time.Second)
+	
 	return nil
 }
 
@@ -298,7 +302,7 @@ func (rm *IPFSRecoveryManager) reinitializeIPFS() error {
 	rm.log.Info("Reinitializing IPFS shell and operations")
 
 	// Create new IPFS shell
-	newShell := ipfsnode.NewLocalShell()
+	newShell := ipfsnode.NewShell(fmt.Sprintf("localhost:%d", rm.cfg.CfgData.Ports.IPFSPort))
 	if newShell == nil {
 		return fmt.Errorf("failed to create new IPFS shell")
 	}

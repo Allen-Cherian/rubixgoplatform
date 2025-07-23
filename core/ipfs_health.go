@@ -48,7 +48,7 @@ func NewIPFSHealthManager(ipfs *ipfsnode.Shell, cfg *config.Config, log logger.L
 		log:                 log.Named("IPFSHealth"),
 		cfg:                 cfg,
 		isHealthy:           false,
-		healthCheckURL:      fmt.Sprintf("http://127.0.0.1:%d/api/v0/version", cfg.CfgData.Ports.IPFSAPIPort),
+		healthCheckURL:      fmt.Sprintf("http://127.0.0.1:%d/api/v0/version", cfg.CfgData.Ports.IPFSPort),
 		globalSem:           make(chan struct{}, 10), // Default to 10 concurrent operations
 		maxConcurrent:       10,
 		healthCheckerCtx:    ctx,
