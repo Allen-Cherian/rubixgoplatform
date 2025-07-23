@@ -733,6 +733,12 @@ func (w *Wallet) FTTokensTransffered(did string, ti []contract.TokenInfo, b *blo
 	return nil
 }
 func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Block, senderPeerId string, receiverPeerId string, pinningServiceMode bool, ipfsShell *ipfsnode.Shell) ([]string, error) {
+	// For large transfers, use parallel processing
+	if len(ti) > 50 {
+		w.log.Info("Using parallel token receiver for large transfer", "token_count", len(ti))
+		return w.ParallelTokensReceived(did, ti, b, senderPeerId, receiverPeerId, pinningServiceMode, ipfsShell)
+	}
+	
 	w.l.Lock()
 	defer w.l.Unlock()
 	// TODO :: Needs to be address
