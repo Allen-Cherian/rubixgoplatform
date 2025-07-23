@@ -227,13 +227,68 @@ func calculateTokensNeeded(availableTokens []Token, requiredAmount float64) []To
 	return selectedTokens
 }
 
-// GetFreeTokensOptimized is the main entry point for optimized token fetching
-func (w *Wallet) GetFreeTokensOptimized(did string, amount float64) ([]Token, error) {
-	// Use the optimized version for large amounts
-	if amount > 100 {
-		return w.OptimizedGetFreeTokens(did, amount)
+// GetTokensForOptimizedTransfer is the main entry point for optimized token fetching
+func (w *Wallet) GetTokensForOptimizedTransfer(did string, amount float64, txnMode int) ([]Token, error) {
+	w.l.Lock()
+	defer w.l.Unlock()
+	
+	startTime := time.Now()
+	
+	// Step 1: Batch fetch all free tokens
+	var allFreeTokens []Token
+	var err error
+	
+	if txnMode == 0 { // RBT Transfer mode
+		err = w.s.Read(TokenStorage, &allFreeTokens, "did=? AND (token_status=? OR token_status=?)", did, TokenIsFree, TokenIsPinnedAsService)
+	} else { // Pinning service mode
+		err = w.s.Read(TokenStorage, &allFreeTokens, "did=? AND token_status=?", did, TokenIsFree)
 	}
 	
-	// For small amounts, use the regular method
-	return w.GetFreeTokens(did)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch free tokens: %v", err)
+	}
+	
+	w.log.Info("Fetched free tokens for optimization", 
+		"count", len(allFreeTokens), 
+		"fetch_time", time.Since(startTime))
+	
+	if len(allFreeTokens) == 0 {
+		return []Token{}, nil
+	}
+	
+	// Step 2: Calculate how many tokens we need
+	tokensNeeded := calculateTokensNeeded(allFreeTokens, amount)
+	if len(tokensNeeded) == 0 {
+		return nil, fmt.Errorf("insufficient free tokens: have %d tokens, need %.2f value", 
+			len(allFreeTokens), amount)
+	}
+	
+	w.log.Info("Tokens needed for transaction", 
+		"required_value", amount,
+		"token_count", len(tokensNeeded))
+	
+	// Step 3: Lock tokens sequentially (since we're already under wallet lock)
+	lockStart := time.Now()
+	for i := range tokensNeeded {
+		tokensNeeded[i].TokenStatus = TokenIsLocked
+		err := w.s.Update(TokenStorage, &tokensNeeded[i], "did=? AND token_id=?", did, tokensNeeded[i].TokenID)
+		if err != nil {
+			// Rollback previously locked tokens
+			for j := 0; j < i; j++ {
+				tokensNeeded[j].TokenStatus = TokenIsFree
+				w.s.Update(TokenStorage, &tokensNeeded[j], "did=? AND token_id=?", did, tokensNeeded[j].TokenID)
+			}
+			return nil, fmt.Errorf("failed to lock token %s: %v", tokensNeeded[i].TokenID, err)
+		}
+	}
+	
+	w.log.Info("Locked tokens", 
+		"count", len(tokensNeeded),
+		"lock_time", time.Since(lockStart))
+	
+	w.log.Info("Total optimized token fetch operation", 
+		"token_count", len(tokensNeeded),
+		"total_time", time.Since(startTime))
+	
+	return tokensNeeded, nil
 }

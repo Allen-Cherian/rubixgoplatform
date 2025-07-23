@@ -798,10 +798,13 @@ func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]
 	// Use optimized version for large amounts
 	if txnAmount > 100 {
 		c.log.Info("Using optimized token fetch for large amount", "amount", txnAmount)
-		tokens, err := c.w.OptimizedGetFreeTokens(did, txnAmount)
+		
+		// Use the wallet's own optimized method
+		tokens, err := c.w.GetTokensForOptimizedTransfer(did, txnAmount, txnMode)
 		if err != nil {
 			return nil, 0, err
 		}
+		
 		// Calculate if we have exact amount or need to create change
 		var totalValue float64
 		for _, t := range tokens {

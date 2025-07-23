@@ -45,6 +45,8 @@ func (w *Wallet) Pin(hash string, role int, did string, transactionId string, se
 	if err != nil {
 		w.log.Info("Error addding provider details to DB", "error", err)
 		return false, err
+	} else {
+		w.log.Info("Provider details added to DB as pin -", " hash ", hash, " transactionID ", transactionId)
 	}
 	return true, nil
 }
@@ -79,6 +81,8 @@ func (w *Wallet) Cat(hash string, role int, did string) (string, error) {
 	if err1 != nil {
 		w.log.Info("Error addding provider details to DB", "error", err)
 		return "", err
+	} else {
+		w.log.Info("Provider details added to DB as cat -", " hash ", hash)
 	}
 	return string(result), nil
 }
@@ -90,6 +94,12 @@ func (w *Wallet) Get(hash string, did string, role int, path string) error {
 		return err
 	}
 	err = w.AddProviderDetails(model.TokenProviderMap{Token: hash, Role: role, DID: did, FuncID: GetFunc})
+	if err != nil {
+		w.log.Info("Error addding provider details to DB", "error", err)
+		//return err
+	} else {
+		w.log.Info("Provider details added to DB as get -", " hash ", hash)
+	}
 	return err
 }
 
@@ -103,6 +113,8 @@ func (w *Wallet) Add(r io.Reader, did string, role int) (string, error) {
 	if err != nil {
 		w.log.Error("Error adding provider details", "error", err)
 		return "", err
+	} else {
+		w.log.Info("Provider details added to DB as Add -", " Token ", result)
 	}
 	return result, err
 }
