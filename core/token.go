@@ -795,6 +795,24 @@ func (c *Core) getFromIPFS(path string) ([]byte, error) {
 // }
 
 func (c *Core) GetRequiredTokens(did string, txnAmount float64, txnMode int) ([]wallet.Token, float64, error) {
+	// Use optimized version for large amounts
+	if txnAmount > 100 {
+		c.log.Info("Using optimized token fetch for large amount", "amount", txnAmount)
+		tokens, err := c.w.OptimizedGetFreeTokens(did, txnAmount)
+		if err != nil {
+			return nil, 0, err
+		}
+		// Calculate if we have exact amount or need to create change
+		var totalValue float64
+		for _, t := range tokens {
+			totalValue += t.TokenValue
+		}
+		totalValue = floatPrecision(totalValue, MaxDecimalPlaces)
+		remainingAmount := floatPrecision(totalValue - txnAmount, MaxDecimalPlaces)
+		return tokens, remainingAmount, nil
+	}
+	
+	// Original logic for smaller amounts
 	requiredTokens := make([]wallet.Token, 0)
 	var remainingAmount float64
 	wholeValue := int(txnAmount)
