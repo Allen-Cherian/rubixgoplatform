@@ -223,7 +223,7 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
-	
+
 	// Use resource-aware token state validator
 	if len(ti) > 50 {
 		// For large token counts, use the optimized validator
@@ -234,20 +234,20 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		var completed int32
 		var lastLoggedPercent int32
 		total := len(ti)
-		
+
 		// Limit concurrent workers
 		maxWorkers := 4
 		if total < maxWorkers {
 			maxWorkers = total
 		}
-		
+
 		semaphore := make(chan struct{}, maxWorkers)
-		
+
 		for i := range ti {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				
+
 				// Acquire semaphore
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
@@ -479,31 +479,31 @@ func (c *Core) quorumSmartContractConsensus(req *ensweb.Request, did string, qdc
 
 		//in deploy mode pin token state of commited RBT tokens
 		tokenStateCheckResult = make([]TokenStateCheckResult, len(commitedTokenInfo))
-		
+
 		// Original logic for all token counts
 		maxConcurrent := 20 // Normal concurrent operations
 		if len(commitedTokenInfo) > 500 {
 			maxConcurrent = 10 // Reduce for larger counts
 		}
 		semaphore := make(chan struct{}, maxConcurrent)
-		
-		c.log.Info("Starting token state validation", 
+
+		c.log.Info("Starting token state validation",
 			"total_tokens", len(commitedTokenInfo),
 			"max_concurrent", maxConcurrent)
-		
+
 		for i, ti := range commitedTokenInfo {
 			t := ti.Token
 			wg.Add(1)
 			go func(token string, idx int, tokenType int) {
 				defer wg.Done()
-				
+
 				// Acquire semaphore
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
-				
+
 				// Add small delay to prevent thundering herd
 				time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-				
+
 				c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
 			}(t, i, ti.TokenType)
 		}
@@ -660,31 +660,31 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 
 		//in deploy mode pin token state of commited RBT tokens
 		tokenStateCheckResult = make([]TokenStateCheckResult, len(commitedTokenInfo))
-		
+
 		// Original logic for all token counts
 		maxConcurrent := 20 // Normal concurrent operations
 		if len(commitedTokenInfo) > 500 {
 			maxConcurrent = 10 // Reduce for larger counts
 		}
 		semaphore := make(chan struct{}, maxConcurrent)
-		
-		c.log.Info("Starting token state validation", 
+
+		c.log.Info("Starting token state validation",
 			"total_tokens", len(commitedTokenInfo),
 			"max_concurrent", maxConcurrent)
-		
+
 		for i, ti := range commitedTokenInfo {
 			t := ti.Token
 			wg.Add(1)
 			go func(token string, idx int, tokenType int) {
 				defer wg.Done()
-				
+
 				// Acquire semaphore
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
-				
+
 				// Add small delay to prevent thundering herd
 				time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-				
+
 				c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
 			}(t, i, ti.TokenType)
 		}
@@ -702,7 +702,7 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 		//3. check token state -- execute mode - pin tokenstate of the nft
 		tokenStateCheckResult = make([]TokenStateCheckResult, len(consensusContract.GetTransTokenInfo()))
 		nftInfo := consensusContract.GetTransTokenInfo()
-		
+
 		// Sync all token chains first
 		for _, ti := range nftInfo {
 			err, _ = c.syncTokenChainFrom(peerConn, "", ti.Token, ti.TokenType)
@@ -712,50 +712,50 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 				return c.l.RenderJSON(req, &consensusReply, http.StatusOK)
 			}
 		}
-		
+
 		// Now validate token states with proper batching
 		if len(nftInfo) > 1000 {
-			c.log.Info("Large NFT transaction detected, processing in batches", 
+			c.log.Info("Large NFT transaction detected, processing in batches",
 				"total_tokens", len(nftInfo))
-			
+
 			// Process in batches of 1000
 			batchSize := 1000
 			maxConcurrent := 10 // Same as for 1000 tokens
-			
+
 			for start := 0; start < len(nftInfo); start += batchSize {
 				end := start + batchSize
 				if end > len(nftInfo) {
 					end = len(nftInfo)
 				}
-				
-				c.log.Info("Processing NFT batch", 
+
+				c.log.Info("Processing NFT batch",
 					"batch_start", start,
 					"batch_end", end,
 					"progress", fmt.Sprintf("%d/%d", end, len(nftInfo)))
-				
+
 				// Process this batch with same resources as 1000 tokens
 				semaphore := make(chan struct{}, maxConcurrent)
-				
+
 				for i := start; i < end; i++ {
 					ti := nftInfo[i]
 					wg.Add(1)
 					go func(token string, idx int, tokenType int) {
 						defer wg.Done()
-						
+
 						// Acquire semaphore
 						semaphore <- struct{}{}
 						defer func() { <-semaphore }()
-						
+
 						// Add small delay
 						time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-						
+
 						c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
 					}(ti.Token, i, ti.TokenType)
 				}
-				
+
 				// Wait for this batch to complete
 				wg.Wait()
-				
+
 				// Pause between batches
 				if end < len(nftInfo) {
 					c.log.Info("Pausing between NFT batches")
@@ -769,19 +769,19 @@ func (c *Core) quorumNFTConsensus(req *ensweb.Request, did string, qdc didcrypto
 				maxConcurrent = 10
 			}
 			semaphore := make(chan struct{}, maxConcurrent)
-			
+
 			for i, ti := range nftInfo {
 				wg.Add(1)
 				go func(token string, idx int, tokenType int) {
 					defer wg.Done()
-					
+
 					// Acquire semaphore
 					semaphore <- struct{}{}
 					defer func() { <-semaphore }()
-					
+
 					// Add small delay
 					time.Sleep(time.Duration(idx%10) * 10 * time.Millisecond)
-					
+
 					c.checkTokenState(token, did, idx, tokenStateCheckResult, consensusRequest.QuorumList, tokenType)
 				}(ti.Token, i, ti.TokenType)
 			}
@@ -868,12 +868,12 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		crep.Result = syncIssueTokens
 	}
 	c.log.Debug("Token ownership validation completed. Checking for errors")
-	
+
 	// Log progress: 1st phase complete (ownership validation)
 	if len(ti) > 50 {
 		c.log.Info("Progress: Token ownership validation", "phase", "1/3", "status", "completed", "tokens", len(ti))
 	}
-	
+
 	if err != nil {
 		validateTokenOwnershipErrorString := fmt.Sprint(err)
 		if strings.Contains(validateTokenOwnershipErrorString, "parent token is not in burnt stage") {
@@ -912,15 +912,15 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	*/
 
 	c.log.Debug("Validating token state for FT Consensus")
-	
+
 	// Log progress: 2nd phase starting (token state validation)
 	if len(ti) > 50 {
 		c.log.Info("Progress: Token state validation", "phase", "2/3", "status", "starting", "tokens", len(ti))
 	}
-	
+
 	tokenStateCheckResult := make([]TokenStateCheckResult, len(ti))
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
-	
+
 	// Use resource-aware token state validator for FT consensus
 	if len(ti) > 100 {
 		// For large token counts, use the optimized validator
@@ -931,20 +931,20 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		var completed int32
 		var lastLoggedPercent int32
 		total := len(ti)
-		
+
 		// Limit concurrent workers
 		maxWorkers := 4
 		if total < maxWorkers {
 			maxWorkers = total
 		}
-		
+
 		semaphore := make(chan struct{}, maxWorkers)
 
 		for i := range ti {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				
+
 				// Acquire semaphore
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
@@ -982,13 +982,13 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		}
 		c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
 	}
-	
+
 	// Log progress: 3rd phase starting (token pinning)
 	if len(ti) > 50 {
 		c.log.Info("Progress: Token state validation", "phase", "2/3", "status", "completed", "tokens", len(ti))
 		c.log.Info("Progress: Token pinning", "phase", "3/3", "status", "starting", "tokens", len(ti))
 	}
-	
+
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
@@ -1015,12 +1015,12 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 			validTokens++
 		}
 	}
-	
+
 	// Log final phase completion
 	if totalTokens > 50 {
 		c.log.Info("Progress: Token pinning", "phase", "3/3", "status", "completed", "tokens", totalTokens)
 	}
-	
+
 	c.log.Info("Token validation summary",
 		"total_tokens", totalTokens,
 		"valid_tokens", validTokens,
@@ -1029,7 +1029,7 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 		"valid_percentage", fmt.Sprintf("%.1f%%", float64(validTokens)*100/float64(totalTokens)),
 		"exhausted_percentage", fmt.Sprintf("%.1f%%", float64(exhaustedTokens)*100/float64(totalTokens)),
 		"error_percentage", fmt.Sprintf("%.1f%%", float64(errorTokens)*100/float64(totalTokens)))
-	
+
 	c.log.Debug("Finished FT Tokenstate check")
 
 	qHash := util.CalculateHash(sc.GetBlock(), "SHA3-256")
@@ -1514,7 +1514,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 		}
 	} */
 
-	tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
+	/* tokenStateCheckResult := make([]TokenStateCheckResult, len(tokenInfo))
 	wg = sync.WaitGroup{}
 	for i, ti := range tokenInfo {
 		t := ti.Token
@@ -1535,7 +1535,7 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 			return nil, nil, fmt.Errorf("Token state has been exhausted, Token being Double spent: %v, msg: %v", tokenStateCheckResult[i].Token, tokenStateCheckResult[i].Message)
 		}
 		c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
-	}
+	} */
 	var FT wallet.FTToken
 	FT.FTName = ftinfo.FTName
 	updatedTokenStateHashes, err := c.w.FTTokensReceived(receiverDID, tokenInfo, b, senderPeerId, receiverPeerId, c.ipfs, FT)
