@@ -50,8 +50,8 @@ func NewTokenStateValidatorOptimized(core *Core, did string, quorumList []string
 	if maxWorkers < 3 {
 		maxWorkers = 3 // Minimum 3 workers for reasonable performance
 	}
-	if maxWorkers > 12 {
-		maxWorkers = 12 // Cap at 12 workers (24GB RAM)
+	if maxWorkers > 32 {
+		maxWorkers = 32 // Cap at 32 workers (64GB RAM)
 	}
 	
 	// Allow 1.5x CPU count for I/O bound operations with higher memory
@@ -425,32 +425,19 @@ func (tsv *TokenStateValidatorOptimized) calculateOptimalWorkers(tokenCount int)
 		maxWorkersByMemory = 3
 	}
 	
-	// Token-based limits
-	var maxWorkersByTokens int
-	switch {
-	case tokenCount <= 50:
-		maxWorkersByTokens = tsv.maxWorkers
-	case tokenCount <= 100:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 6)
-	case tokenCount <= 250:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 5)
-	case tokenCount <= 500:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 4)
-	case tokenCount <= 1000:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 4)
-	case tokenCount <= 1500:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 3)
-	case tokenCount <= 2000:
-		maxWorkersByTokens = minInt(tsv.maxWorkers, 3)
-	default:
-		maxWorkersByTokens = 2
-	}
-	
-	// Use the most conservative limit
-	workers := minInt(maxWorkersByMemory, maxWorkersByTokens)
+	// Simply use the memory-based limit up to our max
+	// No artificial token-based restrictions
+	workers := minInt(maxWorkersByMemory, tsv.maxWorkers)
 	if workers < 1 {
 		workers = 1
 	}
+	
+	tsv.log.Info("Worker allocation", 
+		"available_memory_mb", availableMB,
+		"workers_by_memory", maxWorkersByMemory,
+		"max_workers_cap", tsv.maxWorkers,
+		"allocated_workers", workers,
+		"tokens", tokenCount)
 	
 	return workers
 }
