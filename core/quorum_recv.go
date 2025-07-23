@@ -992,15 +992,44 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
-	c.log.Debug("Pinning token state for FT Consensus")
-	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Minute) // increased timeout for large transactions
-	defer cancel()
+	
+	// For large transactions, use async pinning
+	if len(ti) > 100 && c.cfg.CfgData.TrustedNetwork {
+		c.log.Info("Using async pinning for large transaction", 
+			"tokens", len(ti),
+			"transaction_id", cr.TransactionID)
+		
+		// Submit to async pin manager
+		err1 := c.asyncPinManager.SubmitPinJob(
+			tokenStateCheckResult,
+			did,
+			cr.TransactionID,
+			sender,
+			receiver,
+			float64(0),
+		)
+		if err1 != nil {
+			c.log.Error("Failed to submit async pin job", "err", err1)
+			crep.Message = "Error submitting pin job: " + err1.Error()
+			return c.l.RenderJSON(req, &crep, http.StatusOK)
+		}
+		
+		// For trusted networks, we don't wait for completion
+		c.log.Info("Async pin job submitted, continuing with consensus",
+			"transaction_id", cr.TransactionID)
+		
+	} else {
+		// For small transactions or non-trusted networks, use synchronous pinning
+		c.log.Debug("Pinning token state for FT Consensus (synchronous)")
+		ctx, cancel := context.WithTimeout(req.Context(), 10*time.Minute)
+		defer cancel()
 
-	err1 := c.pinTokenState(ctx, tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
-	if err1 != nil {
-		c.log.Error("Pinning token state failed", "err", err1)
-		crep.Message = "Error Pinning token state: " + err1.Error()
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
+		err1 := c.pinTokenState(ctx, tokenStateCheckResult, did, cr.TransactionID, sender, receiver, float64(0))
+		if err1 != nil {
+			c.log.Error("Pinning token state failed", "err", err1)
+			crep.Message = "Error Pinning token state: " + err1.Error()
+			return c.l.RenderJSON(req, &crep, http.StatusOK)
+		}
 	}
 
 	// Print comprehensive progress summary

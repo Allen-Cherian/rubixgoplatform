@@ -140,6 +140,7 @@ type Core struct {
 	noBalanceQuorumCount int
 	defaultSetup         bool
 	tokenSyncManager     *TokenSyncManager
+	asyncPinManager      *AsyncPinManager
 }
 
 func InitConfig(configFile string, encKey string, node uint16, addr string) error {
@@ -314,6 +315,9 @@ func NewCore(cfg *config.Config, cfgFile string, encKey string, log logger.Logge
 	
 	// Initialize token sync manager
 	c.tokenSyncManager = NewTokenSyncManager(c.log)
+	
+	// Initialize async pin manager with 4 workers by default
+	c.asyncPinManager = NewAsyncPinManager(c, 4)
 	
 	return c, nil
 }

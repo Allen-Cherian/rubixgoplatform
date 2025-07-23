@@ -842,7 +842,23 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 		}
 	}
 
-	// Batch write provider details with retry/backoff
+	// For large transfers, use async provider details processing
+	if len(providerMaps) > 100 && w.asyncProviderMgr != nil {
+		// Submit to async queue
+		err := w.asyncProviderMgr.SubmitProviderDetails(providerMaps, b.GetTid())
+		if err != nil {
+			w.log.Error("Failed to submit provider details to async queue, falling back to sync", "err", err)
+			// Fall back to synchronous processing
+			goto syncProcessing
+		}
+		w.log.Info("Provider details submitted for async processing", 
+			"transaction_id", b.GetTid(),
+			"token_count", len(providerMaps))
+		return updatedtokenhashes, nil
+	}
+
+syncProcessing:
+	// Batch write provider details with retry/backoff (synchronous)
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		err := w.AddProviderDetailsBatch(providerMaps)
@@ -953,7 +969,23 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 		}
 	}
 
-	// Batch write provider details with retry/backoff
+	// For large FT transfers, use async provider details processing
+	if len(providerMaps) > 100 && w.asyncProviderMgr != nil {
+		// Submit to async queue
+		err := w.asyncProviderMgr.SubmitProviderDetails(providerMaps, b.GetTid())
+		if err != nil {
+			w.log.Error("Failed to submit FT provider details to async queue, falling back to sync", "err", err)
+			// Fall back to synchronous processing
+			goto ftSyncProcessing
+		}
+		w.log.Info("FT provider details submitted for async processing", 
+			"transaction_id", b.GetTid(),
+			"token_count", len(providerMaps))
+		return updatedtokenhashes, nil
+	}
+
+ftSyncProcessing:
+	// Batch write provider details with retry/backoff (synchronous)
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		err := w.AddProviderDetailsBatch(providerMaps)

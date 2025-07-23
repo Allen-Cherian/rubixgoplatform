@@ -65,6 +65,7 @@ type Wallet struct {
 	ntcs                           *ChainDB
 	smartContractTokenChainStorage *ChainDB
 	FTChainStorage                 *ChainDB
+	asyncProviderMgr               *AsyncProviderDetailsManager
 }
 
 func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, error) {
@@ -183,6 +184,9 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 		w.log.Error("Failed to initialize TokenStateHash", "err", err)
 		return nil, err
 	}
+
+	// Initialize async provider details manager with 2 workers
+	w.asyncProviderMgr = NewAsyncProviderDetailsManager(w, 2)
 
 	return w, nil
 }

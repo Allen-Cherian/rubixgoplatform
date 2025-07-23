@@ -654,7 +654,13 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		//calling quorum pledge finality before calling the APISendReceiver Token
 		//trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
-		pledgeFinalityError := c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
+		var pledgeFinalityError error
+		if c.cfg.CfgData.TrustedNetwork && len(ti) > 100 {
+			// Use parallel processing for large transactions in trusted networks
+			pledgeFinalityError = c.parallelQuorumPledgeFinality(cr, nb, txnTokenHashes, tid)
+		} else {
+			pledgeFinalityError = c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
+		}
 		if pledgeFinalityError != nil {
 			c.log.Error("Pledge finlaity not achieved", "err", err)
 			return nil, nil, nil, pledgeFinalityError
