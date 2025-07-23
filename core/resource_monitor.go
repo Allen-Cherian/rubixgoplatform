@@ -58,18 +58,20 @@ func (rm *ResourceMonitor) CalculateDynamicWorkers(tokenCount int) int {
 	}
 	
 	// Dynamic memory per worker based on token count
-	// Observed: 500 tokens with parallel workers used ~88GB
-	// This suggests memory usage scales with both workers AND tokens
+	// For pinning operations, we need less memory per worker
+	// More workers with less memory each is better for IPFS stability
 	var memoryPerWorkerMB uint64
 	switch {
 	case tokenCount <= 100:
-		memoryPerWorkerMB = 1024 // 1GB per worker for small batches
+		memoryPerWorkerMB = 512 // 512MB per worker for small batches
 	case tokenCount <= 250:
-		memoryPerWorkerMB = 2048 // 2GB per worker for medium batches
+		memoryPerWorkerMB = 768 // 768MB per worker for medium batches
 	case tokenCount <= 500:
-		memoryPerWorkerMB = 4096 // 4GB per worker for large batches
+		memoryPerWorkerMB = 1024 // 1GB per worker for large batches
+	case tokenCount <= 1000:
+		memoryPerWorkerMB = 1536 // 1.5GB per worker for 1000 tokens
 	default:
-		memoryPerWorkerMB = 8192 // 8GB per worker for very large batches
+		memoryPerWorkerMB = 2048 // 2GB per worker for very large batches
 	}
 	
 	// Calculate workers based on available memory
@@ -82,21 +84,22 @@ func (rm *ResourceMonitor) CalculateDynamicWorkers(tokenCount int) int {
 	var optimalWorkers int
 	cpuCount := runtime.NumCPU()
 	
+	// For pinning operations, more workers with smaller batches is better
 	switch {
 	case tokenCount <= 10:
-		optimalWorkers = cpuCount // Full parallelism for tiny batches
+		optimalWorkers = min(tokenCount, cpuCount) // One worker per token for tiny batches
 	case tokenCount <= 50:
 		optimalWorkers = max(cpuCount/2, 4) // Half CPUs but at least 4
 	case tokenCount <= 100:
-		optimalWorkers = max(cpuCount/3, 6) // 1/3 CPUs but at least 6
+		optimalWorkers = max(cpuCount, 8) // Full CPU count but at least 8
 	case tokenCount <= 250:
-		optimalWorkers = min(8, cpuCount/2) // Max 8 workers
+		optimalWorkers = min(16, cpuCount*2) // Up to 16 workers
 	case tokenCount <= 500:
-		optimalWorkers = min(6, cpuCount/3) // Max 6 workers for 500
+		optimalWorkers = min(12, cpuCount) // Up to 12 workers for 500
 	case tokenCount <= 1000:
-		optimalWorkers = min(4, cpuCount/4) // Max 4 workers for 1000
+		optimalWorkers = min(10, cpuCount) // Up to 10 workers for 1000
 	default:
-		optimalWorkers = min(3, cpuCount/6) // Max 3 workers for very large
+		optimalWorkers = min(8, cpuCount/2) // Up to 8 workers for very large
 	}
 	
 	// Use the smaller of memory-based and optimal calculations

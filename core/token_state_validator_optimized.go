@@ -45,13 +45,13 @@ func NewTokenStateValidatorOptimized(core *Core, did string, quorumList []string
 	rm := &ResourceMonitor{}
 	totalMB, availableMB := rm.GetMemoryStats()
 	
-	// Balanced approach: 1 worker per 2GB of available memory
-	maxWorkers := int(availableMB / 2048)
-	if maxWorkers < 3 {
-		maxWorkers = 3 // Minimum 3 workers for reasonable performance
+	// Aggressive approach: 1 worker per 512MB of available memory
+	maxWorkers := int(availableMB / 512)
+	if maxWorkers < 8 {
+		maxWorkers = 8 // Minimum 8 workers for better parallelism
 	}
-	if maxWorkers > 32 {
-		maxWorkers = 32 // Cap at 32 workers (64GB RAM)
+	if maxWorkers > 64 {
+		maxWorkers = 64 // Cap at 64 workers
 	}
 	
 	// Allow 1.5x CPU count for I/O bound operations with higher memory
@@ -61,10 +61,10 @@ func NewTokenStateValidatorOptimized(core *Core, did string, quorumList []string
 		maxWorkers = maxCPUWorkers
 	}
 	
-	// Large batch sizing with 2GB per worker
-	batchSize := 100 // Increased default for 2GB workers
+	// Aggressive batch sizing for maximum throughput
+	batchSize := 200 // Large batches for better efficiency
 	if len(quorumList) > 0 { // Rough estimate of token count from quorum size
-		batchSize = 150 // Much larger batches with more memory
+		batchSize = 250 // Very large batches for parallel processing
 	}
 	
 	tsv := &TokenStateValidatorOptimized{
@@ -110,14 +110,14 @@ func (tsv *TokenStateValidatorOptimized) ValidateTokenStatesOptimized(
 ) []TokenStateCheckResult {
 	total := len(ti)
 	
-	// Aggressive batch sizing for large transactions
+	// Very aggressive batch sizing for large transactions
 	if total > 1000 {
-		tsv.batchSize = 100 // Process 100 tokens per batch
-		tsv.log.Info("Using large batch size for 1000+ tokens", "batch_size", tsv.batchSize)
+		tsv.batchSize = 300 // Process 300 tokens per batch for 1000+
+		tsv.log.Info("Using very large batch size for 1000+ tokens", "batch_size", tsv.batchSize)
 	} else if total > 500 {
-		tsv.batchSize = 75 // Process 75 tokens per batch
+		tsv.batchSize = 250 // Process 250 tokens per batch
 	} else if total > 250 {
-		tsv.batchSize = 50
+		tsv.batchSize = 200 // Keep large batches even for medium transactions
 	}
 	
 	// Already at 95%, no need to increase further

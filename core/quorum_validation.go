@@ -958,6 +958,13 @@ func (c *Core) pinTokenState(
 				ids = append(ids, tokenIDTokenStateHash)
 				mu.Unlock()
 
+				// Add small delay for IPFS stability with large token counts
+				if total > 500 {
+					time.Sleep(50 * time.Millisecond) // 50ms between pins for large batches
+				} else if total > 250 {
+					time.Sleep(25 * time.Millisecond) // 25ms for medium batches
+				}
+
 				// Retry block for Pin (but skip AddProviderDetails inside Pin)
 				err = retry(func() error {
 					_, retryErr := c.w.Pin(tokenIDTokenStateHash, wallet.QuorumPinRole, did, transactionId, sender, receiver, tokenValue, true)
