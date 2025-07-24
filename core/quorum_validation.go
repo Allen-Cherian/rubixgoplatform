@@ -562,7 +562,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 			}
 			c.log.Info("Syncing token chain completed for token", "token", tokenInfo.Token)
 			// Get the latest block for this token
-			latestBlock := c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
+			latestBlock = c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
 			if latestBlock == nil {
 				c.log.Error("Failed to get latest token block", "token", tokenInfo.Token)
 				return false, fmt.Errorf("failed to get latest token block for token %s", tokenInfo.Token), nil
