@@ -526,32 +526,49 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	c.log.Debug("Grouping tokens by their latest blocks", "totalTokens", len(ti))
 
 	for _, tokenInfo := range ti {
-		// Sync the token chain for this token
-		//c.log.Info("Syncing token chain before validation", "token", tokenInfo.Token, "blockID", tokenInfo.BlockID, "peerID", p.GetPeerID(), "peerDID", p.GetPeerDID())
-		c.log.Debug("Syncing token chain before validation", "token", tokenInfo.Token)
-		err, syncResp := c.syncTokenChainFrom(p, tokenInfo.BlockID, tokenInfo.Token, tokenInfo.TokenType)
-		if err != nil {
-			c.log.Error(
-				"Failed to sync token chain in token validation",
-				"token", tokenInfo.Token,
-				"blockID", tokenInfo.BlockID,
-				"tokenType", tokenInfo.TokenType,
-				"peerID", p.GetPeerID(),
-				"peerDID", p.GetPeerDID(),
-				"syncResponse", syncResp,
-				"err", err,
-			)
-			return false, fmt.Errorf(
-				"Failed to sync token chain for token %s (peer %s, did %s): %v | SyncResponse: %+v",
-				tokenInfo.Token, p.GetPeerID(), p.GetPeerDID(), err, syncResp,
-			), nil
-		}
-		c.log.Info("Syncing token chain completed for token", "token", tokenInfo.Token)
-		// Get the latest block for this token
+		var signersForExistingBlock []string
+
+		// Check if the current quorum was also part of the previous transaction
 		latestBlock := c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
 		if latestBlock == nil {
-			c.log.Error("Failed to get latest token block", "token", tokenInfo.Token)
-			return false, fmt.Errorf("failed to get latest token block for token %s", tokenInfo.Token), nil
+			c.log.Debug("Failed to get latest token block as it could be genesis", "token", tokenInfo.Token)
+		} else {
+			signersForExistingBlock, err = latestBlock.GetSigner()
+			if err != nil {
+				return false, fmt.Errorf("failed to extract Quorums from the Contract struct input"), nil
+			}
+		}
+
+		if !isPresentInList(signersForExistingBlock, quorumDID) || len(signersForExistingBlock) == 0 {
+			// Sync the token chain for this token
+			//c.log.Info("Syncing token chain before validation", "token", tokenInfo.Token, "blockID", tokenInfo.BlockID, "peerID", p.GetPeerID(), "peerDID", p.GetPeerDID())
+			c.log.Debug("Syncing token chain before validation", "token", tokenInfo.Token)
+			err, syncResp := c.syncTokenChainFrom(p, tokenInfo.BlockID, tokenInfo.Token, tokenInfo.TokenType)
+			if err != nil {
+				c.log.Error(
+					"Failed to sync token chain in token validation",
+					"token", tokenInfo.Token,
+					"blockID", tokenInfo.BlockID,
+					"tokenType", tokenInfo.TokenType,
+					"peerID", p.GetPeerID(),
+					"peerDID", p.GetPeerDID(),
+					"syncResponse", syncResp,
+					"err", err,
+				)
+				return false, fmt.Errorf(
+					"Failed to sync token chain for token %s (peer %s, did %s): %v | SyncResponse: %+v",
+					tokenInfo.Token, p.GetPeerID(), p.GetPeerDID(), err, syncResp,
+				), nil
+			}
+			c.log.Info("Syncing token chain completed for token", "token", tokenInfo.Token)
+			// Get the latest block for this token
+			latestBlock = c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
+			if latestBlock == nil {
+				c.log.Error("Failed to get latest token block", "token", tokenInfo.Token)
+				return false, fmt.Errorf("failed to get latest token block for token %s", tokenInfo.Token), nil
+			}
+		} else {
+			c.log.Debug("Previous and current quorums are similar, skipping token sync")
 		}
 
 		// Get block hash as the grouping key
@@ -862,33 +879,33 @@ func (c *Core) pinTokenState(
 	tokenValue float64,
 ) error {
 	total := len(tokenStateCheckResult)
-	
+
 	// For very large token counts, add initial delay to let quorums stabilize
 	if total > 500 {
 		stabilizationDelay := time.Duration(total/500) * time.Second
-		c.log.Info("Adding stabilization delay for large transaction", 
-			"tokens", total, 
+		c.log.Info("Adding stabilization delay for large transaction",
+			"tokens", total,
 			"delay", stabilizationDelay)
 		time.Sleep(stabilizationDelay)
 	}
-	
+
 	// Set up memory optimization for large operations
 	memOptimizer := NewMemoryOptimizer(c.log)
 	memOptimizer.OptimizeForLargeOperation(total)
 	defer memOptimizer.RestoreDefaults()
-	
+
 	// Start memory monitoring
 	monitorDone := make(chan struct{})
 	go memOptimizer.MonitorMemoryPressure(monitorDone)
 	defer close(monitorDone)
-	
+
 	// Start periodic GC for large operations
 	if total > 100 {
 		gcDone := make(chan struct{})
 		go memOptimizer.PeriodicGC(gcDone, 30*time.Second)
 		defer close(gcDone)
 	}
-	
+
 	var (
 		ids              []string
 		completed        int32
@@ -906,11 +923,11 @@ func (c *Core) pinTokenState(
 	// Use dynamic worker sizing based on available resources
 	rm := &ResourceMonitor{}
 	numWorkers := rm.CalculateDynamicWorkers(total)
-	
+
 	// Log resource stats for monitoring
 	stats := rm.GetResourceStats()
-	c.log.Info("Resource-based worker pool sizing", 
-		"tokens", total, 
+	c.log.Info("Resource-based worker pool sizing",
+		"tokens", total,
 		"workers", numWorkers,
 		"memory_available_mb", stats["memory_available_mb"],
 		"memory_usage_pct", stats["memory_usage_pct"],
@@ -1002,7 +1019,7 @@ func (c *Core) pinTokenState(
 				}
 
 				c.log.Debug("Token state pinned", "hash", tokenIDTokenStateHash)
-				
+
 				// Add processing rate control for large batches
 				if total > 100 {
 					// Calculate delay based on worker count and progress
@@ -1012,9 +1029,9 @@ func (c *Core) pinTokenState(
 					} else if numWorkers <= 4 {
 						processingDelay = 100 * time.Millisecond // Medium rate
 					} else {
-						processingDelay = 50 * time.Millisecond  // Faster rate for many workers
+						processingDelay = 50 * time.Millisecond // Faster rate for many workers
 					}
-					
+
 					// Add jitter to prevent thundering herd
 					jitter := time.Duration(i%10) * 10 * time.Millisecond
 					time.Sleep(processingDelay + jitter)
@@ -1047,7 +1064,7 @@ func (c *Core) pinTokenState(
 			return fmt.Errorf("critical error in provider details: %w", err)
 		}
 	}
-	
+
 	c.log.Debug("Provider details batch completed", "total_tokens", len(providerMaps))
 	return nil
 }
