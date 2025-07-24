@@ -859,11 +859,17 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			c.log.Error("Failed to transfer tokens", "err", err)
 			return nil, nil, nil, err
 		}
-		for _, t := range ti {
-			c.w.UnPin(t.Token, wallet.PrevSenderRole, sc.GetSenderDID())
+		
+		// Skip unpinning if senderPeerID and receiverPeerID are same, as reciever
+		// already pinned it
+		if cr.SenderPeerID != c.peerID {
+			for _, t := range ti {
+				c.w.UnPin(t.Token, wallet.PrevSenderRole, sc.GetSenderDID())
+			}
+			//call ipfs repo gc after unpinnning
+			c.ipfsRepoGc()
 		}
-		// call ipfs repo gc after unpinnning
-		c.ipfsRepoGc()
+
 		nbid, err := nb.GetBlockID(ti[0].Token)
 		if err != nil {
 			c.log.Error("Failed to get block id", "err", err)
@@ -883,11 +889,14 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			Epoch:           int64(cr.TransactionEpoch),
 		}
 
-		err = c.initiateUnpledgingProcess(cr, td.TransactionID, td.Epoch)
-		if err != nil {
-			c.log.Error("Failed to store transactiond details with quorum ", "err", err)
-			return nil, nil, nil, err
-		}
+
+		go func() {
+			err = c.initiateUnpledgingProcess(cr, td.TransactionID, td.Epoch)
+			if err != nil {
+				c.log.Error("Failed to store transactiond details with quorum ", "err", err)
+				return
+			}
+		}()
 
 		return &td, pl, pds, nil
 	case FTTransferMode:

@@ -1465,6 +1465,11 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 	receiverPeerId, receiverDID, ok := util.ParseAddress(receiverAddress)
 	b := block.InitBlock(tokenChainBlock, nil)
 
+	senderPeerId, _, ok := util.ParseAddress(senderAddress)
+	if !ok {
+		return nil, nil, fmt.Errorf("Unable to parse sender address: %v", senderAddress)
+	}
+
 	// Debugging block initialization
 	if b == nil {
 		c.log.Error("Failed to initialize block from tokenChainBlock. Check tokenChainBlock structure.")
@@ -1485,14 +1490,17 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 			return nil, nil, fmt.Errorf("failed to sync token chain block, missing previous block id for token %v, error: %v", t, err)
 		}
 
-		err, syncResp := c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
-		if err != nil && !strings.Contains(err.Error(), "syncer block height discrepency") {
-			c.log.Error("receiver failed to sync token chain of FT ", ti.Token, "syncResponse ", syncResp, "error ", err)
-			// return nil, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
-			syncIssueTokens = append(syncIssueTokens, t)
-			continue
-		} else {
-			err = nil
+		var syncResp *TCBSyncReply
+		if senderPeerId != c.peerID {
+			err, syncResp = c.syncTokenChainFrom(senderPeer, pblkID, t, ti.TokenType)
+			if err != nil && !strings.Contains(err.Error(), "syncer block height discrepency") {
+				c.log.Error("receiver failed to sync token chain of FT ", ti.Token, "syncResponse ", syncResp, "error ", err)
+				// return nil, fmt.Errorf("failed to sync tokenchain Token: %v, issueType: %v", t, TokenChainNotSynced)
+				syncIssueTokens = append(syncIssueTokens, t)
+				continue
+			} else {
+				err = nil
+			}
 		}
 
 		if c.TokenType(PartString) == ti.TokenType {
@@ -1520,10 +1528,6 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 	}
 	if len(syncIssueTokens) > 0 {
 		return nil, syncIssueTokens, fmt.Errorf("failed to sync tokenchain Token: %v, : issueType: %v", nil, TokenChainNotSynced)
-	}
-	senderPeerId, _, ok := util.ParseAddress(senderAddress)
-	if !ok {
-		return nil, nil, fmt.Errorf("Unable to parse sender address: %v", senderAddress)
 	}
 
 	//results := make([]MultiPinCheckRes, len(tokenInfo))

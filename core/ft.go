@@ -537,23 +537,25 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 	//TODO: Pinning of tokens
 
 	// Fetching peer's peer id
-	peerInfo, err := c.GetPeerDIDInfo(req.Receiver)
-	if err != nil {
-		if peerInfo == nil {
-			c.log.Error("could not get peerId of receiver ", req.Receiver, "error", err)
-			resp.Message = fmt.Sprintf("could not get peerId of receiver : %v, error: %v", req.Receiver, err)
+	if !c.w.IsDIDExist(req.Receiver) {
+		peerInfo, err := c.GetPeerDIDInfo(req.Receiver)
+		if err != nil {
+			if peerInfo == nil {
+				c.log.Error("could not get peerId of receiver ", req.Receiver, "error", err)
+				resp.Message = fmt.Sprintf("could not get peerId of receiver : %v, error: %v", req.Receiver, err)
+				return resp
+			}
+			if strings.Contains(err.Error(), "retry") {
+				c.AddPeerDetails(*peerInfo)
+			}
+		}
+		if peerInfo.PeerID == "" {
+			c.log.Error("failed to get peerId of receiver ", req.Receiver, "error", err)
+			resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
 			return resp
 		}
-		if strings.Contains(err.Error(), "retry") {
-			c.AddPeerDetails(*peerInfo)
-		}
 	}
-	if peerInfo.PeerID == "" {
-		c.log.Error("failed to get peerId of receiver ", req.Receiver, "error", err)
-		resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
-		return resp
-	}
-
+	
 	receiverPeerID, err := c.getPeer(req.Receiver)
 	if err != nil {
 		resp.Message = "Failed to get receiver peer, " + err.Error()
