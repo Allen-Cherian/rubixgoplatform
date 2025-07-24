@@ -30,7 +30,8 @@ func (c *Core) parallelQuorumPledgeFinality(cr *ConensusRequest, newBlock *block
 		peer          *ipfsport.Peer
 		qAddress      string
 	}
-
+	fmt.Println("Quorumlist length :", len(cr.QuorumList))
+	fmt.Println("Quorum list :", cr.QuorumList)
 	jobs := make([]updateJob, 0)
 	for k, v := range pd.PledgedTokens {
 		p, ok := cs.P[k]
@@ -64,7 +65,7 @@ func (c *Core) parallelQuorumPledgeFinality(cr *ConensusRequest, newBlock *block
 		wg.Add(1)
 		go func(j updateJob) {
 			defer wg.Done()
-			
+
 			// Rate limiting
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
@@ -98,7 +99,7 @@ func (c *Core) parallelQuorumPledgeFinality(cr *ConensusRequest, newBlock *block
 				errChan <- fmt.Errorf("failed to update pledge token status for %s: %s", j.quorumDID, br.Message)
 				return
 			}
-			
+
 			c.log.Debug("Pledge finality updated for quorum", "did", j.quorumDID, "tokens", len(j.pledgedTokens))
 		}(job)
 	}
@@ -118,7 +119,7 @@ func (c *Core) parallelQuorumPledgeFinality(cr *ConensusRequest, newBlock *block
 		return fmt.Errorf("pledge finality failed for %d/%d quorums", len(errs), len(jobs))
 	}
 
-	c.log.Info("Parallel pledge finality completed", 
+	c.log.Info("Parallel pledge finality completed",
 		"quorums", len(jobs),
 		"duration", time.Since(startTime))
 
