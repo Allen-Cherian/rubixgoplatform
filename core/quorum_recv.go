@@ -992,13 +992,13 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	c.log.Debug("Proceeding to pin token state to prevent double spend")
 	sender := cr.SenderPeerID + "." + sc.GetSenderDID()
 	receiver := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
-	
+
 	// For large transactions, use async pinning
 	if len(ti) > 100 && c.cfg.CfgData.TrustedNetwork {
-		c.log.Info("Using async pinning for large transaction", 
+		c.log.Info("Using async pinning for large transaction",
 			"tokens", len(ti),
 			"transaction_id", cr.TransactionID)
-		
+
 		// Submit to async pin manager
 		err1 := c.asyncPinManager.SubmitPinJob(
 			tokenStateCheckResult,
@@ -1013,11 +1013,11 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 			crep.Message = "Error submitting pin job: " + err1.Error()
 			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
-		
+
 		// For trusted networks, we don't wait for completion
 		c.log.Info("Async pin job submitted, continuing with consensus",
 			"transaction_id", cr.TransactionID)
-		
+
 	} else {
 		// For small transactions or non-trusted networks, use synchronous pinning
 		c.log.Debug("Pinning token state for FT Consensus (synchronous)")
@@ -2151,13 +2151,13 @@ func (c *Core) unlockTokens(req *ensweb.Request) *ensweb.Result {
 }
 
 func (c *Core) updateTokenHashDetails(req *ensweb.Request) *ensweb.Result {
-	c.log.Debug("Updating tokenStateHashDetails in DB")
+	//c.log.Debug("Updating tokenStateHashDetails in DB")
 	tokenIDTokenStateHash := c.l.GetQuerry(req, "tokenIDTokenStateHash")
-	c.log.Debug("tokenIDTokenStateHash from query", tokenIDTokenStateHash)
+	//c.log.Debug("tokenIDTokenStateHash from query", tokenIDTokenStateHash)
 
 	err := c.w.RemoveTokenStateHash(tokenIDTokenStateHash)
-	if err == nil {
-		fmt.Println("removed hash successfully")
+	if err != nil {
+		c.log.Error("Failed to remove token state hash", "err", err)
 	}
 	return c.l.RenderJSON(req, struct{}{}, http.StatusOK)
 
