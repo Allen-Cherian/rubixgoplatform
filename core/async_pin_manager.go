@@ -148,10 +148,10 @@ func (apm *AsyncPinManager) processJob(job *AsyncPinJob) {
 		"transaction_id", job.TransactionID,
 		"token_count", job.TokenCount)
 	
-	// Process in smaller batches to avoid overwhelming IPFS
-	batchSize := 50
-	if job.TokenCount > 1000 {
-		batchSize = 20 // Smaller batches for very large transactions
+	// Process in batches optimized for different token counts
+	batchSize := 100
+	if job.TokenCount > 500 {
+		batchSize = 50 // Smaller batches for larger transactions to maintain responsiveness
 	}
 	
 	var (
@@ -159,6 +159,7 @@ func (apm *AsyncPinManager) processJob(job *AsyncPinJob) {
 		providerMapMutex sync.Mutex
 		wg               sync.WaitGroup
 		semaphore        = make(chan struct{}, 5) // Limit concurrent pins
+		lastLoggedPercent int32 = 0
 	)
 	
 	for i := 0; i < job.TokenCount; i += batchSize {
@@ -223,17 +224,22 @@ func (apm *AsyncPinManager) processJob(job *AsyncPinJob) {
 		// Wait for batch to complete
 		wg.Wait()
 		
-		// Log progress
+		// Log progress based on percentage
 		completed := atomic.LoadInt32(&job.CompletedCount)
 		failed := atomic.LoadInt32(&job.FailedCount)
-		progress := float64(completed+failed) / float64(job.TokenCount) * 100
+		processed := completed + failed
+		currentPercent := int32((float64(processed) * 100) / float64(job.TokenCount))
 		
-		apm.log.Info("Async pin progress",
-			"transaction_id", job.TransactionID,
-			"progress", fmt.Sprintf("%.1f%%", progress),
-			"completed", completed,
-			"failed", failed,
-			"total", job.TokenCount)
+		// Log every 10% or at completion
+		if currentPercent >= lastLoggedPercent+10 || processed == int32(job.TokenCount) {
+			apm.log.Info("Async pin progress",
+				"transaction_id", job.TransactionID,
+				"percent", currentPercent,
+				"completed", completed,
+				"failed", failed,
+				"total", job.TokenCount)
+			lastLoggedPercent = (currentPercent / 10) * 10
+		}
 		
 		// Small delay between batches
 		if end < job.TokenCount {

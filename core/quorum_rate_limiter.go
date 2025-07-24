@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"time"
 	
@@ -21,7 +22,12 @@ type QuorumRateLimiter struct {
 
 // NewQuorumRateLimiter creates a new rate limiter for quorum requests
 func NewQuorumRateLimiter(log logger.Logger) *QuorumRateLimiter {
-	maxConcurrent := 3 // Max concurrent requests to any single quorum
+	// Scale concurrent requests with available CPU cores
+	// For 8-core systems, this allows 4 concurrent consensus operations
+	maxConcurrent := runtime.NumCPU() / 2
+	if maxConcurrent < 3 {
+		maxConcurrent = 3 // Minimum of 3
+	}
 	
 	return &QuorumRateLimiter{
 		log:            log.Named("QuorumRateLimiter"),
