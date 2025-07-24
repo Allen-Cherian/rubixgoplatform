@@ -39,7 +39,8 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 	providerMaps := make([]model.TokenProviderMap, 0, len(ti))
 	
 	addStart := time.Now()
-	for _, info := range ti {
+	lastLoggedPercent := 0
+	for idx, info := range ti {
 		t := info.Token
 		b := w.GetLatestTokenBlock(info.Token, info.TokenType)
 		blockId, _ := b.GetBlockID(t)
@@ -55,6 +56,16 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 		tpm.Receiver = receiverPeerId + "." + b.GetReceiverDID()
 		tpm.TokenValue = info.TokenValue
 		providerMaps = append(providerMaps, tpm)
+		
+		// Log progress every 10%
+		currentPercent := ((idx + 1) * 100) / len(ti)
+		if currentPercent >= lastLoggedPercent+10 || idx == len(ti)-1 {
+			w.log.Info("Phase 1 - Token state hashes progress", 
+				"percent", currentPercent,
+				"processed", idx+1,
+				"total", len(ti))
+			lastLoggedPercent = (currentPercent / 10) * 10
+		}
 	}
 	
 	w.log.Info("FT token state addition completed", 
@@ -67,6 +78,7 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 	downloadDirs := make([]string, 0)
 	
 	checkStart := time.Now()
+	lastLoggedPercent = 0
 	for i, tokenInfo := range ti {
 		var FTInfo FTToken
 		err := w.s.Read(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
@@ -93,6 +105,17 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 				Index: i,
 			})
 			tokenIndexMap[tokenInfo.Token] = i
+		}
+		
+		// Log progress every 10%
+		currentPercent := ((i + 1) * 100) / len(ti)
+		if currentPercent >= lastLoggedPercent+10 || i == len(ti)-1 {
+			w.log.Info("Phase 2 - Token existence check progress", 
+				"percent", currentPercent,
+				"checked", i+1,
+				"total", len(ti),
+				"to_download", len(getRequests))
+			lastLoggedPercent = (currentPercent / 10) * 10
 		}
 	}
 	
@@ -143,8 +166,9 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 	// Phase 4: Process downloaded FT tokens
 	processStart := time.Now()
 	processedCount := 0
+	lastLoggedPercent = 0
 	
-	for _, req := range getRequests {
+	for idx, req := range getRequests {
 		tokenInfo := ti[req.Index]
 		
 		// Get genesis block for owner info
@@ -181,12 +205,24 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 		// Cleanup the download directory
 		os.RemoveAll(req.Path)
 		processedCount++
+		
+		// Log progress every 10%
+		currentPercent := ((idx + 1) * 100) / len(getRequests)
+		if currentPercent >= lastLoggedPercent+10 || idx == len(getRequests)-1 {
+			w.log.Info("Phase 4 - Processing downloaded tokens progress", 
+				"percent", currentPercent,
+				"processed", idx+1,
+				"total", len(getRequests),
+				"successful", processedCount)
+			lastLoggedPercent = (currentPercent / 10) * 10
+		}
 	}
 	
 	// Phase 5: Process existing tokens (update status and pin)
 	pinnedCount := 0
+	lastLoggedPercent = 0
 	
-	for _, tokenInfo := range ti {
+	for idx, tokenInfo := range ti {
 		// For tokens that already existed, just update status
 		var FTInfo FTToken
 		err := w.s.Read(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
@@ -224,6 +260,17 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 			continue
 		}
 		pinnedCount++
+		
+		// Log progress every 10%
+		currentPercent := ((idx + 1) * 100) / len(ti)
+		if currentPercent >= lastLoggedPercent+10 || idx == len(ti)-1 {
+			w.log.Info("Phase 5 - Pinning and status update progress", 
+				"percent", currentPercent,
+				"processed", idx+1,
+				"total", len(ti),
+				"pinned", pinnedCount)
+			lastLoggedPercent = (currentPercent / 10) * 10
+		}
 	}
 	
 	w.log.Info("FT token processing completed", 
