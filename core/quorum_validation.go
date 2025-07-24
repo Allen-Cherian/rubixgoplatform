@@ -539,11 +539,6 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 			}
 		}
 
-		signersForExistingBlock, err := latestBlock.GetSigner()
-		if err != nil {
-			return false, fmt.Errorf("failed to extract Quorums from the Contract struct input"), nil
-		}
-
 		if !isPresentInList(signersForExistingBlock, quorumDID) || len(signersForExistingBlock) == 0 {
 			// Sync the token chain for this token
 			//c.log.Info("Syncing token chain before validation", "token", tokenInfo.Token, "blockID", tokenInfo.BlockID, "peerID", p.GetPeerID(), "peerDID", p.GetPeerDID())
