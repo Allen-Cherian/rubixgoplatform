@@ -828,19 +828,34 @@ func (c *Core) syncTokensInBatch(p *ipfsport.Peer, tokens []BatchSyncTokenInfo) 
 	c.log.Info("Starting batch token sync", "totalTokens", len(tokens))
 	startTime := time.Now()
 
-	// Fixed worker configuration based on system analysis
-	// Using 10 workers as analyzed from rubixgoplatform_sc_working patterns
-	numWorkers := 10
+	// Use ResourceMonitor for dynamic worker allocation
+	rm := &ResourceMonitor{}
+	dynamicWorkers := rm.CalculateDynamicWorkers(len(tokens))
+	
+	// Cap at 10 workers due to IPFS connection limits
+	numWorkers := min(dynamicWorkers, 10)
+	
+	// Get memory stats for logging
+	totalMB, availableMB := rm.GetMemoryStats()
 	
 	// Batch size configuration (75-200 tokens per batch as specified)
 	minBatchSize := 75
 	maxBatchSize := 200
-	batchSize := min(maxBatchSize, max(minBatchSize, len(tokens)/numWorkers))
+	// Calculate batch size based on available workers
+	batchSize := len(tokens) / numWorkers
+	if batchSize < minBatchSize {
+		batchSize = minBatchSize
+	} else if batchSize > maxBatchSize {
+		batchSize = maxBatchSize
+	}
 	
 	c.log.Debug("Batch sync configuration",
 		"workers", numWorkers,
+		"dynamicWorkers", dynamicWorkers,
 		"batchSize", batchSize,
-		"totalBatches", (len(tokens)+batchSize-1)/batchSize)
+		"totalBatches", (len(tokens)+batchSize-1)/batchSize,
+		"totalMemoryMB", totalMB,
+		"availableMemoryMB", availableMB)
 
 	// Create batches
 	var batches [][]BatchSyncTokenInfo
