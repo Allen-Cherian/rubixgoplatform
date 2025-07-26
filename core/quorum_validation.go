@@ -487,6 +487,13 @@ func (c *Core) validateTokenOwnership(cr *ConensusRequest, sc *contract.Contract
 	return true, nil, nil
 }
 
+// BatchSyncTokenInfo holds information for batch token syncing
+type BatchSyncTokenInfo struct {
+	Token     string
+	BlockID   string
+	TokenType int
+}
+
 // BlockValidationResult represents the result of validating a specific block
 // Used for optimized token validation
 type BlockValidationResult struct {
@@ -717,6 +724,7 @@ func (c *Core) validateSignature(dc did.DIDCrypto, h string, s string) bool {
 	}
 	return true
 }
+
 
 // func (c *Core) checkTokenIsPledged(wt string) bool {
 // 	tokenType := token.RBTTokenType
