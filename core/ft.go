@@ -928,3 +928,13 @@ func (c *Core) UnlockFTs() error {
 func (c *Core) IsAsyncFTResponse() bool {
 	return c.cfg.CfgData.AsyncFTResponse
 }
+
+// FixAllFTTokensWithPeerIDAsCreator fixes all FT tokens that have peer ID as CreatorDID
+func (c *Core) FixAllFTTokensWithPeerIDAsCreator() ([]wallet.FTTokenFixResult, error) {
+	return c.w.FixAllFTTokensWithPeerIDAsCreator()
+}
+
+// GetFTTokenCreatorStats returns statistics about FT token creators
+func (c *Core) GetFTTokenCreatorStats() (map[string]interface{}, error) {
+	return c.w.GetFTTokenCreatorStats()
+}

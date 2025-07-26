@@ -82,6 +82,8 @@ const (
 	APIDumpFTTokenChainBlock            string = "/api/dump-ft-token-chain"
 	APIInitiateFTTransfer               string = "/api/initiate-ft-transfer"
 	APIGetFTInfo                        string = "/api/get-ft-info-by-did"
+	APIFixFTCreator                     string = "/api/fix-ft-creator"
+	APIGetFTCreatorStats                string = "/api/get-ft-creator-stats"
 	APIValidateToken                    string = "/api/validate-token"
 	APIAddUserAPIKey                    string = "/api/add-user-api-key"
 	APIDeployNFT                        string = "/api/deploy-nft"

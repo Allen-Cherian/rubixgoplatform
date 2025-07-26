@@ -113,6 +113,8 @@ const (
 	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
 	AsyncFTStatusCmd               string = "asyncftstatus"
 	SetAsyncFTStatusCmd            string = "setasyncftstatus"
+	FixFTCreatorCmd                string = "fix-ft-creator"
+	GetFTCreatorStatsCmd           string = "get-ft-creator-stats"
 )
 
 var commands = []string{VersionCmd,
@@ -184,6 +186,8 @@ var commands = []string{VersionCmd,
 	GetFTTxnDetailsCmd,
 	AsyncFTStatusCmd,
 	SetAsyncFTStatusCmd,
+	FixFTCreatorCmd,
+	GetFTCreatorStatsCmd,
 }
 
 var commandsHelp = []string{"To get tool version",
@@ -254,6 +258,8 @@ var commandsHelp = []string{"To get tool version",
 	"This command will get FT transaction details by DID",
 	"This command will check the async FT response status",
 	"This command will set the async FT response status",
+	"This command will fix FT tokens that have peer ID as CreatorDID",
+	"This command will get statistics about FT token creators",
 }
 
 type Command struct {
@@ -944,6 +950,10 @@ func Run(args []string) {
 			return
 		}
 		cmd.setAsyncFTStatus(val == "true")
+	case FixFTCreatorCmd:
+		cmd.fixFTCreator()
+	case GetFTCreatorStatsCmd:
+		cmd.getFTCreatorStats()
 	default:
 		cmd.log.Error("Invalid command")
 	}
