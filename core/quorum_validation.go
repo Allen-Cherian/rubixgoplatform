@@ -772,7 +772,12 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		return false, fmt.Errorf("failed to sync tokenchain Token: issueType: %v", TokenChainNotSynced), syncIssueTokens
 	}
 
-	c.log.Info("Optimized token validation completed successfully", "totalTokens", len(ti), "uniqueBlocks", len(blockGroups))
+	c.log.Info("Optimized token validation completed successfully", 
+		"totalTokens", len(ti), 
+		"uniqueBlocks", len(blockGroups),
+		"tokensSkippedSync", syncSkipped,
+		"tokensBatchSynced", batchSynced,
+		"validationReduction", fmt.Sprintf("%.1f%%", float64(len(ti)-len(blockGroups))/float64(len(ti))*100))
 	return true, nil, nil
 }
 
@@ -794,6 +799,8 @@ func (c *Core) validateTokenOwnershipWrapper(cr *ConensusRequest, sc *contract.C
 func (c *Core) logOptimizationStats(totalTokens int, uniqueBlocks int, syncNeeded int, syncSkipped int, batchSynced int) {
 	reduction := float64(totalTokens-uniqueBlocks) / float64(totalTokens) * 100
 	syncReduction := float64(syncSkipped) / float64(totalTokens) * 100
+	batchSyncPercent := float64(batchSynced) / float64(totalTokens) * 100
+	
 	c.log.Info("Token validation optimization stats",
 		"totalTokens", totalTokens,
 		"uniqueBlocks", uniqueBlocks,
@@ -802,7 +809,14 @@ func (c *Core) logOptimizationStats(totalTokens int, uniqueBlocks int, syncNeede
 		"syncNeeded", syncNeeded,
 		"syncSkipped", syncSkipped,
 		"syncReductionPercent", fmt.Sprintf("%.2f%%", syncReduction),
-		"batchSynced", batchSynced)
+		"batchSynced", batchSynced,
+		"batchSyncPercent", fmt.Sprintf("%.2f%%", batchSyncPercent))
+
+	// Log optimization breakdown
+	c.log.Info("Optimization breakdown",
+		"validationOptimization", fmt.Sprintf("%d→%d (%.1f%% reduction)", totalTokens, uniqueBlocks, reduction),
+		"syncOptimization", fmt.Sprintf("%d skipped (%.1f%%)", syncSkipped, syncReduction),
+		"batchProcessing", fmt.Sprintf("%d tokens (%.1f%%)", batchSynced, batchSyncPercent))
 
 	if reduction > 50 {
 		c.log.Info("Significant optimization achieved!", "reduction", fmt.Sprintf("%.2f%%", reduction))
@@ -923,11 +937,17 @@ func (c *Core) syncTokensInBatch(p *ipfsport.Peer, tokens []BatchSyncTokenInfo) 
 	}
 	
 	duration := time.Since(startTime)
+	tokensPerSecond := float64(len(tokens)) / duration.Seconds()
+	avgBatchTime := duration.Milliseconds() / int64(len(batches))
+	
 	c.log.Info("Batch token sync completed successfully",
 		"totalTokens", len(tokens),
 		"batches", len(batches),
+		"workers", numWorkers,
 		"duration", duration,
-		"tokensPerSecond", float64(len(tokens))/duration.Seconds())
+		"tokensPerSecond", fmt.Sprintf("%.2f", tokensPerSecond),
+		"avgBatchTimeMs", avgBatchTime,
+		"memoryUsedMB", totalMB-availableMB)
 	
 	return nil
 }
