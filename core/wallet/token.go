@@ -879,6 +879,15 @@ syncProcessing:
 
 // need to update in such a way that only for FTs
 func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.Block, senderPeerId string, receiverPeerId string, ipfsShell *ipfsnode.Shell, ftInfo FTToken) ([]string, error) {
+	// For very large FT transfers, use parallel processing without locks
+	if len(ti) > 100 {
+		w.log.Info("Using parallel FT receiver without serialized locks", 
+			"ft_count", len(ti),
+			"ft_name", ftInfo.FTName)
+		parallelReceiver := NewParallelFTReceiver(w)
+		return parallelReceiver.ParallelFTTokensReceived(did, ti, b, senderPeerId, receiverPeerId, ipfsShell, ftInfo)
+	}
+	
 	// For large FT transfers, use optimized processing with batch downloads
 	if len(ti) > 50 {
 		w.log.Info("Using optimized FT receiver with batch downloads", 
