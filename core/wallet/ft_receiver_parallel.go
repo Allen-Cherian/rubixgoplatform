@@ -618,11 +618,12 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 		// Get owner from pre-computed creator map
 		ftOwner, found := tokenCreatorMap[item.Token.Token]
 		
-		// If not found in map, use sender as fallback
+		// If not found in map, use sender's DID as fallback
 		if !found || ftOwner == "" {
-			pfr.log.Debug("Creator not found in batch map, using sender as fallback", 
+			pfr.log.Debug("Creator not found in batch map, using sender DID as fallback", 
 				"token", item.Token.Token)
-			ftOwner = senderPeerId
+			// Get sender's DID from the block
+			ftOwner = b.GetSenderDID()
 		}
 		
 		if ftOwner == "" {

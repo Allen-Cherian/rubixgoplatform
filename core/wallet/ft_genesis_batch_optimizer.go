@@ -160,8 +160,8 @@ func (gbo *GenesisBatchOptimizer) lookupGenesisAndCreator(token contract.TokenIn
 	}
 	
 	// Get creator from genesis block
-	// For FT tokens, the creator is the sender DID of the genesis block
-	creator := genesisBlock.GetSenderDID()
+	// For FT tokens, the creator is the owner from the genesis block
+	creator := genesisBlock.GetOwner()
 	if creator != "" {
 		return genesisID, creator
 	}
