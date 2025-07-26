@@ -767,6 +767,93 @@ func (c *Core) validateSignature(dc did.DIDCrypto, h string, s string) bool {
 	return true
 }
 
+// syncTokensInBatch performs batch token synchronization for improved performance
+func (c *Core) syncTokensInBatch(p *ipfsport.Peer, tokens []BatchSyncTokenInfo) error {
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	c.log.Info("Starting batch token sync", "totalTokens", len(tokens))
+	startTime := time.Now()
+
+	// Fixed worker configuration based on system analysis
+	// Using 10 workers as analyzed from rubixgoplatform_sc_working patterns
+	numWorkers := 10
+	
+	// Batch size configuration (75-200 tokens per batch as specified)
+	minBatchSize := 75
+	maxBatchSize := 200
+	batchSize := min(maxBatchSize, max(minBatchSize, len(tokens)/numWorkers))
+	
+	c.log.Debug("Batch sync configuration",
+		"workers", numWorkers,
+		"batchSize", batchSize,
+		"totalBatches", (len(tokens)+batchSize-1)/batchSize)
+
+	// Create batches
+	var batches [][]BatchSyncTokenInfo
+	for i := 0; i < len(tokens); i += batchSize {
+		end := min(i+batchSize, len(tokens))
+		batches = append(batches, tokens[i:end])
+	}
+
+	// Sync batches with controlled concurrency
+	errChan := make(chan error, len(batches))
+	sem := make(chan struct{}, numWorkers) // Limit to 10 concurrent operations
+	
+	var wg sync.WaitGroup
+	for batchIdx, batch := range batches {
+		wg.Add(1)
+		go func(idx int, tokenBatch []BatchSyncTokenInfo) {
+			defer wg.Done()
+			
+			sem <- struct{}{} // Acquire semaphore
+			defer func() { <-sem }() // Release semaphore
+			
+			c.log.Debug("Processing batch", "batchIndex", idx, "batchSize", len(tokenBatch))
+			
+			// Sync each token in the batch
+			for _, tokenInfo := range tokenBatch {
+				err, syncResp := c.syncTokenChainFrom(p, tokenInfo.BlockID, tokenInfo.Token, tokenInfo.TokenType)
+				if err != nil {
+					c.log.Error("Failed to sync token in batch",
+						"token", tokenInfo.Token,
+						"batch", idx,
+						"err", err,
+						"syncResponse", syncResp)
+					errChan <- fmt.Errorf("failed to sync token %s: %v", tokenInfo.Token, err)
+					return
+				}
+			}
+			
+			c.log.Debug("Batch sync completed", "batchIndex", idx, "tokensProcessed", len(tokenBatch))
+		}(batchIdx, batch)
+	}
+	
+	wg.Wait()
+	close(errChan)
+	
+	// Check for errors
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
+	}
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("batch sync failed with %d errors: %v", len(errors), errors[0])
+	}
+	
+	duration := time.Since(startTime)
+	c.log.Info("Batch token sync completed successfully",
+		"totalTokens", len(tokens),
+		"batches", len(batches),
+		"duration", duration,
+		"tokensPerSecond", float64(len(tokens))/duration.Seconds())
+	
+	return nil
+}
+
+
 
 // func (c *Core) checkTokenIsPledged(wt string) bool {
 // 	tokenType := token.RBTTokenType
