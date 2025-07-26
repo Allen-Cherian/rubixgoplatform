@@ -525,12 +525,14 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	}
 	defer p.Close()
 
-	// Step 1: Group tokens by their latest block hash
+	// Step 1: Collect tokens that need syncing and group tokens by their latest block hash
 	blockGroups := make(map[string]*BlockValidationResult)
+	var tokensNeedingSync []BatchSyncTokenInfo
+	syncNeeded := 0
+	syncSkipped := 0
 
 	c.log.Info("Starting optimized token validation", "totalTokens", len(ti))
-
-	c.log.Debug("Grouping tokens by their latest blocks", "totalTokens", len(ti))
+	c.log.Debug("Analyzing tokens for sync requirements", "totalTokens", len(ti))
 
 	for _, tokenInfo := range ti {
 		var signersForExistingBlock []string
@@ -547,52 +549,88 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		}
 
 		if !isPresentInList(signersForExistingBlock, quorumDID) || len(signersForExistingBlock) == 0 {
-			// Sync the token chain for this token
-			//c.log.Info("Syncing token chain before validation", "token", tokenInfo.Token, "blockID", tokenInfo.BlockID, "peerID", p.GetPeerID(), "peerDID", p.GetPeerDID())
-			c.log.Debug("Syncing token chain before validation", "token", tokenInfo.Token)
-			err, syncResp := c.syncTokenChainFrom(p, tokenInfo.BlockID, tokenInfo.Token, tokenInfo.TokenType)
-			if err != nil {
-				c.log.Error(
-					"Failed to sync token chain in token validation",
-					"token", tokenInfo.Token,
-					"blockID", tokenInfo.BlockID,
-					"tokenType", tokenInfo.TokenType,
-					"peerID", p.GetPeerID(),
-					"peerDID", p.GetPeerDID(),
-					"syncResponse", syncResp,
-					"err", err,
-				)
-				return false, fmt.Errorf(
-					"Failed to sync token chain for token %s (peer %s, did %s): %v | SyncResponse: %+v",
-					tokenInfo.Token, p.GetPeerID(), p.GetPeerDID(), err, syncResp,
-				), nil
-			}
-			c.log.Info("Syncing token chain completed for token", "token", tokenInfo.Token)
-			// Get the latest block for this token
-			latestBlock = c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
-			if latestBlock == nil {
-				c.log.Error("Failed to get latest token block", "token", tokenInfo.Token)
-				return false, fmt.Errorf("failed to get latest token block for token %s", tokenInfo.Token), nil
-			}
+			// This token needs syncing - collect it for batch processing
+			c.log.Debug("Token needs sync", "token", tokenInfo.Token, "reason", "quorum not in signers")
+			tokensNeedingSync = append(tokensNeedingSync, BatchSyncTokenInfo{
+				Token:     tokenInfo.Token,
+				BlockID:   tokenInfo.BlockID,
+				TokenType: tokenInfo.TokenType,
+			})
+			syncNeeded++
 		} else {
-			c.log.Debug("Previous and current quorums are similar, skipping token sync")
+			// Quorum already signed - no sync needed
+			c.log.Debug("Skipping token sync", "token", tokenInfo.Token, "reason", "quorum already signed")
+			syncSkipped++
+			
+			// Store the latest block we already have
+			blockHash, err := latestBlock.GetHash()
+			if err != nil {
+				c.log.Error("Failed to get block hash for token", "token", tokenInfo.Token, "err", err)
+				return false, fmt.Errorf("failed to get block hash for token %s: %v", tokenInfo.Token, err), nil
+			}
+
+			// Group tokens by block hash
+			if result, exists := blockGroups[blockHash]; exists {
+				result.Tokens = append(result.Tokens, tokenInfo.Token)
+			} else {
+				blockGroups[blockHash] = &BlockValidationResult{
+					BlockHash: blockHash,
+					Block:     latestBlock,
+					Tokens:    []string{tokenInfo.Token},
+				}
+			}
+		}
+	}
+
+	c.log.Info("Sync analysis completed", 
+		"totalTokens", len(ti),
+		"needSync", syncNeeded,
+		"skipSync", syncSkipped)
+
+	// Step 2: Sync tokens that need it (for now using existing sync)
+	for _, syncInfo := range tokensNeedingSync {
+		c.log.Debug("Syncing token chain before validation", "token", syncInfo.Token)
+		err, syncResp := c.syncTokenChainFrom(p, syncInfo.BlockID, syncInfo.Token, syncInfo.TokenType)
+		if err != nil {
+			c.log.Error(
+				"Failed to sync token chain in token validation",
+				"token", syncInfo.Token,
+				"blockID", syncInfo.BlockID,
+				"tokenType", syncInfo.TokenType,
+				"peerID", p.GetPeerID(),
+				"peerDID", p.GetPeerDID(),
+				"syncResponse", syncResp,
+				"err", err,
+			)
+			return false, fmt.Errorf(
+				"Failed to sync token chain for token %s (peer %s, did %s): %v | SyncResponse: %+v",
+				syncInfo.Token, p.GetPeerID(), p.GetPeerDID(), err, syncResp,
+			), nil
+		}
+		c.log.Info("Syncing token chain completed for token", "token", syncInfo.Token)
+		
+		// Get the latest block after sync
+		latestBlock := c.w.GetLatestTokenBlock(syncInfo.Token, syncInfo.TokenType)
+		if latestBlock == nil {
+			c.log.Error("Failed to get latest token block", "token", syncInfo.Token)
+			return false, fmt.Errorf("failed to get latest token block for token %s", syncInfo.Token), nil
 		}
 
 		// Get block hash as the grouping key
 		blockHash, err := latestBlock.GetHash()
 		if err != nil {
-			c.log.Error("Failed to get block hash for token", "token", tokenInfo.Token, "err", err)
-			return false, fmt.Errorf("failed to get block hash for token %s: %v", tokenInfo.Token, err), nil
+			c.log.Error("Failed to get block hash for token", "token", syncInfo.Token, "err", err)
+			return false, fmt.Errorf("failed to get block hash for token %s: %v", syncInfo.Token, err), nil
 		}
 
 		// Group tokens by block hash
 		if result, exists := blockGroups[blockHash]; exists {
-			result.Tokens = append(result.Tokens, tokenInfo.Token)
+			result.Tokens = append(result.Tokens, syncInfo.Token)
 		} else {
 			blockGroups[blockHash] = &BlockValidationResult{
 				BlockHash: blockHash,
 				Block:     latestBlock,
-				Tokens:    []string{tokenInfo.Token},
+				Tokens:    []string{syncInfo.Token},
 			}
 		}
 	}
@@ -601,7 +639,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	c.log.Info("Beginning batch block validation", "uniqueBlocks", len(blockGroups))
 
 	// Log optimization statistics
-	c.logOptimizationStats(len(ti), len(blockGroups))
+	c.logOptimizationStats(len(ti), len(blockGroups), syncNeeded, syncSkipped)
 
 	// Log grouping statistics
 	for blockHash, result := range blockGroups {
@@ -690,13 +728,17 @@ func (c *Core) validateTokenOwnershipWrapper(cr *ConensusRequest, sc *contract.C
 }
 
 // logOptimizationStats logs statistics about the optimization
-func (c *Core) logOptimizationStats(totalTokens int, uniqueBlocks int) {
+func (c *Core) logOptimizationStats(totalTokens int, uniqueBlocks int, syncNeeded int, syncSkipped int) {
 	reduction := float64(totalTokens-uniqueBlocks) / float64(totalTokens) * 100
+	syncReduction := float64(syncSkipped) / float64(totalTokens) * 100
 	c.log.Info("Token validation optimization stats",
 		"totalTokens", totalTokens,
 		"uniqueBlocks", uniqueBlocks,
 		"reductionPercent", fmt.Sprintf("%.2f%%", reduction),
-		"reducedValidations", totalTokens-uniqueBlocks)
+		"reducedValidations", totalTokens-uniqueBlocks,
+		"syncNeeded", syncNeeded,
+		"syncSkipped", syncSkipped,
+		"syncReductionPercent", fmt.Sprintf("%.2f%%", syncReduction))
 
 	if reduction > 50 {
 		c.log.Info("Significant optimization achieved!", "reduction", fmt.Sprintf("%.2f%%", reduction))
