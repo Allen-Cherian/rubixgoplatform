@@ -884,16 +884,18 @@ func (c *Core) syncTokensInBatch(p *ipfsport.Peer, tokens []BatchSyncTokenInfo) 
 	// Get memory stats for logging
 	totalMB, availableMB := rm.GetMemoryStats()
 	
-	// Batch size configuration (75-200 tokens per batch as specified)
-	minBatchSize := 75
-	maxBatchSize := 200
-	// Calculate batch size based on available workers
-	batchSize := len(tokens) / numWorkers
-	if batchSize < minBatchSize {
-		batchSize = minBatchSize
-	} else if batchSize > maxBatchSize {
-		batchSize = maxBatchSize
+	// Use progressive batching for optimal performance
+	batchSize := TokenSyncBatchConfig.GetBatchSize(len(tokens))
+	
+	// Adjust based on memory pressure
+	if availableMB < 1000 { // Less than 1GB available
+		batchSize = batchSize / 2
+		if batchSize < 50 {
+			batchSize = 50
+		}
 	}
+	
+	c.log.Debug("Using progressive batch size", "batch_size", batchSize, "total_tokens", len(tokens))
 	
 	c.log.Debug("Batch sync configuration",
 		"workers", numWorkers,

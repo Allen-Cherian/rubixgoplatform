@@ -50,8 +50,9 @@ func NewParallelFTReceiver(w *Wallet) *ParallelFTReceiver {
 	if workers < 8 {
 		workers = 8
 	}
-	if workers > 32 {
-		workers = 32
+	// Increased max workers for large transfers
+	if workers > 64 {
+		workers = 64
 	}
 	
 	return &ParallelFTReceiver{
@@ -74,6 +75,12 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 ) ([]string, error) {
 	startTime := time.Now()
 	totalTokens := len(ti)
+	
+	// Dynamic worker scaling based on token count
+	dynamicWorkers := pfr.calculateDynamicWorkers(totalTokens)
+	if dynamicWorkers > pfr.batchWorkers {
+		pfr.batchWorkers = dynamicWorkers
+	}
 	
 	pfr.log.Info("Starting parallel FT token receive",
 		"ft_count", totalTokens,
@@ -674,6 +681,50 @@ func (pfr *ParallelFTReceiver) withMinimalLock(fn func() error) error {
 	pfr.w.l.Lock()
 	defer pfr.w.l.Unlock()
 	return fn()
+}
+
+// calculateDynamicWorkers determines optimal workers based on token count
+func (pfr *ParallelFTReceiver) calculateDynamicWorkers(tokenCount int) int {
+	// Scale workers based on token count
+	// Target: Process at least 100 tokens per second
+	var workers int
+	
+	switch {
+	case tokenCount < 100:
+		workers = 8
+	case tokenCount < 500:
+		workers = 16
+	case tokenCount < 1000:
+		workers = 32
+	case tokenCount < 5000:
+		workers = 64
+	case tokenCount < 10000:
+		workers = 96
+	default:
+		workers = 128
+	}
+	
+	// Consider CPU cores with higher multiplier for large transfers
+	cpuCount := runtime.NumCPU()
+	maxWorkers := cpuCount * 4 // 4x for I/O bound operations
+	if tokenCount > 5000 {
+		maxWorkers = cpuCount * 8 // 8x for very large transfers
+	}
+	
+	if workers > maxWorkers {
+		workers = maxWorkers
+	}
+	
+	// Ensure minimum workers
+	minWorkers := tokenCount / 50 // At least 1 worker per 50 tokens
+	if minWorkers < 8 {
+		minWorkers = 8
+	}
+	if workers < minWorkers {
+		workers = minWorkers
+	}
+	
+	return workers
 }
 
 func (pfr *ParallelFTReceiver) collectProviderMaps(results []TokenProcessingResult) []model.TokenProviderMap {
