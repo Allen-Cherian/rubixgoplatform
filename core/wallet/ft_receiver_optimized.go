@@ -163,6 +163,10 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 	// Merge provider maps
 	allProviderMaps := append(providerMaps, downloadProviderMaps...)
 
+	// Group tokens by genesis for optimized owner lookup
+	genesisOptimizer := NewGenesisGroupOptimizer(w)
+	genesisGroups := genesisOptimizer.GroupTokensByGenesis(ti)
+	
 	// Phase 4: Process downloaded FT tokens
 	processStart := time.Now()
 	processedCount := 0
@@ -171,15 +175,13 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 	for idx, req := range getRequests {
 		tokenInfo := ti[req.Index]
 
-		// Get genesis block for owner info
-		tt := tokenInfo.TokenType
-		blk := w.GetGenesisTokenBlock(tokenInfo.Token, tt)
-		if blk == nil {
-			w.log.Error("Failed to get genesis block for Parent DID updation, invalid token chain",
+		// Get owner from genesis groups (optimized lookup)
+		FTOwner := genesisOptimizer.GetOwnerForToken(tokenInfo, genesisGroups)
+		if FTOwner == "" {
+			w.log.Error("Failed to get owner from genesis groups",
 				"token", tokenInfo.Token)
 			continue
 		}
-		FTOwner := blk.GetOwner()
 
 		// Create new FT token entry
 		FTInfo := FTToken{

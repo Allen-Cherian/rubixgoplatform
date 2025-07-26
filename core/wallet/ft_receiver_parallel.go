@@ -19,10 +19,11 @@ import (
 
 // ParallelFTReceiver handles FT tokens without global locks
 type ParallelFTReceiver struct {
-	w            *Wallet
-	tokenStates  sync.Map  // Lock-free concurrent map for token states
-	batchWorkers int
-	log          logger.Logger
+	w               *Wallet
+	tokenStates     sync.Map  // Lock-free concurrent map for token states
+	batchWorkers    int
+	log             logger.Logger
+	genesisOptimizer *GenesisGroupOptimizer
 }
 
 // TokenProcessingState tracks processing state for each token
@@ -54,9 +55,10 @@ func NewParallelFTReceiver(w *Wallet) *ParallelFTReceiver {
 	}
 	
 	return &ParallelFTReceiver{
-		w:            w,
-		batchWorkers: workers,
-		log:          w.log.Named("ParallelFTReceiver"),
+		w:                w,
+		batchWorkers:     workers,
+		log:              w.log.Named("ParallelFTReceiver"),
+		genesisOptimizer: NewGenesisGroupOptimizer(w),
 	}
 }
 
@@ -113,9 +115,12 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 		downloadResults = pfr.parallelBatchDownload(ctx, downloadTasks, did)
 	}
 	
+	// Group tokens by genesis for optimized processing
+	genesisGroups := pfr.genesisOptimizer.GroupTokensByGenesis(ti)
+	
 	// Phase 4: Process all tokens in parallel (update DB, pin, etc.)
 	processResults := pfr.processTokensParallel(ctx, ti, hashResults, downloadResults, 
-		existingTokens, b, ftInfo, did, senderPeerId, receiverPeerId)
+		existingTokens, b, ftInfo, did, senderPeerId, receiverPeerId, genesisGroups)
 	
 	// Phase 5: Handle provider details asynchronously
 	allProviderMaps := pfr.collectProviderMaps(processResults)
@@ -463,6 +468,7 @@ func (pfr *ParallelFTReceiver) processTokensParallel(
 	did string,
 	senderPeerId string,
 	receiverPeerId string,
+	genesisGroups map[string]*TokenGenesisGroup,
 ) []TokenProcessingResult {
 	results := make([]TokenProcessingResult, len(tokens))
 	
@@ -516,6 +522,7 @@ func (pfr *ParallelFTReceiver) processTokensParallel(
 					did,
 					senderPeerId,
 					receiverPeerId,
+					genesisGroups,
 				)
 				resultsChan <- result
 			}
@@ -556,6 +563,7 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 	did string,
 	senderPeerId string,
 	receiverPeerId string,
+	genesisGroups map[string]*TokenGenesisGroup,
 ) TokenProcessingResult {
 	result := TokenProcessingResult{
 		Token:          item.Token.Token,
@@ -575,19 +583,10 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 			return result
 		}
 		
-		// Get genesis block for owner info
-		var ftOwner string
-		err := pfr.withMinimalLock(func() error {
-			blk := pfr.w.GetGenesisTokenBlock(item.Token.Token, item.Token.TokenType)
-			if blk == nil {
-				return fmt.Errorf("no genesis block")
-			}
-			ftOwner = blk.GetOwner()
-			return nil
-		})
-		
-		if err != nil {
-			result.Error = fmt.Errorf("failed to get owner: %w", err)
+		// Get owner from genesis groups (already fetched)
+		ftOwner := pfr.genesisOptimizer.GetOwnerForToken(item.Token, genesisGroups)
+		if ftOwner == "" {
+			result.Error = fmt.Errorf("failed to get owner from genesis groups")
 			os.RemoveAll(item.DownloadResult.Task.Dir)
 			return result
 		}
@@ -605,7 +604,7 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 		}
 		
 		// Write to database with minimal locking
-		err = pfr.withMinimalLock(func() error {
+		err := pfr.withMinimalLock(func() error {
 			return pfr.w.s.Write(FTTokenStorage, &ftEntry)
 		})
 		
