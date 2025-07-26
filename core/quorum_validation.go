@@ -507,6 +507,13 @@ type BlockValidationResult struct {
 
 // validateTokenOwnershipOptimized groups tokens by their latest block and validates each unique block only once
 func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract.Contract, quorumDID string) (bool, error, []string) {
+	// Track overall validation time
+	defer c.TrackOperation("quorum.validate_token_ownership.total", map[string]interface{}{
+		"transaction_id": cr.TransactionID,
+		"mode": cr.Mode,
+		"token_count": len(sc.GetTransTokenInfo()),
+	})(nil)
+	
 	var ti []contract.TokenInfo
 	var address string
 
@@ -526,6 +533,8 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	defer p.Close()
 
 	// Step 1: Collect tokens that need syncing and group tokens by their latest block hash
+	// Track collect phase
+	_ = time.Now() // collectStart - reserved for future phase timing
 	blockGroups := make(map[string]*BlockValidationResult)
 	var tokensNeedingSync []BatchSyncTokenInfo
 	syncNeeded := 0
@@ -586,6 +595,13 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		"totalTokens", len(ti),
 		"needSync", syncNeeded,
 		"skipSync", syncSkipped)
+	
+	// Track collection phase time
+	c.TrackOperation("quorum.validate_token_ownership.collect_tokens", map[string]interface{}{
+		"total_tokens": len(ti),
+		"need_sync": syncNeeded,
+		"skip_sync": syncSkipped,
+	})(nil)
 
 	// Step 2: Sync tokens that need it
 	if len(tokensNeedingSync) > 0 {
@@ -594,7 +610,11 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		if len(tokensNeedingSync) > 10 {
 			// Use batch sync for large token sets
 			c.log.Info("Using batch sync for tokens", "count", len(tokensNeedingSync))
+			_ = time.Now() // batchSyncStart - reserved for future phase timing
 			err := c.syncTokensInBatch(p, tokensNeedingSync)
+			c.TrackOperation("quorum.validate_token_ownership.batch_sync", map[string]interface{}{
+				"token_count": len(tokensNeedingSync),
+			})(err)
 			if err != nil {
 				return false, err, nil
 			}
@@ -994,6 +1014,13 @@ func (c *Core) getUnpledgeId(wt string, tokenType int) string {
  * Input tokenId, index, resultArray, waitgroup,quorumList
  */
 func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []TokenStateCheckResult, quorumList []string, tokenType int) {
+	// Track individual token state check
+	defer c.TrackOperation("token.state_check.single_token", map[string]interface{}{
+		"token": tokenId,
+		"token_type": tokenType,
+		"index": index,
+	})(nil)
+	
 	var result TokenStateCheckResult
 	result.Token = tokenId
 

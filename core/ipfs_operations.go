@@ -19,7 +19,7 @@ func NewIPFSOperations(core *Core) *IPFSOperations {
 }
 
 // executeWithMetrics executes an operation with health checks and performance metrics
-func (ops *IPFSOperations) executeWithMetrics(ctx context.Context, operation func() error) error {
+func (ops *IPFSOperations) executeWithMetrics(ctx context.Context, operationName string, metadata map[string]interface{}, operation func() error) error {
 	start := time.Now()
 	
 	err := ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, operation)
@@ -31,6 +31,13 @@ func (ops *IPFSOperations) executeWithMetrics(ctx context.Context, operation fun
 		ops.core.ipfsScalability.UpdateMetrics(responseTime, success)
 	}
 	
+	// Track operation performance
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["duration_ms"] = time.Since(start).Milliseconds()
+	ops.core.TrackOperation(operationName, metadata)(err)
+	
 	return err
 }
 
@@ -38,17 +45,27 @@ func (ops *IPFSOperations) executeWithMetrics(ctx context.Context, operation fun
 func (ops *IPFSOperations) Add(data io.Reader, opts ...ipfsnode.AddOpts) (string, error) {
 	var result string
 	var operationErr error
+	
+	// Check if pinning is enabled
+	// Note: This is a simplified check - actual pinning detection would need
+	// to inspect the options differently
+	pinning := true
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
-	err := ops.executeWithMetrics(ctx, func() error {
+	metadata := map[string]interface{}{
+		"pinning": pinning,
+	}
+
+	err := ops.executeWithMetrics(ctx, "ipfs.add", metadata, func() error {
 		hash, err := ops.core.ipfs.Add(data, opts...)
 		if err != nil {
 			operationErr = err
 			return err
 		}
 		result = hash
+		metadata["hash"] = hash
 		return nil
 	})
 
@@ -66,14 +83,19 @@ func (ops *IPFSOperations) AddDir(path string) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
+	
+	metadata := map[string]interface{}{
+		"path": path,
+	}
 
-	err := ops.executeWithMetrics(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, "ipfs.add_dir", metadata, func() error {
 		hash, err := ops.core.ipfs.AddDir(path)
 		if err != nil {
 			operationErr = err
 			return err
 		}
 		result = hash
+		metadata["hash"] = hash
 		return nil
 	})
 
@@ -91,8 +113,12 @@ func (ops *IPFSOperations) Cat(hash string) (io.ReadCloser, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	
+	metadata := map[string]interface{}{
+		"hash": hash,
+	}
 
-	err := ops.executeWithMetrics(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, "ipfs.cat", metadata, func() error {
 		reader, err := ops.core.ipfs.Cat(hash)
 		if err != nil {
 			operationErr = err
@@ -113,8 +139,13 @@ func (ops *IPFSOperations) Cat(hash string) (io.ReadCloser, error) {
 func (ops *IPFSOperations) Get(hash, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
+	
+	metadata := map[string]interface{}{
+		"hash": hash,
+		"path": path,
+	}
 
-	return ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	return ops.executeWithMetrics(ctx, "ipfs.get", metadata, func() error {
 		return ops.core.ipfs.Get(hash, path)
 	})
 }
@@ -123,8 +154,12 @@ func (ops *IPFSOperations) Get(hash, path string) error {
 func (ops *IPFSOperations) Pin(hash string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	
+	metadata := map[string]interface{}{
+		"hash": hash,
+	}
 
-	return ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	return ops.executeWithMetrics(ctx, "ipfs.pin", metadata, func() error {
 		return ops.core.ipfs.Pin(hash)
 	})
 }
@@ -133,8 +168,12 @@ func (ops *IPFSOperations) Pin(hash string) error {
 func (ops *IPFSOperations) Unpin(hash string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	
+	metadata := map[string]interface{}{
+		"hash": hash,
+	}
 
-	return ops.core.ipfsHealth.ExecuteWithHealthCheck(ctx, func() error {
+	return ops.executeWithMetrics(ctx, "ipfs.unpin", metadata, func() error {
 		return ops.core.ipfs.Unpin(hash)
 	})
 }
@@ -147,7 +186,7 @@ func (ops *IPFSOperations) ID() (*ipfsnode.IdOutput, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err := ops.executeWithMetrics(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, "ipfs.id", nil, func() error {
 		id, err := ops.core.ipfs.ID()
 		if err != nil {
 			operationErr = err
@@ -172,7 +211,7 @@ func (ops *IPFSOperations) BootstrapAdd(peers []string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	err := ops.executeWithMetrics(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, "ipfs.bootstrap_add", map[string]interface{}{"peer_count": len(peers)}, func() error {
 		added, err := ops.core.ipfs.BootstrapAdd(peers)
 		if err != nil {
 			operationErr = err
@@ -197,7 +236,7 @@ func (ops *IPFSOperations) BootstrapRmAll() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	err := ops.executeWithMetrics(ctx, func() error {
+	err := ops.executeWithMetrics(ctx, "ipfs.bootstrap_rm_all", nil, func() error {
 		removed, err := ops.core.ipfs.BootstrapRmAll()
 		if err != nil {
 			operationErr = err
@@ -216,7 +255,9 @@ func (ops *IPFSOperations) BootstrapRmAll() ([]string, error) {
 
 // SwarmConnect connects to a peer with health checks
 func (ops *IPFSOperations) SwarmConnect(ctx context.Context, addr string) error {
-	return ops.executeWithMetrics(ctx, func() error {
+	return ops.executeWithMetrics(ctx, "ipfs.swarm_connect", map[string]interface{}{
+		"address": addr,
+	}, func() error {
 		return ops.core.ipfs.SwarmConnect(ctx, addr)
 	})
 }

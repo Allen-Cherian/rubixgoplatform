@@ -98,6 +98,16 @@ func NewShutdownManager(core *Core) *ShutdownManager {
 			},
 			Timeout: 5 * time.Second,
 		},
+		{
+			Name: "Close Performance Tracker",
+			Function: func() error {
+				if sm.core.perfTracker != nil {
+					return sm.core.perfTracker.Close()
+				}
+				return nil
+			},
+			Timeout: 2 * time.Second,
+		},
 	}
 	
 	return sm

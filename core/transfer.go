@@ -183,6 +183,17 @@ func getConsensusRequest(consensusRequestType int, senderPeerID string, receiver
 func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) *model.BasicResponse {
 	st := time.Now()
 	txEpoch := int(st.Unix())
+	
+	// Track overall transaction performance
+	var txErr error
+	defer func() {
+		c.TrackOperation("tx.rbt_transfer.total", map[string]interface{}{
+			"sender": req.Sender,
+			"receiver": req.Receiver,
+			"amount": req.TokenCount,
+			"type": req.Type,
+		})(txErr)
+	}()
 
 	resp := &model.BasicResponse{
 		Status: false,
@@ -194,9 +205,15 @@ func (c *Core) initiateRBTTransfer(reqID string, req *model.RBTTransferRequest) 
 	// This flag indicates if the call is made for Self Transfer or general token transfer
 	isSelfRBTTransfer := senderDID == receiverdid
 
+	// Track validation phase
+	defer c.TrackOperation("tx.rbt_transfer.validation", map[string]interface{}{
+		"token_count": req.TokenCount,
+	})(nil)
+
 	dc, err := c.SetupDID(reqID, senderDID)
 	if err != nil {
 		resp.Message = "Failed to setup DID, " + err.Error()
+		txErr = err
 		return resp
 	}
 

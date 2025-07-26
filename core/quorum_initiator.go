@@ -401,6 +401,13 @@ func (c *Core) sendQuorumCredit(cr *ConensusRequest) {
 }
 
 func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc did.DIDCrypto) (*model.TransactionDetails, map[string]map[string]float64, *PledgeDetails, error) {
+	// Track overall consensus time
+	defer c.TrackOperation("tx.rbt_transfer.consensus", map[string]interface{}{
+		"mode": cr.Mode,
+		"quorum_count": len(cr.QuorumList),
+		"transaction_id": cr.TransactionID,
+	})(nil)
+	
 	cs := ConsensusStatus{
 		Credit: CreditScore{
 			Credit: make([]CreditSignature, 0),
@@ -611,7 +618,13 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		return nil, nil, nil, fmt.Errorf("Consensus failed due to insufficient balance in Quorum(s)")
 	}
 
+	// Track pledge phase
+	pledgeStart := time.Now()
 	nb, err := c.pledgeQuorumToken(cr, sc, tid, dc)
+	c.TrackOperation("tx.rbt_transfer.pledge", map[string]interface{}{
+		"transaction_id": tid,
+		"duration_ms": time.Since(pledgeStart).Milliseconds(),
+	})(err)
 	if err != nil {
 		c.log.Error("Failed to pledge token", "err", err)
 		return nil, nil, nil, err
@@ -656,6 +669,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		// calling quorum pledge finality before calling the APISendReceiver Token
 		// trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		// Track commit phase
+		_ = time.Now() // commitStart - reserved for future phase timing
 		var pledgeFinalityError error
 		if c.cfg.CfgData.TrustedNetwork && len(ti) > 100 {
 			// Use parallel processing for large transactions in trusted networks
@@ -663,6 +678,11 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		} else {
 			pledgeFinalityError = c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
 		}
+		c.TrackOperation("tx.rbt_transfer.commit", map[string]interface{}{
+			"transaction_id": tid,
+			"token_count": len(ti),
+			"parallel": c.cfg.CfgData.TrustedNetwork && len(ti) > 100,
+		})(pledgeFinalityError)
 		if pledgeFinalityError != nil {
 			c.log.Error("Pledge finlaity not achieved", "err", err)
 			return nil, nil, nil, pledgeFinalityError
@@ -927,6 +947,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		// calling quorum pledge finality before calling the APISendReceiver Token
 		// trigger pledge finality to the quorum and also adding the new tokenstate hash details for transferred tokens to quorum
+		// Track commit phase
+		_ = time.Now() // commitStart - reserved for future phase timing
 		var pledgeFinalityError error
 		if c.cfg.CfgData.TrustedNetwork && len(ti) > 100 {
 			// Use parallel processing for large transactions in trusted networks
@@ -934,6 +956,11 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		} else {
 			pledgeFinalityError = c.quorumPledgeFinality(cr, nb, txnTokenHashes, tid)
 		}
+		c.TrackOperation("tx.rbt_transfer.commit", map[string]interface{}{
+			"transaction_id": tid,
+			"token_count": len(ti),
+			"parallel": c.cfg.CfgData.TrustedNetwork && len(ti) > 100,
+		})(pledgeFinalityError)
 		if pledgeFinalityError != nil {
 			c.log.Error("Pledge finlaity not achieved", "err", err)
 			return nil, nil, nil, pledgeFinalityError

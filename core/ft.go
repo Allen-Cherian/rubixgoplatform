@@ -432,12 +432,25 @@ func (c *Core) InitiateFTTransfer(reqID string, req *model.TransferFTReq) {
 func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model.BasicResponse {
 	st := time.Now()
 	txEpoch := int(st.Unix())
+	
+	// Track overall FT transaction performance
+	var txErr error
+	defer func() {
+		c.TrackOperation("tx.ft_transfer.total", map[string]interface{}{
+			"sender": req.Sender,
+			"receiver": req.Receiver,
+			"ft_count": req.FTCount,
+			"ft_name": req.FTName,
+		})(txErr)
+	}()
+	
 	resp := &model.BasicResponse{
 		Status: false,
 	}
 	if req.Sender == req.Receiver {
 		c.log.Error("Sender and receiver cannot same")
 		resp.Message = "Sender and receiver cannot be same"
+		txErr = fmt.Errorf("sender and receiver cannot be same")
 		return resp
 	}
 	if req.Sender == "" || req.Receiver == "" {

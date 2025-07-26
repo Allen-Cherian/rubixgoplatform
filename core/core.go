@@ -141,6 +141,7 @@ type Core struct {
 	defaultSetup         bool
 	tokenSyncManager     *TokenSyncManager
 	asyncPinManager      *AsyncPinManager
+	perfTracker          *PerformanceTracker
 }
 
 func InitConfig(configFile string, encKey string, node uint16, addr string) error {
@@ -318,6 +319,29 @@ func NewCore(cfg *config.Config, cfgFile string, encKey string, log logger.Logge
 	
 	// Initialize async pin manager with 4 workers by default
 	c.asyncPinManager = NewAsyncPinManager(c, 4)
+	
+	// Initialize performance tracker
+	perfConfig := &PerformanceConfig{
+		Enabled:        true, // TODO: Make this configurable
+		DataPath:       c.cfg.DirPath,
+		RetentionHours: 24,
+		MaxFileSize:    100, // 100MB
+		DetailLevel:    "detailed",
+	}
+	c.perfTracker, err = NewPerformanceTracker(perfConfig, c.log)
+	if err != nil {
+		c.log.Error("Failed to initialize performance tracker", "err", err)
+		// Continue without performance tracking
+		c.perfTracker = &PerformanceTracker{enabled: false}
+	}
+	
+	// Wrap storage with tracking if performance tracker is enabled
+	if c.perfTracker != nil && c.perfTracker.enabled && c.s != nil {
+		c.s = NewTrackedStorage(c.s, c)
+		if c.arbitaryMode && c.as != nil {
+			c.as = NewTrackedStorage(c.as, c)
+		}
+	}
 	
 	return c, nil
 }
