@@ -225,7 +225,11 @@ func (c *Core) quorumRBTConsensus(req *ensweb.Request, did string, qdc didcrypto
 	c.log.Debug("entering validation to check if token state is exhausted, ti len", len(ti))
 
 	// Use resource-aware token state validator
-	if len(ti) > 50 {
+	if len(ti) > 100 {
+		// For very large token counts, use the new parallel validator
+		parallelValidator := NewParallelTokenStateValidator(c, did, cr.QuorumList)
+		tokenStateCheckResult = parallelValidator.ValidateTokenStates(ti, did)
+	} else if len(ti) > 50 {
 		// For large token counts, use the optimized validator
 		validator := NewTokenStateValidatorOptimized(c, did, cr.QuorumList)
 		tokenStateCheckResult = validator.ValidateTokenStatesOptimized(ti, did)
@@ -923,6 +927,10 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 
 	// Use resource-aware token state validator for FT consensus
 	if len(ti) > 100 {
+		// For very large token counts, use the new parallel validator
+		parallelValidator := NewParallelTokenStateValidator(c, did, cr.QuorumList)
+		tokenStateCheckResult = parallelValidator.ValidateTokenStates(ti, did)
+	} else if len(ti) > 50 {
 		// For large token counts, use the optimized validator
 		validator := NewTokenStateValidatorOptimized(c, did, cr.QuorumList)
 		tokenStateCheckResult = validator.ValidateTokenStatesOptimized(ti, did)
