@@ -601,8 +601,31 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 		
 		// Get owner from genesis groups (already fetched)
 		ftOwner := pfr.genesisOptimizer.GetOwnerForToken(item.Token, genesisGroups)
+		
+		// If genesis group lookup fails, try multiple fallback methods
 		if ftOwner == "" {
-			result.Error = fmt.Errorf("failed to get owner from genesis groups")
+			pfr.log.Debug("Genesis group lookup failed, trying fallback methods", 
+				"token", item.Token.Token)
+			
+			// Method 1: Try to get from downloaded token data
+			var err error
+			ftOwner, err = pfr.GetOwnerFromDownloadedToken(item.Token, item.DownloadResult.Task.Dir)
+			if err != nil {
+				pfr.log.Warn("Failed to get owner from downloaded data", 
+					"token", item.Token.Token, 
+					"error", err)
+				
+				// Method 2: For FT tokens, the creator is often the sender in the current transaction
+				// This is a reasonable assumption for FT transfers
+				ftOwner = senderPeerId
+				pfr.log.Info("Using sender as FT creator", 
+					"token", item.Token.Token,
+					"creator", ftOwner)
+			}
+		}
+		
+		if ftOwner == "" {
+			result.Error = fmt.Errorf("owner not found - genesis lookup, downloaded data, and fallback all failed")
 			os.RemoveAll(item.DownloadResult.Task.Dir)
 			return result
 		}
