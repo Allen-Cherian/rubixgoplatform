@@ -26,12 +26,12 @@ func (pfr *ParallelFTReceiver) processTokensParallelWithRetry(
 	did string,
 	senderPeerId string,
 	receiverPeerId string,
-	genesisGroups map[string]*TokenGenesisGroup,
+	tokenCreatorMap map[string]string,
 ) []TokenProcessingResult {
 	
 	// First attempt
 	results := pfr.processTokensParallel(ctx, tokens, hashResults, downloadResults, 
-		existingTokenIndices, b, ftInfo, did, senderPeerId, receiverPeerId, genesisGroups)
+		existingTokenIndices, b, ftInfo, did, senderPeerId, receiverPeerId, tokenCreatorMap)
 	
 	// Count failures
 	var failedCount int32
@@ -78,7 +78,7 @@ func (pfr *ParallelFTReceiver) processTokensParallelWithRetry(
 			
 			hashResult := hashResults[item.Token.Token]
 			retryResult := pfr.processSingleToken(item, hashResult, b, ftInfo, 
-				did, senderPeerId, receiverPeerId, genesisGroups)
+				did, senderPeerId, receiverPeerId, tokenCreatorMap)
 			
 			if retryResult.Success {
 				results[item.Index] = retryResult

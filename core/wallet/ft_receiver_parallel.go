@@ -27,6 +27,7 @@ type ParallelFTReceiver struct {
 	downloadBatchSize int
 	batchDelay        int // milliseconds
 	maxConcurrentIPFS int
+	creatorCache      sync.Map  // Cache for creator DIDs by genesis
 }
 
 // TokenProcessingState tracks processing state for each token
@@ -47,29 +48,21 @@ type TokenBatch struct {
 
 // NewParallelFTReceiver creates a new parallel FT receiver
 func NewParallelFTReceiver(w *Wallet) *ParallelFTReceiver {
-	// Use hardware-optimized configuration
-	hwConfig := GetHardwareOptimizedConfig()
-	workers := hwConfig.OptimalWorkers
+	cpuCount := runtime.NumCPU()
+	
+	// Start with conservative defaults
+	// Will be dynamically adjusted based on token count
+	initialWorkers := min(16, cpuCount * 2)
 	
 	w.log.Info("Initializing parallel FT receiver",
-		"cpu_cores", hwConfig.CPUCores,
-		"is_virtualized", hwConfig.IsVirtualized,
-		"optimal_workers", workers,
-		"max_workers", hwConfig.MaxWorkers)
+		"cpu_cores", cpuCount,
+		"initial_workers", initialWorkers)
 	
 	pfr := &ParallelFTReceiver{
 		w:                 w,
-		batchWorkers:      workers,
+		batchWorkers:      initialWorkers,
 		log:               w.log.Named("ParallelFTReceiver"),
 		genesisOptimizer:  NewGenesisGroupOptimizer(w),
-		downloadBatchSize: hwConfig.BatchSize,
-		batchDelay:        50, // 50ms default
-		maxConcurrentIPFS: hwConfig.OptimalWorkers,
-	}
-	
-	// Apply EC2 optimizations if virtualized
-	if hwConfig.IsVirtualized {
-		pfr.OptimizeForEC2Instance()
 	}
 	
 	return pfr
@@ -93,8 +86,8 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 		return nil, err
 	}
 	
-	// Use hardware-optimized worker calculation
-	dynamicWorkers := pfr.calculateOptimalWorkersForHardware(totalTokens)
+	// Use dynamic worker calculation with hardware awareness
+	dynamicWorkers := pfr.calculateDynamicWorkers(totalTokens)
 	if dynamicWorkers != pfr.batchWorkers {
 		pfr.log.Info("Adjusting workers for token count",
 			"current_workers", pfr.batchWorkers,
@@ -143,13 +136,19 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 		downloadResults = pfr.parallelBatchDownload(ctx, downloadTasks, did)
 	}
 	
-	// Group tokens by genesis for optimized processing
-	genesisGroups := pfr.genesisOptimizer.GroupTokensByGenesis(ti)
+	// Create batch genesis optimizer
+	genesisBatchOptimizer := NewGenesisBatchOptimizer(pfr.w)
+	
+	// Preload creator info from downloads if available
+	genesisBatchOptimizer.PreloadFromDownloads(downloadResults)
+	
+	// Batch process all tokens to get creator mappings efficiently
+	tokenCreatorMap := genesisBatchOptimizer.BatchProcessTokens(ti)
 	
 	// Phase 4: Process all tokens in parallel (update DB, pin, etc.)
 	// Use enhanced processing with retry for mainnet stability
 	processResults := pfr.processTokensParallelWithRetry(ctx, ti, hashResults, downloadResults, 
-		existingTokens, b, ftInfo, did, senderPeerId, receiverPeerId, genesisGroups)
+		existingTokens, b, ftInfo, did, senderPeerId, receiverPeerId, tokenCreatorMap)
 	
 	// Debug logging for mainnet issues
 	pfr.debugTokenProcessing(ti, processResults)
@@ -368,6 +367,7 @@ type DownloadResult struct {
 	Success     bool
 	Error       error
 	ProviderMap model.TokenProviderMap
+	CreatorDID  string // Cache creator DID extracted during download
 }
 
 // parallelBatchDownload downloads tokens in parallel batches
@@ -500,7 +500,7 @@ func (pfr *ParallelFTReceiver) processTokensParallel(
 	did string,
 	senderPeerId string,
 	receiverPeerId string,
-	genesisGroups map[string]*TokenGenesisGroup,
+	tokenCreatorMap map[string]string,
 ) []TokenProcessingResult {
 	results := make([]TokenProcessingResult, len(tokens))
 	
@@ -554,7 +554,7 @@ func (pfr *ParallelFTReceiver) processTokensParallel(
 					did,
 					senderPeerId,
 					receiverPeerId,
-					genesisGroups,
+					tokenCreatorMap,
 				)
 				resultsChan <- result
 			}
@@ -595,7 +595,7 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 	did string,
 	senderPeerId string,
 	receiverPeerId string,
-	genesisGroups map[string]*TokenGenesisGroup,
+	tokenCreatorMap map[string]string,
 ) TokenProcessingResult {
 	result := TokenProcessingResult{
 		Token:          item.Token.Token,
@@ -615,29 +615,14 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 			return result
 		}
 		
-		// Get owner from genesis groups (already fetched)
-		ftOwner := pfr.genesisOptimizer.GetOwnerForToken(item.Token, genesisGroups)
+		// Get owner from pre-computed creator map
+		ftOwner, found := tokenCreatorMap[item.Token.Token]
 		
-		// If genesis group lookup fails, try multiple fallback methods
-		if ftOwner == "" {
-			pfr.log.Debug("Genesis group lookup failed, trying fallback methods", 
+		// If not found in map, use sender as fallback
+		if !found || ftOwner == "" {
+			pfr.log.Debug("Creator not found in batch map, using sender as fallback", 
 				"token", item.Token.Token)
-			
-			// Method 1: Try to get from downloaded token data
-			var err error
-			ftOwner, err = pfr.GetOwnerFromDownloadedToken(item.Token, item.DownloadResult.Task.Dir)
-			if err != nil {
-				pfr.log.Warn("Failed to get owner from downloaded data", 
-					"token", item.Token.Token, 
-					"error", err)
-				
-				// Method 2: For FT tokens, the creator is often the sender in the current transaction
-				// This is a reasonable assumption for FT transfers
-				ftOwner = senderPeerId
-				pfr.log.Info("Using sender as FT creator", 
-					"token", item.Token.Token,
-					"creator", ftOwner)
-			}
+			ftOwner = senderPeerId
 		}
 		
 		if ftOwner == "" {
@@ -741,48 +726,90 @@ func (pfr *ParallelFTReceiver) withMinimalLock(fn func() error) error {
 	return fn()
 }
 
-// calculateDynamicWorkers determines optimal workers based on token count
+// calculateDynamicWorkers determines optimal workers based on token count and hardware
 func (pfr *ParallelFTReceiver) calculateDynamicWorkers(tokenCount int) int {
-	// Scale workers based on token count
-	// Target: Process at least 100 tokens per second
+	cpuCount := runtime.NumCPU()
+	
+	// Detect if running in virtualized environment (conservative approach)
+	// In virtualized environments, we should be more conservative with concurrency
+	isVirtualized := cpuCount <= 8 // Most VMs have 8 or fewer vCPUs
+	
+	// Base calculation for workers
 	var workers int
 	
 	switch {
 	case tokenCount < 100:
-		workers = 8
+		workers = min(8, cpuCount)
+	case tokenCount < 250:
+		workers = min(12, cpuCount * 2)
 	case tokenCount < 500:
-		workers = 16
+		workers = min(16, cpuCount * 2)
 	case tokenCount < 1000:
-		workers = 32
+		workers = min(32, cpuCount * 3)
 	case tokenCount < 5000:
-		workers = 64
+		workers = min(64, cpuCount * 4)
 	case tokenCount < 10000:
-		workers = 96
+		workers = min(96, cpuCount * 6)
 	default:
-		workers = 128
+		workers = min(128, cpuCount * 8)
 	}
 	
-	// Consider CPU cores with higher multiplier for large transfers
-	cpuCount := runtime.NumCPU()
-	maxWorkers := cpuCount * 4 // 4x for I/O bound operations
-	if tokenCount > 5000 {
-		maxWorkers = cpuCount * 8 // 8x for very large transfers
+	// Apply constraints based on environment
+	if isVirtualized {
+		// For virtualized environments (like EC2), be more conservative
+		// to prevent context switching overhead
+		maxVirtualizedWorkers := cpuCount * 2
+		if tokenCount <= 250 && cpuCount == 8 {
+			// Special case for your 8 vCPU system with 250 tokens
+			maxVirtualizedWorkers = 16
+		}
+		
+		if workers > maxVirtualizedWorkers {
+			pfr.log.Debug("Limiting workers for virtualized environment",
+				"cpu_count", cpuCount,
+				"requested_workers", workers,
+				"limited_to", maxVirtualizedWorkers)
+			workers = maxVirtualizedWorkers
+		}
+	} else {
+		// Physical hardware can handle more workers
+		maxWorkers := cpuCount * 4
+		if tokenCount > 5000 {
+			maxWorkers = cpuCount * 8
+		}
+		if workers > maxWorkers {
+			workers = maxWorkers
+		}
 	}
 	
-	if workers > maxWorkers {
-		workers = maxWorkers
-	}
-	
-	// Ensure minimum workers
-	minWorkers := tokenCount / 50 // At least 1 worker per 50 tokens
-	if minWorkers < 8 {
-		minWorkers = 8
-	}
+	// Ensure minimum workers for efficiency
+	minWorkers := max(8, tokenCount/100) // At least 1 worker per 100 tokens
 	if workers < minWorkers {
 		workers = minWorkers
 	}
 	
+	// Final safety check
+	if workers > 128 {
+		workers = 128 // Absolute maximum to prevent resource exhaustion
+	}
+	
 	return workers
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// max returns the maximum of two integers  
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (pfr *ParallelFTReceiver) collectProviderMaps(results []TokenProcessingResult) []model.TokenProviderMap {
