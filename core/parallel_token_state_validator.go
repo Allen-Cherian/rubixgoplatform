@@ -2,11 +2,9 @@ package core
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	ipfsnode "github.com/ipfs/go-ipfs-api"

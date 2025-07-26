@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	ipfsnode "github.com/ipfs/go-ipfs-api"
@@ -98,15 +97,9 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 		}
 	}
 	
-	// Group tokens by their state hash for efficient processing
-	tokenGroups := pfr.groupTokensByState(ti)
-	
-	// Process token groups in parallel
+	// Process tokens in parallel
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
-	results := make(chan TokenProcessingResult, totalTokens)
-	var wg sync.WaitGroup
 	
 	// Phase 1: Parallel state hash computation
 	hashResults := pfr.computeStateHashesParallel(ctx, ti, did, b, senderPeerId, receiverPeerId)
@@ -450,6 +443,14 @@ func (pfr *ParallelFTReceiver) parallelBatchDownload(
 	return results
 }
 
+// workItem represents a token processing task
+type workItem struct {
+	Index          int
+	Token          contract.TokenInfo
+	IsNewToken     bool
+	DownloadResult *DownloadResult
+}
+
 // processTokensParallel processes all tokens in parallel
 func (pfr *ParallelFTReceiver) processTokensParallel(
 	ctx context.Context,
@@ -464,14 +465,6 @@ func (pfr *ParallelFTReceiver) processTokensParallel(
 	receiverPeerId string,
 ) []TokenProcessingResult {
 	results := make([]TokenProcessingResult, len(tokens))
-	
-	// Create work items
-	type workItem struct {
-		Index          int
-		Token          contract.TokenInfo
-		IsNewToken     bool
-		DownloadResult *DownloadResult
-	}
 	
 	workItems := make([]workItem, 0, len(tokens))
 	
@@ -625,8 +618,8 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 		// Cleanup download directory
 		os.RemoveAll(item.DownloadResult.Task.Dir)
 		
-		// Merge provider maps
-		if item.DownloadResult.ProviderMap.TokenID != "" {
+		// Merge provider maps if available
+		if item.DownloadResult.Success {
 			result.ProviderMap = item.DownloadResult.ProviderMap
 		}
 	} else {
@@ -678,16 +671,6 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 
 // Helper methods
 
-func (pfr *ParallelFTReceiver) groupTokensByState(tokens []contract.TokenInfo) map[string][]contract.TokenInfo {
-	groups := make(map[string][]contract.TokenInfo)
-	
-	// This would group tokens by some state characteristic
-	// For now, we'll just return a single group
-	groups["all"] = tokens
-	
-	return groups
-}
-
 func (pfr *ParallelFTReceiver) withMinimalLock(fn func() error) error {
 	pfr.w.l.Lock()
 	defer pfr.w.l.Unlock()
@@ -697,7 +680,7 @@ func (pfr *ParallelFTReceiver) withMinimalLock(fn func() error) error {
 func (pfr *ParallelFTReceiver) collectProviderMaps(results []TokenProcessingResult) []model.TokenProviderMap {
 	maps := make([]model.TokenProviderMap, 0, len(results))
 	for _, result := range results {
-		if result.Success && result.ProviderMap.TokenID != "" {
+		if result.Success && result.Token != "" {
 			maps = append(maps, result.ProviderMap)
 		}
 	}
