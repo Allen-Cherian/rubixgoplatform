@@ -19,11 +19,14 @@ import (
 
 // ParallelFTReceiver handles FT tokens without global locks
 type ParallelFTReceiver struct {
-	w               *Wallet
-	tokenStates     sync.Map  // Lock-free concurrent map for token states
-	batchWorkers    int
-	log             logger.Logger
-	genesisOptimizer *GenesisGroupOptimizer
+	w                 *Wallet
+	tokenStates       sync.Map  // Lock-free concurrent map for token states
+	batchWorkers      int
+	log               logger.Logger
+	genesisOptimizer  *GenesisGroupOptimizer
+	downloadBatchSize int
+	batchDelay        int // milliseconds
+	maxConcurrentIPFS int
 }
 
 // TokenProcessingState tracks processing state for each token
@@ -44,23 +47,32 @@ type TokenBatch struct {
 
 // NewParallelFTReceiver creates a new parallel FT receiver
 func NewParallelFTReceiver(w *Wallet) *ParallelFTReceiver {
-	// Calculate workers based on available resources
-	cpuCount := runtime.NumCPU()
-	workers := cpuCount * 2 // 2x CPU for I/O bound operations
-	if workers < 8 {
-		workers = 8
-	}
-	// Increased max workers for large transfers
-	if workers > 64 {
-		workers = 64
+	// Use hardware-optimized configuration
+	hwConfig := GetHardwareOptimizedConfig()
+	workers := hwConfig.OptimalWorkers
+	
+	w.log.Info("Initializing parallel FT receiver",
+		"cpu_cores", hwConfig.CPUCores,
+		"is_virtualized", hwConfig.IsVirtualized,
+		"optimal_workers", workers,
+		"max_workers", hwConfig.MaxWorkers)
+	
+	pfr := &ParallelFTReceiver{
+		w:                 w,
+		batchWorkers:      workers,
+		log:               w.log.Named("ParallelFTReceiver"),
+		genesisOptimizer:  NewGenesisGroupOptimizer(w),
+		downloadBatchSize: hwConfig.BatchSize,
+		batchDelay:        50, // 50ms default
+		maxConcurrentIPFS: hwConfig.OptimalWorkers,
 	}
 	
-	return &ParallelFTReceiver{
-		w:                w,
-		batchWorkers:     workers,
-		log:              w.log.Named("ParallelFTReceiver"),
-		genesisOptimizer: NewGenesisGroupOptimizer(w),
+	// Apply EC2 optimizations if virtualized
+	if hwConfig.IsVirtualized {
+		pfr.OptimizeForEC2Instance()
 	}
+	
+	return pfr
 }
 
 // ParallelFTTokensReceived processes received FT tokens without serialized locks
@@ -81,9 +93,13 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 		return nil, err
 	}
 	
-	// Dynamic worker scaling based on token count
-	dynamicWorkers := pfr.calculateDynamicWorkers(totalTokens)
-	if dynamicWorkers > pfr.batchWorkers {
+	// Use hardware-optimized worker calculation
+	dynamicWorkers := pfr.calculateOptimalWorkersForHardware(totalTokens)
+	if dynamicWorkers != pfr.batchWorkers {
+		pfr.log.Info("Adjusting workers for token count",
+			"current_workers", pfr.batchWorkers,
+			"new_workers", dynamicWorkers,
+			"token_count", totalTokens)
 		pfr.batchWorkers = dynamicWorkers
 	}
 	
