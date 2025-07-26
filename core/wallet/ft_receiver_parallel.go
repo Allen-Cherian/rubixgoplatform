@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -662,10 +663,32 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 		}
 	} else {
 		// Update existing token
+		// Get creator for fix (capture before the closure)
+		creatorToUse := ""
+		// First try to get from the pre-computed map
+		if creator, found := tokenCreatorMap[item.Token.Token]; found && creator != "" {
+			creatorToUse = creator
+		} else {
+			// Use genesis lookup as fallback
+			gb := pfr.w.GetGenesisTokenBlock(item.Token.Token, item.Token.TokenType)
+			if gb != nil {
+				creatorToUse = gb.GetOwner()
+			}
+		}
+		
 		err := pfr.withMinimalLock(func() error {
 			var ftEntry FTToken
 			if err := pfr.w.s.Read(FTTokenStorage, &ftEntry, "token_id=?", item.Token.Token); err != nil {
 				return err
+			}
+			
+			// Fix CreatorDID if it's a peer ID (temporary fix for existing bad data)
+			if strings.HasPrefix(ftEntry.CreatorDID, "12D3KooW") && creatorToUse != "" {
+				pfr.log.Info("Fixing CreatorDID from peer ID to DID", 
+					"token", item.Token.Token,
+					"old_creator", ftEntry.CreatorDID,
+					"new_creator", creatorToUse)
+				ftEntry.CreatorDID = creatorToUse
 			}
 			
 			ftEntry.FTName = ftInfo.FTName
