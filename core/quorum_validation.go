@@ -701,9 +701,21 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	var wg sync.WaitGroup
 	results := make(chan *BlockValidationResult, len(blockGroups))
 
-	// Limit concurrency
+	// Use dynamic worker allocation for block validation
+	rm := &ResourceMonitor{}
+	dynamicWorkers := rm.CalculateDynamicWorkers(len(blockGroups))
+	
+	// Apply CPU-based limits (numCores * 2)
 	numCores := runtime.NumCPU()
-	maxWorkers := numCores * 2
+	cpuLimit := numCores * 2
+	maxWorkers := min(dynamicWorkers, cpuLimit)
+	
+	c.log.Debug("Block validation worker configuration",
+		"uniqueBlocks", len(blockGroups),
+		"dynamicWorkers", dynamicWorkers,
+		"cpuLimit", cpuLimit,
+		"actualWorkers", maxWorkers)
+	
 	sem := make(chan struct{}, maxWorkers)
 
 	for _, blockResult := range blockGroups {
