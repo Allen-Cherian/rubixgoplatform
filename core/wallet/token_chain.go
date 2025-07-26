@@ -585,6 +585,9 @@ func (w *Wallet) addBlocks(b *block.Block) error {
 		w.log.Error("Failed to add block, invalid token type")
 		return fmt.Errorf("failed to get db")
 	}
+	
+	// Track how many tokens already have this block
+	skippedTokens := 0
 	for _, token := range tokens {
 		tt := b.GetTokenType(token)
 		lb := w.getLatestBlock(tt, token)
@@ -607,6 +610,19 @@ func (w *Wallet) addBlocks(b *block.Block) error {
 			}
 			if bn <= lbn {
 				if bn == lbn {
+					// Check if it's the same block
+					existingBlockID, _ := lb.GetBlockID(token)
+					newBlockID, _ := b.GetBlockID(token)
+					if existingBlockID == newBlockID {
+						// Same block already exists, this is okay for idempotent operations
+						w.log.Debug("Block already exists for token, continuing", 
+							"token", token, 
+							"blockID", newBlockID,
+							"blockNumber", bn)
+						skippedTokens++
+						continue // Skip to next token
+					}
+					// Different block with same number, remove existing
 					err = w.removeTokenChainBlockLatest(token, tt)
 					if err != nil {
 						w.log.Error("Failed to remove latest block of token", token, "err", err)
@@ -627,6 +643,20 @@ func (w *Wallet) addBlocks(b *block.Block) error {
 			}
 		}
 	}
+	
+	// If all tokens already have this block, it's an idempotent operation
+	if skippedTokens == len(tokens) {
+		w.log.Info("All tokens already have this block, operation is idempotent",
+			"total_tokens", len(tokens),
+			"block_id", func() string {
+				if bid, err := b.GetBlockID(tokens[0]); err == nil {
+					return bid
+				}
+				return "unknown"
+			}())
+		return nil
+	}
+	
 	bs, err := b.GetHash()
 	if err != nil {
 		return err
