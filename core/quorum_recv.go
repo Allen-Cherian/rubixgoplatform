@@ -976,20 +976,30 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 	// After all goroutines have completed, check the results
 	// This is where you can handle the results of the token state checks
 
-	c.log.Debug("Token state validation completed, checking for errors")
+	// Add summary stats for token state validation
+	var validTokens, exhaustedTokens, errorTokens int
 	for i := range tokenStateCheckResult {
 		if tokenStateCheckResult[i].Error != nil {
+			errorTokens++
 			c.log.Error("Error occured", "error", tokenStateCheckResult[i].Error)
 			crep.Message = "Error while cheking Token State Message : " + tokenStateCheckResult[i].Message
 			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
 		if tokenStateCheckResult[i].Exhausted {
+			exhaustedTokens++
 			c.log.Debug("Token state has been exhausted, Token being Double spent:", tokenStateCheckResult[i].Token)
 			crep.Message = tokenStateCheckResult[i].Message
 			return c.l.RenderJSON(req, &crep, http.StatusOK)
 		}
-		c.log.Debug("Token", tokenStateCheckResult[i].Token, "Message", tokenStateCheckResult[i].Message)
+		validTokens++
+		// Don't log for each token to reduce noise
 	}
+	
+	c.log.Info("Token state validation completed",
+		"total_tokens", len(tokenStateCheckResult),
+		"valid", validTokens,
+		"exhausted", exhaustedTokens,
+		"errors", errorTokens)
 
 	// Log progress: 3rd phase starting (token pinning)
 	if len(ti) > 50 {

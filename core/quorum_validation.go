@@ -559,7 +559,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 
 		if !isPresentInList(signersForExistingBlock, quorumDID) || len(signersForExistingBlock) == 0 {
 			// This token needs syncing - collect it for batch processing
-			c.log.Debug("Token needs sync", "token", tokenInfo.Token, "reason", "quorum not in signers")
+			// Don't log for each token to reduce noise
 			tokensNeedingSync = append(tokensNeedingSync, BatchSyncTokenInfo{
 				Token:     tokenInfo.Token,
 				BlockID:   tokenInfo.BlockID,
@@ -568,7 +568,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 			syncNeeded++
 		} else {
 			// Quorum already signed - no sync needed
-			c.log.Debug("Skipping token sync", "token", tokenInfo.Token, "reason", "quorum already signed")
+			// Don't log for each token to reduce noise
 			syncSkipped++
 			
 			// Store the latest block we already have
@@ -594,7 +594,8 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	c.log.Info("Sync analysis completed", 
 		"totalTokens", len(ti),
 		"needSync", syncNeeded,
-		"skipSync", syncSkipped)
+		"skipSync", syncSkipped,
+		"uniqueBlocks", len(blockGroups))
 	
 	// Track collection phase time
 	c.TrackOperation("quorum.validate_token_ownership.collect_tokens", map[string]interface{}{
@@ -1130,7 +1131,7 @@ func (c *Core) checkTokenState(tokenId, did string, index int, resultArray []Tok
 		}
 	}
 
-	c.log.Debug("Token state is not exhausted, Unique Txn")
+	// Don't log for each token to reduce noise
 	result.Error = nil
 	result.Message = "Token state is free, Unique Txn"
 	result.tokenIDTokenStateData = tokenIDTokenStateData

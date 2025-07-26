@@ -230,15 +230,20 @@ func (apm *AsyncPinManager) processJob(job *AsyncPinJob) {
 		processed := completed + failed
 		currentPercent := int32((float64(processed) * 100) / float64(job.TokenCount))
 		
-		// Log every 10% or at completion
-		if currentPercent >= lastLoggedPercent+10 || processed == int32(job.TokenCount) {
+		// Log every 20% or at completion for large jobs, every 10% for smaller ones
+		logInterval := int32(10)
+		if job.TokenCount > 1000 {
+			logInterval = 20
+		}
+		
+		if currentPercent >= lastLoggedPercent+logInterval || processed == int32(job.TokenCount) {
 			apm.log.Info("Async pin progress",
 				"transaction_id", job.TransactionID,
 				"percent", currentPercent,
 				"completed", completed,
 				"failed", failed,
 				"total", job.TokenCount)
-			lastLoggedPercent = (currentPercent / 10) * 10
+			lastLoggedPercent = (currentPercent / logInterval) * logInterval
 		}
 		
 		// Small delay between batches
@@ -276,7 +281,7 @@ func (apm *AsyncPinManager) processJob(job *AsyncPinJob) {
 func (apm *AsyncPinManager) statusMonitor() {
 	defer apm.wg.Done()
 	
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(60 * time.Second) // Reduced frequency to minimize log noise
 	defer ticker.Stop()
 	
 	for {

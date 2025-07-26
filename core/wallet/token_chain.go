@@ -634,15 +634,17 @@ func (w *Wallet) addBlocks(b *block.Block) error {
 	hs := ut.HexToStr(ut.CalculateHash(b.GetBlock(), "SHA3-256"))
 	refkey := []byte(ReferenceType + "-" + hs + "-" + bs)
 	_, err = w.getRawBlock(db, refkey)
-	// if block already exist return error
+	// if block already exist, just skip writing the reference block
 	if err == nil {
-		return fmt.Errorf("failed write the block, block already exist")
-	}
-	db.l.Lock()
-	err = db.Put(refkey, b.GetBlock(), opt)
-	db.l.Unlock()
-	if err != nil {
-		return err
+		w.log.Debug("Reference block already exists, skipping write", "hash", hs)
+		// Still need to update token references
+	} else {
+		db.l.Lock()
+		err = db.Put(refkey, b.GetBlock(), opt)
+		db.l.Unlock()
+		if err != nil {
+			return err
+		}
 	}
 	for _, token := range tokens {
 		bid, err := b.GetBlockID(token)
