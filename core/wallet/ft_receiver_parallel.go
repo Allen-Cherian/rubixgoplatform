@@ -76,6 +76,11 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 	startTime := time.Now()
 	totalTokens := len(ti)
 	
+	// Validate mainnet limits
+	if err := pfr.validateMainnetLimits(totalTokens); err != nil {
+		return nil, err
+	}
+	
 	// Dynamic worker scaling based on token count
 	dynamicWorkers := pfr.calculateDynamicWorkers(totalTokens)
 	if dynamicWorkers > pfr.batchWorkers {
@@ -126,8 +131,12 @@ func (pfr *ParallelFTReceiver) ParallelFTTokensReceived(
 	genesisGroups := pfr.genesisOptimizer.GroupTokensByGenesis(ti)
 	
 	// Phase 4: Process all tokens in parallel (update DB, pin, etc.)
-	processResults := pfr.processTokensParallel(ctx, ti, hashResults, downloadResults, 
+	// Use enhanced processing with retry for mainnet stability
+	processResults := pfr.processTokensParallelWithRetry(ctx, ti, hashResults, downloadResults, 
 		existingTokens, b, ftInfo, did, senderPeerId, receiverPeerId, genesisGroups)
+	
+	// Debug logging for mainnet issues
+	pfr.debugTokenProcessing(ti, processResults)
 	
 	// Phase 5: Handle provider details asynchronously
 	allProviderMaps := pfr.collectProviderMaps(processResults)
@@ -610,10 +619,8 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 			TokenStateHash: hashResult.Hash,
 		}
 		
-		// Write to database with minimal locking
-		err := pfr.withMinimalLock(func() error {
-			return pfr.w.s.Write(FTTokenStorage, &ftEntry)
-		})
+		// Write to database with minimal locking and retry
+		err := pfr.enhancedDatabaseWrite(FTTokenStorage, &ftEntry)
 		
 		if err != nil {
 			result.Error = fmt.Errorf("failed to write token: %w", err)
@@ -642,7 +649,19 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 			ftEntry.TransactionID = b.GetTid()
 			ftEntry.TokenStateHash = hashResult.Hash
 			
-			return pfr.w.s.Update(FTTokenStorage, &ftEntry, "token_id=?", item.Token.Token)
+			// Use retry logic for updates too
+			const maxRetries = 3
+			var updateErr error
+			for attempt := 1; attempt <= maxRetries; attempt++ {
+				updateErr = pfr.w.s.Update(FTTokenStorage, &ftEntry, "token_id=?", item.Token.Token)
+				if updateErr == nil {
+					break
+				}
+				if attempt < maxRetries {
+					time.Sleep(time.Duration(attempt*50) * time.Millisecond)
+				}
+			}
+			return updateErr
 		})
 		
 		if err != nil {
