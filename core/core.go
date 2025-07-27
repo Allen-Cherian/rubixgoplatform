@@ -40,6 +40,7 @@ const (
 	APIUpdatePledgeToken            string = "/api/update-pledge-token"
 	APISignatureRequest             string = "/api/signature-request"
 	APISendReceiverToken            string = "/api/send-receiver-token"
+	APIConfirmTokenTransfer         string = "/api/confirm-token-transfer"
 	APISyncTokenChain               string = "/api/sync-token-chain"
 	APIDhtProviderCheck             string = "/api/dht-provider-check"
 	APIMapDIDArbitration            string = "/api/map-did-arbitration"

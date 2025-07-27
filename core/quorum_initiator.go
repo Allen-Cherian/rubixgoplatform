@@ -215,6 +215,7 @@ func (c *Core) QuroumSetup() {
 	c.l.AddRoute(APIUpdatePledgeToken, "POST", c.updatePledgeToken)
 	c.l.AddRoute(APISignatureRequest, "POST", c.signatureRequest)
 	c.l.AddRoute(APISendReceiverToken, "POST", c.updateReceiverTokenHandle)
+	c.l.AddRoute(APIConfirmTokenTransfer, "POST", c.confirmTokenTransfer)
 	c.l.AddRoute(APIUnlockTokens, "POST", c.unlockTokens)
 	c.l.AddRoute(APIUpdateTokenHashDetails, "POST", c.updateTokenHashDetails)
 	c.l.AddRoute(APIAddUnpledgeDetails, "POST", c.addUnpledgeDetails)
@@ -785,6 +786,17 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			return nil, nil, nil, fmt.Errorf("unable to send tokens to receiver, " + br.Message)
 		}
 
+		// Send token confirmation to receiver after consensus finality
+		err = c.sendTokenConfirmation(receiver, tid, ti, wallet.RBTTokenType)
+		if err != nil {
+			// Log error but don't fail the transaction - tokens are already committed
+			c.log.Error("Failed to send token confirmation to receiver", 
+				"receiver", receiver,
+				"transaction_id", tid,
+				"error", err)
+			// Continue with the flow - receiver will eventually clean up pending tokens
+		}
+
 		// TODO:Remove this below commented out code, once after testing the quorum pledge finality location change.
 		// br.Result will contain the new token state after sending tokens to receiver as a response to APISendReceiverToken
 		// newtokenhashresult, ok := br.Result.([]interface{})
@@ -1054,6 +1066,17 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		if !br.Status {
 			c.log.Error("Unable to send FT tokens to receiver", "msg", br.Message)
 			return nil, nil, nil, fmt.Errorf("unable to send FT tokens to receiver, " + br.Message)
+		}
+
+		// Send token confirmation to receiver after consensus finality
+		err = c.sendTokenConfirmation(receiver, tid, ti, wallet.FTTokenType)
+		if err != nil {
+			// Log error but don't fail the transaction - tokens are already committed
+			c.log.Error("Failed to send FT token confirmation to receiver", 
+				"receiver", receiver,
+				"transaction_id", tid,
+				"error", err)
+			// Continue with the flow - receiver will eventually clean up pending tokens
 		}
 
 		// TODO: remove the following commented out code once after testing, calling the quorum pledge finality before APISendFT token

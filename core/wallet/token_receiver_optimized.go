@@ -201,7 +201,7 @@ func (w *Wallet) OptimizedTokensReceived(did string, ti []contract.TokenInfo, b 
 		}
 		
 		// Update token status
-		tokenStatus := TokenIsFree
+		tokenStatus := TokenIsPending // Changed from TokenIsFree to prevent premature spending
 		role := OwnerRole
 		ownerdid := did
 		if pinningServiceMode {

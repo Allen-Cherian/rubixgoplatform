@@ -196,7 +196,7 @@ func (w *Wallet) tokenProcessWorker(did string, b *block.Block, senderPeerId, re
 		}
 		
 		// Update token status
-		tokenStatus := TokenIsFree
+		tokenStatus := TokenIsPending // Changed from TokenIsFree to prevent premature spending
 		role := OwnerRole
 		ownerdid := did
 		if pinningServiceMode {

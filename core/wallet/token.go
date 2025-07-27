@@ -28,6 +28,7 @@ const (
 	TokenIsFetched
 	TokenIsBurnt
 	TokenIsExecuted
+	TokenIsPending // Tokens received but not yet confirmed by consensus finality
 	TokenIsOrphaned
 	TokenChainSyncIssue
 	TokenPledgeIssue
@@ -817,7 +818,7 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 			}
 		}
 		// Update token status and pin tokens
-		tokenStatus := TokenIsFree
+		tokenStatus := TokenIsPending // Changed from TokenIsFree to prevent premature spending
 		role := OwnerRole
 		ownerdid := did
 		if pinningServiceMode {
@@ -968,7 +969,7 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 			}
 		}
 		// Update token status and pin tokens
-		tokenStatus := TokenIsFree
+		tokenStatus := TokenIsPending // Changed from TokenIsFree to prevent premature spending
 		role := OwnerRole
 		ownerdid := did
 
