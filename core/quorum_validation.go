@@ -585,12 +585,12 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		if !isPresentInList(signersForExistingBlock, quorumDID) || len(signersForExistingBlock) == 0 {
 			// This token needs syncing - collect it for batch processing
 			// Don't log for each token to reduce noise
-			// Use pool for BatchSyncTokenInfo
-			batchSyncInfo := c.batchSyncTokenPool.Get()
-			batchSyncInfo.Token = tokenInfo.Token
-			batchSyncInfo.BlockID = tokenInfo.BlockID
-			batchSyncInfo.TokenType = tokenInfo.TokenType
-			tokensNeedingSync = append(tokensNeedingSync, *batchSyncInfo)
+			// Create BatchSyncTokenInfo - don't use pool here as we need to store them
+			tokensNeedingSync = append(tokensNeedingSync, BatchSyncTokenInfo{
+				Token:     tokenInfo.Token,
+				BlockID:   tokenInfo.BlockID,
+				TokenType: tokenInfo.TokenType,
+			})
 			syncNeeded++
 		} else {
 			// Quorum already signed - no sync needed
@@ -643,15 +643,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 				"token_count": len(tokensNeedingSync),
 			})(err)
 			if err != nil {
-				// Return items to pool before returning error
-				for i := range tokensNeedingSync {
-					c.batchSyncTokenPool.Put(&tokensNeedingSync[i])
-				}
 				return false, err, nil
-			}
-			// Return items to pool after successful use
-			for i := range tokensNeedingSync {
-				c.batchSyncTokenPool.Put(&tokensNeedingSync[i])
 			}
 		} else {
 			// Use parallel sync for small token sets (≤10 tokens)
@@ -700,10 +692,6 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 			
 			syncWg.Wait()
 			if syncErr != nil {
-				// Return items to pool before returning error
-				for i := range tokensNeedingSync {
-					c.batchSyncTokenPool.Put(&tokensNeedingSync[i])
-				}
 				return false, syncErr, nil
 			}
 		}
@@ -713,7 +701,9 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 			"tokensSynced", len(tokensNeedingSync))
 		
 		// Process synced tokens and group by block hash
-		for _, syncInfo := range tokensNeedingSync {
+		// IMPORTANT: We must process the tokens BEFORE returning them to the pool
+		for i := range tokensNeedingSync {
+			syncInfo := &tokensNeedingSync[i]
 			// Get the latest block after sync
 			latestBlock := c.w.GetLatestTokenBlock(syncInfo.Token, syncInfo.TokenType)
 			if latestBlock == nil {
@@ -740,10 +730,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 			}
 		}
 		
-		// Return all BatchSyncTokenInfo items to pool after processing
-		for i := range tokensNeedingSync {
-			c.batchSyncTokenPool.Put(&tokensNeedingSync[i])
-		}
+		// Note: We're not using pool for tokensNeedingSync anymore, so no need to return them
 	}
 
 	c.log.Info("Token grouping completed", "totalTokens", len(ti), "uniqueBlocks", len(blockGroups))
