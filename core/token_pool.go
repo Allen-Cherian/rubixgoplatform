@@ -29,12 +29,12 @@ func (p *TokenInfoPool) Get() *contract.TokenInfo {
 
 // Put returns a TokenInfo to the pool after resetting it
 func (p *TokenInfoPool) Put(ti *contract.TokenInfo) {
-	// Reset the token info
+	// Reset ALL fields to prevent state leakage between transactions
 	ti.Token = ""
 	ti.TokenType = 0
+	ti.TokenValue = 0.0
 	ti.OwnerDID = ""
-	// Note: TokenInfo struct doesn't have all fields we assumed
-	// Just reset the basic fields
+	ti.BlockID = ""
 	
 	p.pool.Put(ti)
 }
@@ -62,9 +62,10 @@ func (p *BatchSyncTokenInfoPool) Get() *BatchSyncTokenInfo {
 
 // Put returns a BatchSyncTokenInfo to the pool after resetting it
 func (p *BatchSyncTokenInfoPool) Put(bsti *BatchSyncTokenInfo) {
-	// Reset the batch sync token info
+	// Reset ALL fields to prevent state leakage between transactions
 	bsti.Token = ""
-	// Reset only fields that exist in the struct
+	bsti.BlockID = ""
+	bsti.TokenType = 0
 	
 	p.pool.Put(bsti)
 }
