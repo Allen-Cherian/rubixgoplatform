@@ -79,14 +79,19 @@ func (c *Core) OptimizedFTTransferLocking(ftsForTxn []wallet.FTToken, did string
 					continue
 				}
 				
-				// Create token info
-				tokenInfos[job.index] = contract.TokenInfo{
-					Token:      job.token.TokenID,
-					TokenType:  tt,
-					TokenValue: job.token.TokenValue,
-					OwnerDID:   did,
-					BlockID:    bid,
-				}
+				// Get token info from pool and populate it
+				ti := c.tokenPool.Get()
+				ti.Token = job.token.TokenID
+				ti.TokenType = tt
+				ti.TokenValue = job.token.TokenValue
+				ti.OwnerDID = did
+				ti.BlockID = bid
+				
+				// Store in result array
+				tokenInfos[job.index] = *ti
+				
+				// Return to pool
+				c.tokenPool.Put(ti)
 				
 				// Update progress
 				newCount := atomic.AddInt32(&completed, 1)

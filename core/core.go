@@ -146,6 +146,9 @@ type Core struct {
 	perfTracker          *PerformanceTracker
 	txStateMgr           *TransactionStateManager
 	rollbackMgr          *RollbackManager
+	tokenPool            *TokenInfoPool
+	batchSyncTokenPool   *BatchSyncTokenInfoPool
+	tokenSlicePool       *TokenSlicePool
 }
 
 func InitConfig(configFile string, encKey string, node uint16, addr string) error {
@@ -344,6 +347,11 @@ func NewCore(cfg *config.Config, cfgFile string, encKey string, log logger.Logge
 	
 	// Initialize rollback manager
 	c.rollbackMgr = NewRollbackManager(c, c.txStateMgr)
+	
+	// Initialize token pools for memory optimization
+	c.tokenPool = NewTokenInfoPool()
+	c.batchSyncTokenPool = NewBatchSyncTokenInfoPool()
+	c.tokenSlicePool = NewTokenSlicePool()
 	
 	// Wrap storage with tracking if performance tracker is enabled
 	if c.perfTracker != nil && c.perfTracker.enabled && c.s != nil {
