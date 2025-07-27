@@ -574,7 +574,17 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		// Check if the current quorum was also part of the previous transaction
 		latestBlock := c.w.GetLatestTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
 		if latestBlock == nil {
-			c.log.Debug("Failed to get latest token block as it could be genesis", "token", tokenInfo.Token)
+			// Try genesis block as fallback
+			latestBlock = c.w.GetGenesisTokenBlock(tokenInfo.Token, tokenInfo.TokenType)
+			if latestBlock == nil {
+				c.log.Debug("No latest or genesis block found - token needs sync", "token", tokenInfo.Token)
+			} else {
+				c.log.Debug("Using genesis block for token sync check", "token", tokenInfo.Token)
+				signersForExistingBlock, err = latestBlock.GetSigner()
+				if err != nil {
+					return false, fmt.Errorf("failed to extract Quorums from genesis block: %v", err), nil
+				}
+			}
 		} else {
 			signersForExistingBlock, err = latestBlock.GetSigner()
 			if err != nil {
@@ -585,6 +595,16 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		if !isPresentInList(signersForExistingBlock, quorumDID) || len(signersForExistingBlock) == 0 {
 			// This token needs syncing - collect it for batch processing
 			// Don't log for each token to reduce noise
+			
+			// Validate token info before adding to sync list
+			if tokenInfo.Token == "" {
+				c.log.Error("Empty token in input list",
+					"index", len(tokensNeedingSync),
+					"tokenType", tokenInfo.TokenType,
+					"blockID", tokenInfo.BlockID)
+				return false, fmt.Errorf("empty token found in input at position %d", len(tokensNeedingSync)), nil
+			}
+			
 			// Create BatchSyncTokenInfo - don't use pool here as we need to store them
 			tokensNeedingSync = append(tokensNeedingSync, BatchSyncTokenInfo{
 				Token:     tokenInfo.Token,
@@ -704,11 +724,51 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		// IMPORTANT: We must process the tokens BEFORE returning them to the pool
 		for i := range tokensNeedingSync {
 			syncInfo := &tokensNeedingSync[i]
+			
+			// Validate token info before processing
+			if syncInfo.Token == "" {
+				c.log.Error("Empty token found in synced tokens", 
+					"index", i, 
+					"totalSynced", len(tokensNeedingSync),
+					"tokenType", syncInfo.TokenType,
+					"blockID", syncInfo.BlockID)
+				return false, fmt.Errorf("empty token found at index %d after sync", i), nil
+			}
+			
 			// Get the latest block after sync
 			latestBlock := c.w.GetLatestTokenBlock(syncInfo.Token, syncInfo.TokenType)
 			if latestBlock == nil {
-				c.log.Error("Failed to get latest token block", "token", syncInfo.Token)
-				return false, fmt.Errorf("failed to get latest token block for token %s", syncInfo.Token), nil
+				// Try genesis block as fallback
+				latestBlock = c.w.GetGenesisTokenBlock(syncInfo.Token, syncInfo.TokenType)
+				if latestBlock != nil {
+					c.log.Info("Using genesis block for token", "token", syncInfo.Token)
+				} else {
+					// Try to understand why the block is missing
+					c.log.Error("Failed to get latest token block after sync", 
+						"token", syncInfo.Token,
+						"tokenType", syncInfo.TokenType,
+						"blockID", syncInfo.BlockID,
+						"index", i,
+						"totalTokens", len(tokensNeedingSync))
+					
+					// Check if token exists in wallet
+					tokenData, err := c.w.ReadToken(syncInfo.Token)
+					if err != nil {
+						c.log.Error("Token not found in wallet", "token", syncInfo.Token, "err", err)
+					} else {
+						c.log.Error("Token exists but no block found", "token", syncInfo.Token, "tokenData", tokenData)
+					}
+					
+					// In trusted network mode, this might be a genesis token
+					if c.cfg.CfgData.TrustedNetwork {
+						c.log.Warn("In trusted network mode - might be genesis token without chain", "token", syncInfo.Token)
+						// Skip this token instead of failing the entire transaction
+						c.log.Warn("Skipping token that has no block", "token", syncInfo.Token)
+						continue
+					}
+					
+					return false, fmt.Errorf("failed to get latest token block for token %s after sync", syncInfo.Token), nil
+				}
 			}
 
 			// Get block hash as the grouping key
