@@ -532,6 +532,31 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 	}
 	defer p.Close()
 
+	// Pre-optimization: Use genesis batch optimization for RBT/Part tokens if applicable
+	var tokenCreatorCache map[string]string
+	if cr.Mode == RBTTransferMode || cr.Mode == SelfTransferMode {
+		// Check if we have many part tokens that would benefit from batch genesis optimization
+		partTokenCount := 0
+		for _, token := range ti {
+			if token.TokenType == c.TokenType(PartString) {
+				partTokenCount++
+			}
+		}
+		
+		// Use batch genesis optimization if we have significant part tokens
+		if partTokenCount > 10 {
+			c.log.Info("Using batch genesis optimization for RBT validation",
+				"total_tokens", len(ti),
+				"part_tokens", partTokenCount)
+			
+			genesisBatchOptimizer := wallet.NewGenesisBatchOptimizer(c.w)
+			tokenCreatorCache = genesisBatchOptimizer.BatchProcessTokens(ti)
+			
+			c.log.Debug("Genesis batch optimization complete",
+				"cache_size", len(tokenCreatorCache))
+		}
+	}
+
 	// Step 1: Collect tokens that need syncing and group tokens by their latest block hash
 	// Track collect phase
 	_ = time.Now() // collectStart - reserved for future phase timing
