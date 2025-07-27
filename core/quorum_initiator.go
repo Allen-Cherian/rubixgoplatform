@@ -216,6 +216,7 @@ func (c *Core) QuroumSetup() {
 	c.l.AddRoute(APISignatureRequest, "POST", c.signatureRequest)
 	c.l.AddRoute(APISendReceiverToken, "POST", c.updateReceiverTokenHandle)
 	c.l.AddRoute(APIConfirmTokenTransfer, "POST", c.confirmTokenTransfer)
+	c.l.AddRoute(APIRollbackTransaction, "POST", c.initTransactionRollback)
 	c.l.AddRoute(APIUnlockTokens, "POST", c.unlockTokens)
 	c.l.AddRoute(APIUpdateTokenHashDetails, "POST", c.updateTokenHashDetails)
 	c.l.AddRoute(APIAddUnpledgeDetails, "POST", c.addUnpledgeDetails)

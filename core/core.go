@@ -41,6 +41,7 @@ const (
 	APISignatureRequest             string = "/api/signature-request"
 	APISendReceiverToken            string = "/api/send-receiver-token"
 	APIConfirmTokenTransfer         string = "/api/confirm-token-transfer"
+	APIRollbackTransaction          string = "/api/rollback-transaction"
 	APISyncTokenChain               string = "/api/sync-token-chain"
 	APIDhtProviderCheck             string = "/api/dht-provider-check"
 	APIMapDIDArbitration            string = "/api/map-did-arbitration"
@@ -143,6 +144,8 @@ type Core struct {
 	tokenSyncManager     *TokenSyncManager
 	asyncPinManager      *AsyncPinManager
 	perfTracker          *PerformanceTracker
+	txStateMgr           *TransactionStateManager
+	rollbackMgr          *RollbackManager
 }
 
 func InitConfig(configFile string, encKey string, node uint16, addr string) error {
@@ -335,6 +338,12 @@ func NewCore(cfg *config.Config, cfgFile string, encKey string, log logger.Logge
 		// Continue without performance tracking
 		c.perfTracker = &PerformanceTracker{enabled: false}
 	}
+
+	// Initialize transaction state manager
+	c.txStateMgr = NewTransactionStateManager(c)
+	
+	// Initialize rollback manager
+	c.rollbackMgr = NewRollbackManager(c, c.txStateMgr)
 	
 	// Wrap storage with tracking if performance tracker is enabled
 	if c.perfTracker != nil && c.perfTracker.enabled && c.s != nil {
