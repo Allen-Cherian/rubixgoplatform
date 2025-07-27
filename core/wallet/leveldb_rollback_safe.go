@@ -1,7 +1,6 @@
 package wallet
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -103,8 +102,8 @@ func (slr *SafeLevelDBRollback) RemoveTrackedBlocks(txID string) error {
 
 	// Group blocks by token type for efficient removal
 	blocksByType := make(map[int][]BlockAdditionRecord)
-	for _, block := range blocks {
-		blocksByType[block.TokenType] = append(blocksByType[block.TokenType], block)
+	for _, blockRecord := range blocks {
+		blocksByType[blockRecord.TokenType] = append(blocksByType[blockRecord.TokenType], blockRecord)
 	}
 
 	// Remove blocks for each token type
@@ -117,49 +116,56 @@ func (slr *SafeLevelDBRollback) RemoveTrackedBlocks(txID string) error {
 			continue
 		}
 
-		for _, block := range typeBlocks {
+		for _, blockRecord := range typeBlocks {
 			// Verify the block still exists and matches our record
-			value, err := db.Get([]byte(block.Key), nil)
+			value, err := db.Get([]byte(blockRecord.Key), nil)
 			if err != nil {
 				slr.w.log.Debug("Block already removed or doesn't exist",
-					"key", block.Key,
+					"key", blockRecord.Key,
 					"error", err)
 				continue
 			}
 
 			// Parse and verify it's the same block we added
-			blk, err := block.InitBlock(value, nil)
-			if err != nil {
+			blk := block.InitBlock(value, nil)
+			if blk == nil {
 				slr.w.log.Error("Failed to parse block for verification",
-					"key", block.Key,
-					"error", err)
+					"key", blockRecord.Key,
+					"error", "InitBlock returned nil")
 				failedCount++
 				continue
 			}
 
 			// Verify block hash matches
-			currentHash := blk.GetBlockHash()
-			if currentHash != block.BlockHash {
+			currentHash, err := blk.GetHash()
+			if err != nil {
+				slr.w.log.Error("Failed to get block hash",
+					"key", blockRecord.Key,
+					"error", err)
+				failedCount++
+				continue
+			}
+			if currentHash != blockRecord.BlockHash {
 				slr.w.log.Error("Block hash mismatch, not removing",
-					"key", block.Key,
-					"expected_hash", block.BlockHash,
+					"key", blockRecord.Key,
+					"expected_hash", blockRecord.BlockHash,
 					"current_hash", currentHash)
 				failedCount++
 				continue
 			}
 
 			// Safe to remove - it's the exact block we added
-			err = db.Delete([]byte(block.Key), nil)
+			err = db.Delete([]byte(blockRecord.Key), nil)
 			if err != nil {
 				slr.w.log.Error("Failed to remove block",
-					"key", block.Key,
+					"key", blockRecord.Key,
 					"error", err)
 				failedCount++
 			} else {
 				removedCount++
 				slr.w.log.Debug("Successfully removed block",
-					"key", block.Key,
-					"token_id", block.TokenID)
+					"key", blockRecord.Key,
+					"token_id", blockRecord.TokenID)
 			}
 		}
 	}
@@ -255,23 +261,30 @@ func (w *Wallet) VerifyTokenChainIntegrity(tokenID string, tokenType int) error 
 
 	for iter.Next() {
 		value := iter.Value()
-		blk, err := block.InitBlock(value, nil)
-		if err != nil {
-			return fmt.Errorf("failed to parse block: %v", err)
+		blk := block.InitBlock(value, nil)
+		if blk == nil {
+			return fmt.Errorf("failed to parse block")
 		}
 
 		// Verify block number sequence
-		blockNum := blk.GetBlockNumber(tokenID)
-		if blockNum != expectedBlockNum {
+		blockNum, err := blk.GetBlockNumber(tokenID)
+		if err != nil {
+			return fmt.Errorf("failed to get block number: %v", err)
+		}
+		if int(blockNum) != expectedBlockNum {
 			return fmt.Errorf("block number mismatch: expected %d, got %d", expectedBlockNum, blockNum)
 		}
 
 		// Verify previous block hash (except for genesis)
 		if expectedBlockNum > 0 && prevBlock != nil {
-			prevHash := blk.GetPrevBlockHash(tokenID)
-			actualPrevHash := prevBlock.GetBlockHash()
-			if prevHash != actualPrevHash {
-				return fmt.Errorf("previous block hash mismatch at block %d", blockNum)
+			// Get previous block ID from current block's parent reference
+			prevBlockID, err := blk.GetPrevBlockID(tokenID)
+			if err == nil && prevBlockID != "" {
+				// Verify it matches the actual previous block
+				actualPrevBlockID, _ := prevBlock.GetBlockID(tokenID)
+				if prevBlockID != actualPrevBlockID {
+					return fmt.Errorf("previous block ID mismatch at block %d", blockNum)
+				}
 			}
 		}
 

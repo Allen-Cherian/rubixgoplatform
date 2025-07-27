@@ -6,7 +6,6 @@ import (
 
 	"github.com/rubixchain/rubixgoplatform/wrapper/ensweb"
 	"github.com/rubixchain/rubixgoplatform/core/model"
-	"github.com/rubixchain/rubixgoplatform/core/wallet"
 )
 
 // RollbackRequest represents a request to rollback a transaction
@@ -177,12 +176,12 @@ func (c *Core) removeConsensusData(txID string) {
 	c.log.Info("Removing consensus data",
 		"transaction_id", txID)
 
-	// Remove from consensus request storage
-	key := fmt.Sprintf("consensus:%s", txID)
-	err := c.s.Delete(key)
-	if err != nil {
-		c.log.Error("Failed to remove consensus data", "err", err)
-	}
+	// TODO: Remove from consensus request storage when available
+	// key := fmt.Sprintf("consensus:%s", txID)
+	// err := c.s.Delete(key)
+	// if err != nil {
+	//     c.log.Error("Failed to remove consensus data", "err", err)
+	// }
 }
 
 // removeTokenStateHashEntries removes token state hash entries

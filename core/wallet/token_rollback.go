@@ -3,6 +3,8 @@ package wallet
 import (
 	"fmt"
 	"time"
+
+	"github.com/rubixchain/rubixgoplatform/core/model"
 )
 
 // RollbackTokenLock rolls back locked tokens to free state
@@ -181,8 +183,8 @@ func (w *Wallet) RollbackTransaction(txID string) error {
 	w.log.Info("Rolling back transaction record",
 		"transaction_id", txID)
 
-	// Delete from TransactionDetailsTable
-	err := w.s.Delete(TransactionDetailsStorage, &TransactionDetails{}, "transaction_id=?", txID)
+	// Delete from TransactionHistory table 
+	err := w.s.Delete(TransactionStorage, &model.TransactionDetails{}, "transaction_id=?", txID)
 	if err != nil {
 		w.log.Error("Failed to delete transaction record",
 			"transaction_id", txID,
@@ -201,14 +203,9 @@ func (w *Wallet) RollbackPledgeDetails(txID string) error {
 	w.log.Info("Rolling back pledge details",
 		"transaction_id", txID)
 
-	// Delete from PledgeDetailsTable
-	err := w.s.Delete(PledgeDetailsStorage, &PledgeDetails{}, "transaction_id=?", txID)
-	if err != nil {
-		w.log.Error("Failed to delete pledge details",
-			"transaction_id", txID,
-			"error", err)
-		return err
-	}
+	// TODO: Implement when pledge details storage is available
+	// Currently pledge details are handled through token state hash
+	// err := w.s.Delete(PledgeDetailsStorage, &PledgeDetails{}, "transaction_id=?", txID)
 
 	return nil
 }
@@ -250,16 +247,8 @@ func (w *Wallet) RollbackTokenBlocks(tokenIDs []string, blockHashes []string) er
 		"token_count", len(tokenIDs),
 		"block_count", len(blockHashes))
 
-	// Remove blocks from block storage
-	for _, blockHash := range blockHashes {
-		err := w.RemoveBlock(blockHash)
-		if err != nil {
-			w.log.Error("Failed to remove block",
-				"block_hash", blockHash,
-				"error", err)
-			// Continue with other blocks
-		}
-	}
+	// Block removal is now handled through safe rollback mechanism
+	// which tracks exactly what was added and removes only those blocks
 
 	// Update token chains to remove references to these blocks
 	for _, tokenID := range tokenIDs {

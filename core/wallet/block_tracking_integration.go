@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/rubixchain/rubixgoplatform/block"
+	tkn "github.com/rubixchain/rubixgoplatform/token"
+	ut "github.com/rubixchain/rubixgoplatform/util"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
@@ -70,7 +72,11 @@ func (wt *WalletWithTracking) addBlockWithTracking(token string, b *block.Block)
 		return err
 	}
 	
-	blockHash := b.GetBlockHash()
+	blockHash, err := b.GetHash()
+	if err != nil {
+		wt.log.Error("Failed to get block hash", "err", err)
+		return err
+	}
 
 	// Perform the actual block addition (existing logic)
 	lb := wt.getLatestBlock(tt, token)
@@ -93,7 +99,7 @@ func (wt *WalletWithTracking) addBlockWithTracking(token string, b *block.Block)
 				// Block already exists, check if it's the same block
 				existingBlock := wt.getLatestBlock(tt, token)
 				if existingBlock != nil {
-					existingHash := existingBlock.GetBlockHash()
+					existingHash, _ := existingBlock.GetHash()
 					if existingHash == blockHash {
 						wt.log.Debug("Block already exists with same hash, skipping",
 							"token", token,
@@ -156,7 +162,7 @@ func (wt *WalletWithTracking) addBlockWithTracking(token string, b *block.Block)
 			wt.blockTracker.RecordBlockAddition(
 				txID,
 				token,
-				bn,
+				int(bn),
 				blockHash,
 				key,
 				tt,
@@ -192,18 +198,19 @@ func (wt *WalletWithTracking) CreateTokenBlock(b *block.Block) error {
 	}
 
 	if txID != "" {
-		tokens := b.GetTokens()
+		tokens := b.GetTransTokens()
 		for _, token := range tokens {
 			bn, _ := b.GetBlockNumber(token)
 			tt := b.GetTokenType(token)
 			bid, _ := b.GetBlockID(token)
 			key := tcsKey(tt, token, bid)
+			blockHash, _ := b.GetHash()
 			
 			wt.blockTracker.RecordBlockAddition(
 				txID,
 				token,
-				bn,
-				b.GetBlockHash(),
+				int(bn),
+				blockHash,
 				key,
 				tt,
 			)
@@ -215,8 +222,9 @@ func (wt *WalletWithTracking) CreateTokenBlock(b *block.Block) error {
 
 // BatchAddTokenBlocks with tracking
 func (wt *WalletWithTracking) BatchAddTokenBlocks(pairs []struct {
-	Token string
-	Block *block.Block
+	Token     string
+	Block     *block.Block
+	TokenType int
 }) error {
 	// Track transaction ID for the batch
 	var txID string
@@ -240,12 +248,13 @@ func (wt *WalletWithTracking) BatchAddTokenBlocks(pairs []struct {
 			tt := pair.Block.GetTokenType(pair.Token)
 			bid, _ := pair.Block.GetBlockID(pair.Token)
 			key := tcsKey(tt, pair.Token, bid)
+			blockHash, _ := pair.Block.GetHash()
 			
 			wt.blockTracker.RecordBlockAddition(
 				txID,
 				pair.Token,
-				bn,
-				pair.Block.GetBlockHash(),
+				int(bn),
+				blockHash,
 				key,
 				tt,
 			)
@@ -292,7 +301,7 @@ func (wt *WalletWithTracking) ExecuteSafeRollback(snapshot *RollbackStateInfo) e
 
 	// Execute safe LevelDB rollback using tracked blocks
 	if snapshot.TransactionID != "" {
-		safeRollback := wt.NewSafeLevelDBRollback(wt.blockTracker)
+		safeRollback := wt.Wallet.NewSafeLevelDBRollback(wt.blockTracker)
 		err = safeRollback.RemoveTrackedBlocks(snapshot.TransactionID)
 		if err != nil {
 			wt.log.Error("Failed to execute safe LevelDB rollback", "error", err)

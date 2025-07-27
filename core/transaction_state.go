@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
+	"github.com/rubixchain/rubixgoplatform/wrapper/logger"
 )
 
 // TransactionState represents the current state of a transaction
@@ -35,7 +36,7 @@ type TransactionStateManager struct {
 	mu          sync.RWMutex
 	states      map[string]*TransactionStateInfo
 	core        *Core
-	log         Logger
+	log         logger.Logger
 }
 
 // TransactionStateInfo holds all information about a transaction's state

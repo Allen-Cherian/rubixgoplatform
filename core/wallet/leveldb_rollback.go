@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/rubixchain/rubixgoplatform/block"
+	tkn "github.com/rubixchain/rubixgoplatform/token"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
@@ -84,8 +85,8 @@ func (w *Wallet) RemoveBlocksForTransaction(txID string, tokenType int) error {
 		value := iter.Value()
 
 		// Parse the block to check transaction ID
-		blk, err := block.InitBlock(value, nil)
-		if err != nil {
+		blk := block.InitBlock(value, nil)
+		if blk == nil {
 			continue
 		}
 
@@ -135,8 +136,8 @@ func (w *Wallet) GetLatestBlockBeforeTransaction(tokenID string, txID string, to
 	// Iterate through blocks
 	for iter.Next() {
 		value := iter.Value()
-		blk, err := block.InitBlock(value, nil)
-		if err != nil {
+		blk := block.InitBlock(value, nil)
+		if blk == nil {
 			continue
 		}
 
@@ -192,19 +193,19 @@ func (w *Wallet) ExecuteLevelDBRollback(snapshot *LevelDBRollbackInfo) error {
 	}
 
 	// Remove blocks for RBT tokens
-	err = w.RemoveBlocksForTransaction(snapshot.TransactionID, RBTTokenType)
+	err = w.RemoveBlocksForTransaction(snapshot.TransactionID, tkn.RBTTokenType)
 	if err != nil {
 		w.log.Error("Failed to remove RBT blocks", "error", err)
 	}
 
 	// Remove blocks for FT tokens
-	err = w.RemoveBlocksForTransaction(snapshot.TransactionID, FTTokenType)
+	err = w.RemoveBlocksForTransaction(snapshot.TransactionID, tkn.FTTokenType)
 	if err != nil {
 		w.log.Error("Failed to remove FT blocks", "error", err)
 	}
 
 	// Remove blocks for NFT tokens if applicable
-	err = w.RemoveBlocksForTransaction(snapshot.TransactionID, NFTTokenType)
+	err = w.RemoveBlocksForTransaction(snapshot.TransactionID, tkn.NFTTokenType)
 	if err != nil {
 		w.log.Error("Failed to remove NFT blocks", "error", err)
 	}
@@ -283,7 +284,7 @@ func (w *Wallet) CleanupOrphanedBlocks(tokenType int) error {
 
 		// Check if token exists in SQLite
 		var exists bool
-		if tokenType == FTTokenType {
+		if tokenType == tkn.FTTokenType {
 			var ft FTToken
 			err := w.s.Read(FTTokenStorage, &ft, "token_id=?", tokenID)
 			exists = (err == nil && ft.TokenID != "")

@@ -16,6 +16,7 @@ import (
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	wallet "github.com/rubixchain/rubixgoplatform/core/wallet"
 	"github.com/rubixchain/rubixgoplatform/did"
+	tkn "github.com/rubixchain/rubixgoplatform/token"
 	"github.com/rubixchain/rubixgoplatform/util"
 )
 
@@ -788,11 +789,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		// Send token confirmation to receiver after consensus finality
-		err = c.sendTokenConfirmation(receiver, tid, ti, wallet.RBTTokenType)
+		receiverAddr := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
+		err = c.sendTokenConfirmation(receiverAddr, tid, ti, tkn.RBTTokenType)
 		if err != nil {
 			// Log error but don't fail the transaction - tokens are already committed
 			c.log.Error("Failed to send token confirmation to receiver", 
-				"receiver", receiver,
+				"receiver", receiverAddr,
 				"transaction_id", tid,
 				"error", err)
 			// Continue with the flow - receiver will eventually clean up pending tokens
@@ -1070,11 +1072,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 
 		// Send token confirmation to receiver after consensus finality
-		err = c.sendTokenConfirmation(receiver, tid, ti, wallet.FTTokenType)
+		receiverAddr := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
+		err = c.sendTokenConfirmation(receiverAddr, tid, ti, tkn.FTTokenType)
 		if err != nil {
 			// Log error but don't fail the transaction - tokens are already committed
 			c.log.Error("Failed to send FT token confirmation to receiver", 
-				"receiver", receiver,
+				"receiver", receiverAddr,
 				"transaction_id", tid,
 				"error", err)
 			// Continue with the flow - receiver will eventually clean up pending tokens
