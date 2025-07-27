@@ -28,13 +28,13 @@ const (
 	TokenIsFetched
 	TokenIsBurnt
 	TokenIsExecuted
-	TokenIsPending // Tokens received but not yet confirmed by consensus finality
 	TokenIsOrphaned
 	TokenChainSyncIssue
 	TokenPledgeIssue
 	TokenIsBeingDoubleSpent
 	TokenIsPinnedAsService
 	TokenIsBurntForFT
+	TokenIsPending // Tokens received but not yet confirmed by consensus finality
 	QuorumPledgedForThisToken int = 20
 )
 const (
