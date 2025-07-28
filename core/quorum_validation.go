@@ -827,60 +827,64 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		"cpuLimit", cpuLimit,
 		"actualWorkers", maxWorkers)
 	
-	sem := make(chan struct{}, maxWorkers)
+	if !c.cfg.CfgData.TrustedNetwork {
+		sem := make(chan struct{}, maxWorkers)
 
-	for _, blockResult := range blockGroups {
-		wg.Add(1)
-		sem <- struct{}{}
+		for _, blockResult := range blockGroups {
+			wg.Add(1)
+			sem <- struct{}{}
 
-		go func(br *BlockValidationResult) {
-			defer wg.Done()
-			defer func() { <-sem }()
+			go func(br *BlockValidationResult) {
+				defer wg.Done()
+				defer func() { <-sem }()
 
-			c.log.Debug("Validating unique block", "blockHash", br.BlockHash, "tokenCount", len(br.Tokens))
+				c.log.Debug("Validating unique block", "blockHash", br.BlockHash, "tokenCount", len(br.Tokens))
 
-			// Validate this block
-			valid, err := c.validateSigner(br.Block, quorumDID, p)
-			br.IsValid = valid
-			br.Error = err
+				// Validate this block
+				valid, err := c.validateSigner(br.Block, quorumDID, p)
+				br.IsValid = valid
+				br.Error = err
 
-			// Check for sync issues
-			if err != nil && strings.Contains(err.Error(), "syncer block height discrepency") {
-				br.SyncIssue = true
-			}
+				// Check for sync issues
+				if err != nil && strings.Contains(err.Error(), "syncer block height discrepency") {
+					br.SyncIssue = true
+				}
 
-			results <- br
-		}(blockResult)
+				results <- br
+			}(blockResult)
+		}
+
+		wg.Wait()
+		close(results)
 	}
-
-	wg.Wait()
-	close(results)
 
 	// Step 3: Process results and identify failed tokens
-	var syncIssueTokens []string
-	var failedTokens []string
+	if !c.cfg.CfgData.TrustedNetwork {
+		var syncIssueTokens []string
+		var failedTokens []string
 
-	for result := range results {
-		if !result.IsValid || result.Error != nil {
-			c.log.Error("Block validation failed", "blockHash", result.BlockHash, "error", result.Error, "tokenCount", len(result.Tokens))
+		for result := range results {
+			if !result.IsValid || result.Error != nil {
+				c.log.Error("Block validation failed", "blockHash", result.BlockHash, "error", result.Error, "tokenCount", len(result.Tokens))
 
-			if result.SyncIssue {
-				// All tokens sharing this block have sync issues
-				syncIssueTokens = append(syncIssueTokens, result.Tokens...)
+				if result.SyncIssue {
+					// All tokens sharing this block have sync issues
+					syncIssueTokens = append(syncIssueTokens, result.Tokens...)
+				} else {
+					// All tokens sharing this block failed validation
+					failedTokens = append(failedTokens, result.Tokens...)
+					// Return immediately on first validation failure
+					return false, fmt.Errorf("failed to validate token signer for block %s: %v", result.BlockHash, result.Error), nil
+				}
 			} else {
-				// All tokens sharing this block failed validation
-				failedTokens = append(failedTokens, result.Tokens...)
-				// Return immediately on first validation failure
-				return false, fmt.Errorf("failed to validate token signer for block %s: %v", result.BlockHash, result.Error), nil
+				c.log.Debug("Block validation successful", "blockHash", result.BlockHash, "tokenCount", len(result.Tokens))
 			}
-		} else {
-			c.log.Debug("Block validation successful", "blockHash", result.BlockHash, "tokenCount", len(result.Tokens))
 		}
-	}
-
-	// Step 4: Handle sync issues
-	if len(syncIssueTokens) > 0 {
-		return false, fmt.Errorf("failed to sync tokenchain Token: issueType: %v", TokenChainNotSynced), syncIssueTokens
+	
+		// Step 4: Handle sync issues
+		if len(syncIssueTokens) > 0 {
+			return false, fmt.Errorf("failed to sync tokenchain Token: issueType: %v", TokenChainNotSynced), syncIssueTokens
+		}
 	}
 
 	c.log.Info("Optimized token validation completed successfully", 
