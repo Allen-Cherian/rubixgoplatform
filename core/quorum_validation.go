@@ -827,36 +827,34 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		"cpuLimit", cpuLimit,
 		"actualWorkers", maxWorkers)
 	
-	if !c.cfg.CfgData.TrustedNetwork {
-		sem := make(chan struct{}, maxWorkers)
+	sem := make(chan struct{}, maxWorkers)
 
-		for _, blockResult := range blockGroups {
-			wg.Add(1)
-			sem <- struct{}{}
+	for _, blockResult := range blockGroups {
+		wg.Add(1)
+		sem <- struct{}{}
 
-			go func(br *BlockValidationResult) {
-				defer wg.Done()
-				defer func() { <-sem }()
+		go func(br *BlockValidationResult) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-				c.log.Debug("Validating unique block", "blockHash", br.BlockHash, "tokenCount", len(br.Tokens))
+			c.log.Debug("Validating unique block", "blockHash", br.BlockHash, "tokenCount", len(br.Tokens))
 
-				// Validate this block
-				valid, err := c.validateSigner(br.Block, quorumDID, p)
-				br.IsValid = valid
-				br.Error = err
+			// Validate this block
+			valid, err := c.validateSigner(br.Block, quorumDID, p)
+			br.IsValid = valid
+			br.Error = err
 
-				// Check for sync issues
-				if err != nil && strings.Contains(err.Error(), "syncer block height discrepency") {
-					br.SyncIssue = true
-				}
+			// Check for sync issues
+			if err != nil && strings.Contains(err.Error(), "syncer block height discrepency") {
+				br.SyncIssue = true
+			}
 
-				results <- br
-			}(blockResult)
-		}
-
-		wg.Wait()
-		close(results)
+			results <- br
+		}(blockResult)
+	
 	}
+	wg.Wait()
+	close(results)
 
 	// Step 3: Process results and identify failed tokens
 	if !c.cfg.CfgData.TrustedNetwork {

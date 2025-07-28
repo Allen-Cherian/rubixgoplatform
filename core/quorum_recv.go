@@ -1803,123 +1803,129 @@ func (c *Core) updatePledgeToken(req *ensweb.Request) *ensweb.Result {
 		crep.Message = "Failed to setup quorum crypto"
 		return c.l.RenderJSON(req, &crep, http.StatusOK)
 	}
-	b := block.InitBlock(ur.TokenChainBlock, nil)
-	tks := b.GetTransTokens()
 
-	// refID := ""
-	// var refIDArr []string = make([]string, 0)
-	// if len(tks) > 0 {
-	// 	for _, tkn := range tks {
-	// 		id, err := b.GetBlockID(tkn)
-	// 		if err != nil {
-	// 			c.log.Error("Failed to get block ID")
-	// 			crep.Message = "Failed to get block ID"
-	// 			return c.l.RenderJSON(req, &crep, http.StatusOK)
-	// 		}
-	// 		refIDArr = append(refIDArr, fmt.Sprintf("%v_%v_%v", tkn, b.GetTokenType(tkn), id))
-	// 	}
-	// }
-	// refID = strings.Join(refIDArr, ",")
+	// TODO: Verifying the info about quorums 
+	go func() {
+		b := block.InitBlock(ur.TokenChainBlock, nil)
+		tks := b.GetTransTokens()
 
-	ctcb := make(map[string]*block.Block)
-	tsb := make([]block.TransTokens, 0)
-	// Generally, addition of a token block happens on Sender, Receiver
-	// and Quorum's end.
-	//
-	// If both sender and receiver happen to be on a Non-Quorum server, this is
-	// not an issue since we skip TokensTable and Token chain update, if the reciever
-	// and sender peer as seem. Thus, multiple update of same block to the Token's tokenchain
-	// is avoided
-	//
-	// However in case either sender or receiver happen to be a Quorum server, even though the above
-	// scenario is covered , but since the token block is also added on Quorum's end, we end up in a
-	// situation where update of same block happens twice. Hence the following check ensures that we
-	// skip the addition of block here, if either sender or receiver happen to be on a Quorum node.
-	if !c.w.IsDIDExist(b.GetReceiverDID()) && !c.w.IsDIDExist(b.GetSenderDID()) {
-		for _, t := range tks {
-			err = c.w.AddTokenBlock(t, b)
-			if err != nil {
-				c.log.Error("Failed to add token block", "token", t)
-				crep.Message = "Failed to add token block"
-				return c.l.RenderJSON(req, &crep, http.StatusOK)
+		// refID := ""
+		// var refIDArr []string = make([]string, 0)
+		// if len(tks) > 0 {
+		// 	for _, tkn := range tks {
+		// 		id, err := b.GetBlockID(tkn)
+		// 		if err != nil {
+		// 			c.log.Error("Failed to get block ID")
+		// 			crep.Message = "Failed to get block ID"
+		// 			return c.l.RenderJSON(req, &crep, http.StatusOK)
+		// 		}
+		// 		refIDArr = append(refIDArr, fmt.Sprintf("%v_%v_%v", tkn, b.GetTokenType(tkn), id))
+		// 	}
+		// }
+		// refID = strings.Join(refIDArr, ",")
+
+		ctcb := make(map[string]*block.Block)
+		tsb := make([]block.TransTokens, 0)
+		// Generally, addition of a token block happens on Sender, Receiver
+		// and Quorum's end.
+		//
+		// If both sender and receiver happen to be on a Non-Quorum server, this is
+		// not an issue since we skip TokensTable and Token chain update, if the reciever
+		// and sender peer as seem. Thus, multiple update of same block to the Token's tokenchain
+		// is avoided
+		//
+		// However in case either sender or receiver happen to be a Quorum server, even though the above
+		// scenario is covered , but since the token block is also added on Quorum's end, we end up in a
+		// situation where update of same block happens twice. Hence the following check ensures that we
+		// skip the addition of block here, if either sender or receiver happen to be on a Quorum node.
+		if !c.w.IsDIDExist(b.GetReceiverDID()) && !c.w.IsDIDExist(b.GetSenderDID()) {
+			for _, t := range tks {
+				err = c.w.AddTokenBlock(t, b)
+				if err != nil {
+					c.log.Error("Failed to add token block", "token", t)
+					crep.Message = "Failed to add token block"
+					return
+				}
 			}
 		}
-	}
 
-	for _, t := range ur.PledgedTokens {
-		tk, err := c.w.ReadToken(t)
+		for _, t := range ur.PledgedTokens {
+			tk, err := c.w.ReadToken(t)
+			if err != nil {
+				c.log.Error("failed to read token from wallet")
+				crep.Message = "failed to read token from wallet"
+				return
+			}
+			ts := RBTString
+			if tk.TokenValue != 1.0 {
+				ts = PartString
+			}
+			tt := block.TransTokens{
+				Token:     t,
+				TokenType: c.TokenType(ts),
+			}
+			tsb = append(tsb, tt)
+			lb := c.w.GetLatestTokenBlock(t, c.TokenType(ts))
+			if lb == nil {
+				c.log.Error("Failed to get token chain block")
+				crep.Message = "Failed to get token chain block"
+				return
+			}
+			ctcb[t] = lb
+		}
+
+		tcb := block.TokenChainBlock{
+			TransactionType: block.TokenPledgedType,
+			TokenOwner:      did,
+			TransInfo: &block.TransInfo{
+				Comment: "Token is pledged at " + time.Now().String(),
+				// RefID:   refID,
+				Tokens:  tsb,
+			},
+			Epoch: ur.TransactionEpoch,
+		}
+
+		nb := block.CreateNewBlock(ctcb, &tcb)
+		if nb == nil {
+			c.log.Error("Failed to create new token chain block - qrm rec")
+			crep.Message = "Failed to create new token chain block -qrm rec"
+			return
+		}
+		err = nb.UpdateSignature(dc)
 		if err != nil {
-			c.log.Error("failed to read token from wallet")
-			crep.Message = "failed to read token from wallet"
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			c.log.Error("Failed to update signature to block", "err", err)
+			crep.Message = "Failed to update signature to block"
+			return
 		}
-		ts := RBTString
-		if tk.TokenValue != 1.0 {
-			ts = PartString
-		}
-		tt := block.TransTokens{
-			Token:     t,
-			TokenType: c.TokenType(ts),
-		}
-		tsb = append(tsb, tt)
-		lb := c.w.GetLatestTokenBlock(t, c.TokenType(ts))
-		if lb == nil {
-			c.log.Error("Failed to get token chain block")
-			crep.Message = "Failed to get token chain block"
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
-		}
-		ctcb[t] = lb
-	}
-
-	tcb := block.TokenChainBlock{
-		TransactionType: block.TokenPledgedType,
-		TokenOwner:      did,
-		TransInfo: &block.TransInfo{
-			Comment: "Token is pledged at " + time.Now().String(),
-			// RefID:   refID,
-			Tokens:  tsb,
-		},
-		Epoch: ur.TransactionEpoch,
-	}
-
-	nb := block.CreateNewBlock(ctcb, &tcb)
-	if nb == nil {
-		c.log.Error("Failed to create new token chain block - qrm rec")
-		crep.Message = "Failed to create new token chain block -qrm rec"
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
-	}
-	err = nb.UpdateSignature(dc)
-	if err != nil {
-		c.log.Error("Failed to update signature to block", "err", err)
-		crep.Message = "Failed to update signature to block"
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
-	}
-	err = c.w.CreateTokenBlock(nb)
-	if err != nil {
-		c.log.Error("Failed to update token chain block", "err", err)
-		crep.Message = "Failed to update token chain block"
-		return c.l.RenderJSON(req, &crep, http.StatusOK)
-	}
-	for _, t := range ur.PledgedTokens {
-		err = c.w.PledgeWholeToken(did, t, nb)
+		err = c.w.CreateTokenBlock(nb)
 		if err != nil {
-			c.log.Error("Failed to update pledge token", "err", err)
-			crep.Message = "Failed to update pledge token"
-			return c.l.RenderJSON(req, &crep, http.StatusOK)
+			c.log.Error("Failed to update token chain block", "err", err)
+			crep.Message = "Failed to update token chain block"
+			return
 		}
-	}
-
-	//Adding to the Token State Hash Table
-	if ur.TransferredTokenStateHashes != nil {
-		err = c.w.AddTokenStateHash(did, ur.TransferredTokenStateHashes, ur.PledgedTokens, ur.TransactionID)
-		if err != nil {
-			c.log.Error("Failed to add token state hash", "err", err)
+		for _, t := range ur.PledgedTokens {
+			err = c.w.PledgeWholeToken(did, t, nb)
+			if err != nil {
+				c.log.Error("Failed to update pledge token", "err", err)
+				crep.Message = "Failed to update pledge token"
+				return
+			}
 		}
-	}
 
+		//Adding to the Token State Hash Table
+		if ur.TransferredTokenStateHashes != nil {
+			err = c.w.AddTokenStateHash(did, ur.TransferredTokenStateHashes, ur.PledgedTokens, ur.TransactionID)
+			if err != nil {
+				c.log.Error("Failed to add token state hash", "err", err)
+				return
+			}
+		}
+	}()
+
+    // return
 	crep.Status = true
 	crep.Message = "Token pledge status updated"
-	return c.l.RenderJSON(req, &crep, http.StatusOK)
+	return c.l.RenderJSON(req, &crep, http.StatusOK) 
 }
 
 func (c *Core) quorumCredit(req *ensweb.Request) *ensweb.Result {
