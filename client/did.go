@@ -303,13 +303,12 @@ func (c *Client) ArbitrarySignature(didStr, msg string) (*model.BasicResponse, e
 
 // signature verification
 func (c *Client) SignVerification(didStr, msgHash, signature string) (string, error) {
-	verificationData := &model.SignVerificationRequest{
-		DID:       didStr,
-		SignedMsg: msgHash,
-		Signature: signature,
-	}
+	verificationData := make(map[string]string)
+	verificationData["did"] = didStr
+	verificationData["msg_hash"] = msgHash
+	verificationData["signature"] = signature
 	var resp model.BasicResponse
-	err := c.sendJSONRequest("GET", setup.APISignVerification, nil, verificationData, &resp)
+	err := c.sendJSONRequest("GET", setup.APISignVerification, verificationData, nil, &resp)
 	if err != nil {
 		return "", err
 	}
