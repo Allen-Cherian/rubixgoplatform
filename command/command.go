@@ -110,6 +110,8 @@ const (
 	AddUserAPIKeyCmd               string = "adduserapikey"
 	AddPeerDetailsFromExplorer     string = "exppeerdetails"
 	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
+	ArbitrarySignCmd               string = "sign"
+	VerifySignatureCmd             string = "verify-signature"
 )
 
 var commands = []string{VersionCmd,
@@ -179,6 +181,8 @@ var commands = []string{VersionCmd,
 	AddUserAPIKeyCmd,
 	AddPeerDetailsFromExplorer,
 	GetFTTxnDetailsCmd,
+	ArbitrarySignCmd,
+	VerifySignatureCmd,
 }
 
 var commandsHelp = []string{"To get tool version",
@@ -341,6 +345,8 @@ type Command struct {
 	apiKey                       string
 	nftValue                     float64
 	ftNumStartIndex              int
+	msgHash                      string
+	signature                    string
 }
 
 func showVersion() {
@@ -563,6 +569,8 @@ func Run(args []string) {
 	flag.StringVar(&cmd.apiKey, "apikey", "", "Give the API Key corresponding to the DID")
 	flag.Float64Var(&cmd.nftValue, "nftValue", 0.0, "Value of the NFT")
 	flag.IntVar(&cmd.ftNumStartIndex, "ftStartIndex", 0, "Start index of the FTs to be created")
+	flag.StringVar(&cmd.msgHash, "msgHash", "", "Value to be signed on")
+	flag.StringVar(&cmd.signature, "signature", "", "signature to be verified")
 
 	if len(os.Args) < 2 {
 		fmt.Println("Invalid Command")
@@ -774,6 +782,10 @@ func Run(args []string) {
 		cmd.addPeerDetailsFromExplorer()
 	case GetFTTxnDetailsCmd:
 		cmd.getFTTxnDetails()
+	case ArbitrarySignCmd:
+		cmd.ArbitrarySign()
+	case VerifySignatureCmd:
+		cmd.SignVerification()
 	default:
 		cmd.log.Error("Invalid command")
 	}

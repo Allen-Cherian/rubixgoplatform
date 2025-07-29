@@ -299,3 +299,32 @@ func (s *Server) APICreateDIDFromPubKey(req *ensweb.Request) *ensweb.Result {
 	}
 	return s.RenderJSON(req, didResp, http.StatusOK)
 }
+
+// arbitrary signature API
+func (s *Server) APIArbitrarySignature(req *ensweb.Request) *ensweb.Result {
+	var signReq model.ArbitrarySignRequest
+	err := s.ParseJSON(req, &signReq)
+	if err != nil {
+		s.log.Error("failed to parse sign input ", "err ", err)
+		return s.BasicResponse(req, false, "Failed to parse input to sign on", nil)
+	}
+	
+	s.c.AddWebReq(req)
+	go s.c.ArbitrarySign(req.ID, &signReq)
+	return s.didResponse(req, req.ID)
+}
+
+// arbitrary signature verification API
+func (s *Server) APISignVerification(req *ensweb.Request) *ensweb.Result {
+	var verificationReq model.SignVerificationRequest
+	err := s.ParseJSON(req, &verificationReq)
+	if err != nil {
+		return s.BasicResponse(req, false, "Failed to parse input to sign on", nil)
+	}
+	verificationResp, err := s.c.ArbitrarySignVerification(req.ID, &verificationReq)
+	if err != nil {
+		s.log.Error("failed to verify given signature", "err", err)
+		return s.BasicResponse(req, false, err.Error(), nil)
+	}
+	return s.RenderJSON(req, verificationResp, http.StatusOK)
+}

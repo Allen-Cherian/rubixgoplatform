@@ -404,3 +404,31 @@ func (cmd *Command) CreateDIDFromPubKey() {
 	}
 	cmd.log.Debug("received did", did)
 }
+
+func (cmd *Command) ArbitrarySign() {
+	signResp, err := cmd.c.ArbitrarySignature(cmd.did, cmd.msgHash)
+	if err != nil {
+		cmd.log.Error("err", err)
+		return
+	}
+	if !signResp.Status {
+		cmd.log.Error("Failed to sign, msg ", signResp.Message)
+		return
+	}
+	msg, status := cmd.SignatureResponse(signResp)
+	if !status {
+		cmd.log.Error("Failed to sign, msg ", msg)
+		return
+	}
+	result := fmt.Sprintf("Status : %v, Signature string : %v", status, msg)
+	cmd.log.Info(result)
+}
+
+func (cmd *Command) SignVerification() {
+	result, err := cmd.c.SignVerification(cmd.did, cmd.msgHash, cmd.signature)
+	if err != nil {
+		cmd.log.Error("err", err)
+		return
+	}
+	cmd.log.Info("signature verification result", result)
+}

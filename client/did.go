@@ -286,3 +286,33 @@ func (c *Client) CreateDIDFromPubKey(pubKey string) (string, error) {
 	}
 	return resp.DID, nil
 }
+
+// Arbitrary signature
+func (c *Client) ArbitrarySignature(didStr, msg string) (*model.BasicResponse, error) {
+	signData := &model.ArbitrarySignRequest{
+		DID:       didStr,
+		MsgToSign: msg,
+	}
+	var resp model.BasicResponse
+	err := c.sendJSONRequest("POST", setup.APIArbitrarySign, nil, signData, &resp)
+	if err != nil {
+		return &resp, err
+	}
+	return &resp, nil
+}
+
+// signature verification
+func (c *Client) SignVerification(didStr, msgHash, signature string) (string, error) {
+	verificationData := &model.SignVerificationRequest{
+		DID:       didStr,
+		SignedMsg: msgHash,
+		Signature: signature,
+	}
+	var resp model.BasicResponse
+	err := c.sendJSONRequest("GET", setup.APISignVerification, nil, verificationData, &resp)
+	if err != nil {
+		return "", err
+	}
+	result := fmt.Sprintf("sign verification Status : %v, Message : %v", resp.Status, resp.Message)
+	return result, nil
+}
