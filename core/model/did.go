@@ -51,7 +51,7 @@ type ArbitrarySignRequest struct {
 
 // Arbitrary sign request
 type SignVerificationRequest struct {
-	DID       string `json:"did"`
+	SignerDID string `json:"did"`
 	SignedMsg string `json:"msg_hash"`
 	Signature string `json:"signature"`
 }

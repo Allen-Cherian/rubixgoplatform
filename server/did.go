@@ -301,6 +301,16 @@ func (s *Server) APICreateDIDFromPubKey(req *ensweb.Request) *ensweb.Result {
 }
 
 // arbitrary signature API
+// @Summary     Request Arbitrary Signature
+// @Description Accepts a DID and message hash to request an arbitrary signature asynchronously.
+// @Tags        Signature
+// @ID          arbitrary-signature
+// @Accept      json
+// @Produce     json
+// @Param       input body model.ArbitrarySignRequest true "Arbitrary Signature Request"
+// @Success     200 {object} model.BasicResponse
+// @Failure     400 {object} model.BasicResponse
+// @Router      /api/sign [post]
 func (s *Server) APIArbitrarySignature(req *ensweb.Request) *ensweb.Result {
 	var signReq model.ArbitrarySignRequest
 	err := s.ParseJSON(req, &signReq)
@@ -315,9 +325,21 @@ func (s *Server) APIArbitrarySignature(req *ensweb.Request) *ensweb.Result {
 }
 
 // arbitrary signature verification API
+// @Summary     Verify Arbitrary Signature
+// @Description Verifies a signature for a given DID and signed message hash.
+// @Tags        Signature
+// @ID          verify-arbitrary-signature
+// @Accept      json
+// @Produce     json
+// @Param       did        query string true "DID of the signer"
+// @Param       msg_hash   query string true "Signed message hash"
+// @Param       signature  query string true "Signature to verify"
+// @Success     200 {object} model.BasicResponse
+// @Failure     400 {object} model.BasicResponse
+// @Router      /api/verify-signature [get]
 func (s *Server) APISignVerification(req *ensweb.Request) *ensweb.Result {
 	var verificationReq model.SignVerificationRequest
-	verificationReq.DID = s.GetQuerry(req, "did")
+	verificationReq.SignerDID = s.GetQuerry(req, "did")
 	verificationReq.SignedMsg = s.GetQuerry(req, "msg_hash")
 	verificationReq.Signature = s.GetQuerry(req, "signature")
 

@@ -508,7 +508,7 @@ func (c *Core) arbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) 
 		signResp.Message = errMsg
 		return signResp
 	}
-	
+
 	// sign the given message with private key
 	signatureBytes, err := didCrypto.PvtSign([]byte(signReq.MsgToSign))
 	if err != nil {
@@ -519,7 +519,7 @@ func (c *Core) arbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) 
 	}
 	// convert signature bytes into string
 	signature := util.HexToStr(signatureBytes)
-	
+
 	// verify the signature before returning
 	verificationResult, err := didCrypto.PvtVerify([]byte(signReq.MsgToSign), signatureBytes)
 	if err != nil {
@@ -546,7 +546,7 @@ func (c *Core) ArbitrarySignVerification(reqID string, verificationReq *model.Si
 	}
 
 	// initiate the did with did crypto
-	didCrypto, err := c.SetupForienDID(verificationReq.DID, "")
+	didCrypto, err := c.SetupForienDID(verificationReq.SignerDID, "")
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to setup did for sign verification, err : %v", err)
 		c.log.Error(errMsg)
