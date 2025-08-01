@@ -490,7 +490,7 @@ func (c *Core) ArbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) 
 	signResp := c.arbitrarySign(reqID, signReq)
 	dc := c.GetWebReq(reqID)
 	if dc == nil {
-		c.log.Error("Failed to get did channels")
+		c.log.Error("arbitrary sign failed, Failed to get did channels")
 		return
 	}
 	dc.OutChan <- signResp
@@ -501,9 +501,9 @@ func (c *Core) arbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) 
 	}
 
 	// initiate the did with did crypto
-	didCrypto, err := c.SetupDID(reqID, signReq.DID)
+	didCrypto, err := c.SetupDID(reqID, signReq.SignerDID)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to setup did for signing, err : %v", err)
+		errMsg := fmt.Sprintf("arbitrary sign failed, failed to setup did, err : %v", err)
 		c.log.Error(errMsg)
 		signResp.Message = errMsg
 		return signResp
@@ -512,7 +512,7 @@ func (c *Core) arbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) 
 	// sign the given message with private key
 	signatureBytes, err := didCrypto.PvtSign([]byte(signReq.MsgToSign))
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to sign, err : %v", err)
+		errMsg := fmt.Sprintf("arbitrary sign failed, err : %v", err)
 		c.log.Error(errMsg)
 		signResp.Message = errMsg
 		return signResp
@@ -523,7 +523,7 @@ func (c *Core) arbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) 
 	// verify the signature before returning
 	verificationResult, err := didCrypto.PvtVerify([]byte(signReq.MsgToSign), signatureBytes)
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to verify signature, err : %v", err)
+		errMsg := fmt.Sprintf("arbitrary sign failed, failed to verify signature, err : %v", err)
 		c.log.Error(errMsg)
 		signResp.Message = errMsg
 		return signResp
@@ -531,9 +531,13 @@ func (c *Core) arbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) 
 
 	if !verificationResult {
 		c.log.Error("verification failed, signature is invalid")
-		signResp.Message = "verification failed, signature is invalid"
+		signResp.Message = "arbitrary sign failed, verification failed, signature is invalid"
 	} else {
-		signResp.Message = signature
+		signResp.Message = "arbitrary sign successful"
+		signMap := model.Signature{
+			Signature: signature,
+		}
+		signResp.Result = signMap
 	}
 
 	signResp.Status = true

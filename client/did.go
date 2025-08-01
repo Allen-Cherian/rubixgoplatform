@@ -290,7 +290,7 @@ func (c *Client) CreateDIDFromPubKey(pubKey string) (string, error) {
 // Arbitrary signature
 func (c *Client) ArbitrarySignature(didStr, msg string) (*model.BasicResponse, error) {
 	signData := &model.ArbitrarySignRequest{
-		DID:       didStr,
+		SignerDID:       didStr,
 		MsgToSign: msg,
 	}
 	var resp model.BasicResponse
@@ -302,15 +302,15 @@ func (c *Client) ArbitrarySignature(didStr, msg string) (*model.BasicResponse, e
 }
 
 // signature verification
-func (c *Client) SignVerification(didStr, msgHash, signature string) (string, error) {
+func (c *Client) SignVerification(signerDID, signedMsg, signature string) (string, error) {
 	verificationData := make(map[string]string)
-	verificationData["did"] = didStr
-	verificationData["msg_hash"] = msgHash
+	verificationData["signer_did"] = signerDID
+	verificationData["signed_msg"] = signedMsg
 	verificationData["signature"] = signature
 	var resp model.BasicResponse
 	err := c.sendJSONRequest("GET", setup.APISignVerification, verificationData, nil, &resp)
 	if err != nil {
-		return "", err
+		return "arbitrary sign failed", err
 	}
 	result := fmt.Sprintf("sign verification Status : %v, Message : %v", resp.Status, resp.Message)
 	return result, nil

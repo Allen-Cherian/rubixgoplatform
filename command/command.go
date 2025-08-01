@@ -345,8 +345,9 @@ type Command struct {
 	apiKey                       string
 	nftValue                     float64
 	ftNumStartIndex              int
-	msgHash                      string
+	message                      string
 	signature                    string
+	signerDID                    string
 }
 
 func showVersion() {
@@ -569,8 +570,9 @@ func Run(args []string) {
 	flag.StringVar(&cmd.apiKey, "apikey", "", "Give the API Key corresponding to the DID")
 	flag.Float64Var(&cmd.nftValue, "nftValue", 0.0, "Value of the NFT")
 	flag.IntVar(&cmd.ftNumStartIndex, "ftStartIndex", 0, "Start index of the FTs to be created")
-	flag.StringVar(&cmd.msgHash, "msgHash", "", "Value to be signed on")
+	flag.StringVar(&cmd.message, "message", "", "Value to be signed on")
 	flag.StringVar(&cmd.signature, "signature", "", "signature to be verified")
+	flag.StringVar(&cmd.signerDID, "signerdid", "", "DID of the signer")
 
 	if len(os.Args) < 2 {
 		fmt.Println("Invalid Command")

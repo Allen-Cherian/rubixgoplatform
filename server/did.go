@@ -316,7 +316,7 @@ func (s *Server) APIArbitrarySignature(req *ensweb.Request) *ensweb.Result {
 	err := s.ParseJSON(req, &signReq)
 	if err != nil {
 		s.log.Error("failed to parse sign input ", "err ", err)
-		return s.BasicResponse(req, false, "Failed to parse input to sign on", nil)
+		return s.BasicResponse(req, false, "arbitrary sign failed, failed to parse input", nil)
 	}
 
 	s.c.AddWebReq(req)
@@ -339,8 +339,8 @@ func (s *Server) APIArbitrarySignature(req *ensweb.Request) *ensweb.Result {
 // @Router      /api/verify-signature [get]
 func (s *Server) APISignVerification(req *ensweb.Request) *ensweb.Result {
 	var verificationReq model.SignVerificationRequest
-	verificationReq.SignerDID = s.GetQuerry(req, "did")
-	verificationReq.SignedMsg = s.GetQuerry(req, "msg_hash")
+	verificationReq.SignerDID = s.GetQuerry(req, "signer_did")
+	verificationReq.SignedMsg = s.GetQuerry(req, "signed_msg")
 	verificationReq.Signature = s.GetQuerry(req, "signature")
 
 	verificationResp, err := s.c.ArbitrarySignVerification(req.ID, &verificationReq)

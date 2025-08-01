@@ -45,13 +45,17 @@ type DIDFromPubKeyResponse struct {
 
 // Arbitrary sign request
 type ArbitrarySignRequest struct {
-	DID       string `json:"did"`
-	MsgToSign string `json:"msg_hash"`
+	SignerDID string `json:"signer_did"`
+	MsgToSign string `json:"msg_to_sign"`
 }
 
 // Arbitrary sign request
 type SignVerificationRequest struct {
-	SignerDID string `json:"did"`
-	SignedMsg string `json:"msg_hash"`
+	SignerDID string `json:"signer_did"`
+	SignedMsg string `json:"signed_msg"`
+	Signature string `json:"signature"`
+}
+
+type Signature struct {
 	Signature string `json:"signature"`
 }
