@@ -1102,13 +1102,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 						}
 						continue
 					} else {
-						// Log error but don't fail the transaction - tokens are already committed
-						c.log.Error("Failed to send FT token confirmation to receiver",
+						// Success - token confirmation sent
+						c.log.Info("Successfully sent FT token confirmation",
 							"receiver", receiverAddr,
 							"transaction_id", tid,
-							"error", err)
+							"attempt", currAttempt)
 						break
-						// Continue with the flow - receiver will eventually clean up pending tokens
 					}
 				}
 			}()
