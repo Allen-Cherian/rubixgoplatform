@@ -406,11 +406,11 @@ func (c *Core) sendQuorumCredit(cr *ConensusRequest) {
 func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc did.DIDCrypto) (*model.TransactionDetails, map[string]map[string]float64, *PledgeDetails, error) {
 	// Track overall consensus time
 	defer c.TrackOperation("tx.rbt_transfer.consensus", map[string]interface{}{
-		"mode": cr.Mode,
-		"quorum_count": len(cr.QuorumList),
+		"mode":           cr.Mode,
+		"quorum_count":   len(cr.QuorumList),
 		"transaction_id": cr.TransactionID,
 	})(nil)
-	
+
 	cs := ConsensusStatus{
 		Credit: CreditScore{
 			Credit: make([]CreditSignature, 0),
@@ -498,12 +498,13 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	c.quorumRequest[cr.ReqID] = &cs
 	c.pd[cr.ReqID] = &pd
 	c.qlock.Unlock()
-	defer func() {
-		c.qlock.Lock()
-		delete(c.quorumRequest, cr.ReqID)
-		delete(c.pd, cr.ReqID)
-		c.qlock.Unlock()
-	}()
+	// defer func() {
+	// 	c.qlock.Lock()
+	// 	delete(c.quorumRequest, cr.ReqID)
+	// 	delete(c.pd, cr.ReqID)
+	// 	c.qlock.Unlock()
+	// }()
+
 	c.quorumCount = QuorumRequired - len(cr.QuorumList)
 	c.noBalanceQuorumCount = QuorumRequired - len(cr.QuorumList)
 	// Count tokens for timeout calculation
@@ -626,7 +627,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	nb, err := c.pledgeQuorumToken(cr, sc, tid, dc)
 	c.TrackOperation("tx.rbt_transfer.pledge", map[string]interface{}{
 		"transaction_id": tid,
-		"duration_ms": time.Since(pledgeStart).Milliseconds(),
+		"duration_ms":    time.Since(pledgeStart).Milliseconds(),
 	})(err)
 	if err != nil {
 		c.log.Error("Failed to pledge token", "err", err)
@@ -683,8 +684,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		c.TrackOperation("tx.rbt_transfer.commit", map[string]interface{}{
 			"transaction_id": tid,
-			"token_count": len(ti),
-			"parallel": c.cfg.CfgData.TrustedNetwork && len(ti) > 100,
+			"token_count":    len(ti),
+			"parallel":       c.cfg.CfgData.TrustedNetwork && len(ti) > 100,
 		})(pledgeFinalityError)
 		if pledgeFinalityError != nil {
 			c.log.Error("Pledge finlaity not achieved", "err", err)
@@ -793,7 +794,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		err = c.sendTokenConfirmation(receiverAddr, tid, ti, tkn.RBTTokenType)
 		if err != nil {
 			// Log error but don't fail the transaction - tokens are already committed
-			c.log.Error("Failed to send token confirmation to receiver", 
+			c.log.Error("Failed to send token confirmation to receiver",
 				"receiver", receiverAddr,
 				"transaction_id", tid,
 				"error", err)
@@ -894,7 +895,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			c.log.Error("Failed to transfer tokens", "err", err)
 			return nil, nil, nil, err
 		}
-		
+
 		// Skip unpinning if senderPeerID and receiverPeerID are same, as reciever
 		// already pinned it
 		if cr.SenderPeerID != c.peerID {
@@ -924,7 +925,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			Epoch:           int64(cr.TransactionEpoch),
 		}
 
-
 		go func() {
 			err = c.initiateUnpledgingProcess(cr, td.TransactionID, td.Epoch)
 			if err != nil {
@@ -935,6 +935,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		return &td, pl, pds, nil
 	case FTTransferMode:
+		if cr.ReceiverPeerID == "" {
+			if c.w.IsDIDExist(sc.GetReceiverDID()) {
+				cr.ReceiverPeerID = c.peerID
+			}
+		}
+
 		// #### FT Tranfer starts here
 		// Connect to the receiver's peer
 		rp, err := c.getPeer(cr.ReceiverPeerID + "." + sc.GetReceiverDID())
@@ -973,8 +979,8 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		}
 		c.TrackOperation("tx.rbt_transfer.commit", map[string]interface{}{
 			"transaction_id": tid,
-			"token_count": len(ti),
-			"parallel": c.cfg.CfgData.TrustedNetwork && len(ti) > 100,
+			"token_count":    len(ti),
+			"parallel":       c.cfg.CfgData.TrustedNetwork && len(ti) > 100,
 		})(pledgeFinalityError)
 		if pledgeFinalityError != nil {
 			c.log.Error("Pledge finlaity not achieved", "err", err)
@@ -1073,14 +1079,39 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 		// Send token confirmation to receiver after consensus finality
 		receiverAddr := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
-		err = c.sendTokenConfirmation(receiverAddr, tid, ti, tkn.FTTokenType)
-		if err != nil {
-			// Log error but don't fail the transaction - tokens are already committed
-			c.log.Error("Failed to send FT token confirmation to receiver", 
-				"receiver", receiverAddr,
-				"transaction_id", tid,
-				"error", err)
-			// Continue with the flow - receiver will eventually clean up pending tokens
+		if cr.SenderPeerID != cr.ReceiverPeerID {
+			go func() {
+				backoff := 30 * time.Second
+				maxBackoff := 3 * time.Hour
+				maxRetries := 15
+				
+				for currAttempt := 1; currAttempt <= maxRetries; currAttempt++ {
+					err = c.sendTokenConfirmation(receiverAddr, tid, ti, tkn.FTTokenType)
+					if err != nil {
+						c.log.Error(fmt.Sprintf(
+							"tokenConfirmation: attempt %v for tx=%v to receiver=%v",
+							currAttempt,
+							tid,
+							receiverAddr,
+						))
+						
+						time.Sleep(backoff)
+						backoff = time.Duration(float64(backoff) * 1.5)
+						if backoff > maxBackoff {
+							backoff = maxBackoff
+						}
+						continue
+					} else {
+						// Log error but don't fail the transaction - tokens are already committed
+						c.log.Error("Failed to send FT token confirmation to receiver",
+							"receiver", receiverAddr,
+							"transaction_id", tid,
+							"error", err)
+						break
+						// Continue with the flow - receiver will eventually clean up pending tokens
+					}
+				}
+			}()
 		}
 
 		// TODO: remove the following commented out code once after testing, calling the quorum pledge finality before APISendFT token
@@ -1124,7 +1155,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 					c.log.Error("failed to get latest block height of token ", tokeninfo.Token)
 					return
 				}
-	
+
 				// if latest block is genesis block of a whole token, then the signer(s) is(are) advisory node(s), not quorum(s)
 				// this is the case of all migrated RBTs
 				if blockHeight == 0 && tokeninfo.TokenValue == 1.0 {
@@ -1135,12 +1166,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 					c.log.Error(fmt.Sprintf("unable to fetch previous quorum's DIDs for token: %v, err: %v", tokeninfo.Token, err))
 					return
 				}
-	
+
 				// if signer is similar to sender did skip this token, as the block is the genesis block
 				if previousQuorumDIDs[0] == sc.GetSenderDID() {
 					continue
 				}
-	
+
 				// concat tokenId and BlockID
 				bid, errBlockID := b.GetBlockID(tokeninfo.Token)
 				if errBlockID != nil {
@@ -1150,7 +1181,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 
 				prevtokenIDTokenStateData := tokeninfo.Token + bid
 				prevtokenIDTokenStateBuffer := bytes.NewBuffer([]byte(prevtokenIDTokenStateData))
-	
+
 				// add to ipfs get only the hash of the token+tokenstate. This is the hash just before transferring i.e. the exhausted token state hash, and updating in Sender side
 				prevtokenIDTokenStateHash, errIpfsAdd := IpfsAddWithBackoff(c.ipfs, prevtokenIDTokenStateBuffer, ipfsnode.Pin(false), ipfsnode.OnlyHash(true))
 				if errIpfsAdd != nil {
@@ -1170,19 +1201,25 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 						}
 						peerInfoCache[previousQuorumDID] = previousQuorumInfo
 					}
-	
+
 					previousQuorumAddress := previousQuorumInfo.PeerID + "." + previousQuorumDID
 					previousQuorumPeer, errGetPeer := c.getPeer(previousQuorumAddress)
 					if errGetPeer != nil {
 						c.log.Error(fmt.Sprint("unable to retrieve peer information for %v, err: %v", previousQuorumInfo.PeerID, errGetPeer))
 						return
 					}
-	
+
 					updateTokenHashDetailsQuery := make(map[string]string)
 					updateTokenHashDetailsQuery["tokenIDTokenStateHash"] = prevtokenIDTokenStateHash
 					previousQuorumPeer.SendJSONRequest("POST", APIUpdateTokenHashDetails, updateTokenHashDetailsQuery, nil, nil, true)
 					previousQuorumPeer.Close()
 				}
+			}
+
+			err = c.initiateUnpledgingProcess(cr, cr.TransactionID, int64(cr.TransactionEpoch))
+			if err != nil {
+				c.log.Error("Failed to store transactiond details with quorum ", "err", err)
+				return
 			}
 		}()
 
@@ -1199,7 +1236,7 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			// call ipfs repo gc after unpinnning
 			c.ipfsRepoGc()
 		}
-		
+
 		nbid, err := nb.GetBlockID(ti[0].Token)
 		if err != nil {
 			c.log.Error("Failed to get block id", "err", err)
@@ -1218,14 +1255,6 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			Status:          true,
 			Epoch:           int64(cr.TransactionEpoch),
 		}
-
-		go func() {
-			err = c.initiateUnpledgingProcess(cr, td.TransactionID, td.Epoch)
-			if err != nil {
-				c.log.Error("Failed to store transactiond details with quorum ", "err", err)
-				return
-			}
-		}()
 
 		return &td, pl, pds, nil
 	case PinningServiceMode:

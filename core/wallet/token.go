@@ -969,7 +969,12 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 			}
 		}
 		// Update token status and pin tokens
-		tokenStatus := TokenIsPending // Changed from TokenIsFree to prevent premature spending
+		var tokenStatus int
+		if senderPeerId != receiverPeerId {
+			tokenStatus = TokenIsPending // Changed from TokenIsFree to prevent premature spending
+		} else {
+			tokenStatus = TokenIsFree
+		}
 		role := OwnerRole
 		ownerdid := did
 

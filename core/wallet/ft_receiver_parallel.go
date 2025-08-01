@@ -693,7 +693,12 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 			
 			ftEntry.FTName = ftInfo.FTName
 			ftEntry.DID = did
-			ftEntry.TokenStatus = TokenIsPending
+			
+			if senderPeerId != receiverPeerId {
+				ftEntry.TokenStatus = TokenIsPending
+			} else {
+				ftEntry.TokenStatus = TokenIsFree
+			}
 			ftEntry.TransactionID = b.GetTid()
 			ftEntry.TokenStateHash = hashResult.Hash
 			
@@ -722,21 +727,23 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 	senderAddress := senderPeerId + "." + b.GetSenderDID()
 	receiverAddress := receiverPeerId + "." + b.GetReceiverDID()
 	
-	_, err := pfr.w.Pin(
-		item.Token.Token,
-		OwnerRole,
-		did,
-		b.GetTid(),
-		senderAddress,
-		receiverAddress,
-		item.Token.TokenValue,
-		true,
-	)
-	
-	if err != nil {
-		result.Error = fmt.Errorf("failed to pin token: %w", err)
-		return result
+	if senderPeerId != receiverPeerId {
+		_, err := pfr.w.Pin(
+			item.Token.Token,
+			OwnerRole,
+			did,
+			b.GetTid(),
+			senderAddress,
+			receiverAddress,
+			item.Token.TokenValue,
+			true,
+		)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to pin token: %w", err)
+			return result
+		}
 	}
+	
 	
 	result.Success = true
 	return result

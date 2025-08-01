@@ -1022,9 +1022,10 @@ func (c *Core) quorumFTConsensus(req *ensweb.Request, did string, qdc didcrypto.
 				}
 			}(i)
 		}
+
+		wg.Wait()
 	}
 
-	wg.Wait()
 	// After all goroutines have completed, check the results
 	// This is where you can handle the results of the token state checks
 

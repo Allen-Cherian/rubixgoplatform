@@ -595,7 +595,6 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 		if !isPresentInList(signersForExistingBlock, quorumDID) || len(signersForExistingBlock) == 0 {
 			// This token needs syncing - collect it for batch processing
 			// Don't log for each token to reduce noise
-			
 			// Validate token info before adding to sync list
 			if tokenInfo.Token == "" {
 				c.log.Error("Empty token in input list",
@@ -617,7 +616,7 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 			// Don't log for each token to reduce noise
 			syncSkipped++
 			
-			// Store the latest block we already have
+			//Store the latest block we already have
 			blockHash, err := latestBlock.GetHash()
 			if err != nil {
 				c.log.Error("Failed to get block hash for token", "token", tokenInfo.Token, "err", err)
@@ -851,7 +850,6 @@ func (c *Core) validateTokenOwnershipOptimized(cr *ConensusRequest, sc *contract
 
 			results <- br
 		}(blockResult)
-	
 	}
 	wg.Wait()
 	close(results)

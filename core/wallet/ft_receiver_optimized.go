@@ -184,13 +184,20 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 		}
 
 		// Create new FT token entry
+		var tokenStatus int
+		if senderPeerId != receiverPeerId {
+			tokenStatus = TokenIsPending
+		} else {
+			tokenStatus = TokenIsFree
+		}
+
 		FTInfo := FTToken{
 			TokenID:        tokenInfo.Token,
 			TokenValue:     tokenInfo.TokenValue,
 			CreatorDID:     FTOwner,
 			FTName:         ftInfo.FTName,
 			DID:            did,
-			TokenStatus:    TokenIsPending,
+			TokenStatus:    tokenStatus,
 			TransactionID:  b.GetTid(),
 			TokenStateHash: tokenHashMap[tokenInfo.Token],
 		}
@@ -235,10 +242,17 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 			continue
 		}
 
+		var tokenStatus int
+		if senderPeerId != receiverPeerId {
+			tokenStatus = TokenIsPending
+		} else {
+			tokenStatus = TokenIsFree
+		}
+		
 		// Update token status
 		FTInfo.FTName = ftInfo.FTName
 		FTInfo.DID = did
-		FTInfo.TokenStatus = TokenIsPending
+		FTInfo.TokenStatus = tokenStatus
 		FTInfo.TransactionID = b.GetTid()
 		FTInfo.TokenStateHash = tokenHashMap[tokenInfo.Token]
 
