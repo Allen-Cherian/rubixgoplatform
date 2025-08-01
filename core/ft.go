@@ -221,6 +221,8 @@ func (c *Core) createFTs(reqID string, FTName string, numFTs int, numWholeTokens
 				TokenStatus: wallet.TokenIsFree,
 				TokenValue:  fractionalValue,
 				DID:         did,
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
 			}
 			results <- ftResult{FTToken: ft, FTID: ftID}
 		}

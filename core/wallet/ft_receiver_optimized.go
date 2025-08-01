@@ -200,6 +200,8 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 			TokenStatus:    tokenStatus,
 			TransactionID:  b.GetTid(),
 			TokenStateHash: tokenHashMap[tokenInfo.Token],
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
 		}
 
 		err = w.s.Write(FTTokenStorage, &FTInfo)

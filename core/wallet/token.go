@@ -963,6 +963,8 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 				TokenID:    tokenInfo.Token,
 				TokenValue: tokenInfo.TokenValue,
 				CreatorDID: FTOwner,
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
 			}
 
 			err = w.s.Write(FTTokenStorage, &FTInfo)

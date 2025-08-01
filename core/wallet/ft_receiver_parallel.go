@@ -643,6 +643,8 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 			TokenStatus:    TokenIsPending,
 			TransactionID:  b.GetTid(),
 			TokenStateHash: hashResult.Hash,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
 		}
 		
 		// Write to database with minimal locking and retry
