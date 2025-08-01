@@ -82,6 +82,7 @@ type ConensusRequest struct {
 	NFT                string       `json:"nft"`
 	FTinfo             model.FTInfo `json:"ft_info"`
 	// TransTokenSyncInfo map[string]GenesisAndLatestBlocks `json:"tokens_sync_info"`
+	ExplorerDone       chan struct{} `json:"-"` // Channel to signal explorer submission completion
 }
 
 type ConensusReply struct {
@@ -1082,6 +1083,21 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		receiverAddr := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
 		if cr.SenderPeerID != cr.ReceiverPeerID {
 			go func() {
+				// First wait for explorer submission to complete if channel is provided
+				if cr.ExplorerDone != nil {
+					c.log.Info("Waiting for explorer submission to complete before sending confirmation",
+						"transaction_id", cr.TransactionID)
+					
+					select {
+					case <-cr.ExplorerDone:
+						c.log.Info("Explorer submission completed, proceeding with receiver confirmation",
+							"transaction_id", cr.TransactionID)
+					case <-time.After(30 * time.Second):
+						c.log.Warn("Explorer submission timeout, proceeding with receiver confirmation anyway",
+							"transaction_id", cr.TransactionID)
+					}
+				}
+				
 				// Calculate initial delay based on token count to allow receiver processing
 				tokenCount := len(ti)
 				var initialDelay time.Duration

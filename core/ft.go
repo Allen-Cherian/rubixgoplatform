@@ -779,7 +779,12 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 			return
 		}
 
+		// Create a channel to signal explorer submission completion
+		explorerDone := make(chan struct{})
+		
 		go func ()  {
+			defer close(explorerDone) // Signal completion when done
+			
 			AllTokens := make([]AllToken, len(TokenInfo))
 			for i := range TokenInfo {
 				tokenDetail := AllToken{}
@@ -815,7 +820,11 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 				FTTokenList:     FTTokenIDs,
 			}
 			c.ec.ExplorerFTTransaction(eTrans)
+			c.log.Info("Explorer submission completed", "transaction_id", td.TransactionID)
 		}()
+		
+		// Pass the explorerDone channel to consensus request
+		cr.ExplorerDone = explorerDone
 
 		c.log.Info("FT Transfer finished successfully", "duration", dif, " trnxid", td.TransactionID)
 		msg := fmt.Sprintf("FT Transfer finished successfully in %v with trnxid %v", dif, td.TransactionID)
