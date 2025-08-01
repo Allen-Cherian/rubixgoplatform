@@ -884,23 +884,17 @@ syncProcessing:
 
 // need to update in such a way that only for FTs
 func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.Block, senderPeerId string, receiverPeerId string, ipfsShell *ipfsnode.Shell, ftInfo FTToken) ([]string, error) {
-	// For very large FT transfers, use parallel processing without locks
-	if len(ti) > 100 {
-		w.log.Info("Using parallel FT receiver without serialized locks", 
-			"ft_count", len(ti),
-			"ft_name", ftInfo.FTName)
-		parallelReceiver := NewParallelFTReceiver(w)
-		return parallelReceiver.ParallelFTTokensReceived(did, ti, b, senderPeerId, receiverPeerId, ipfsShell, ftInfo)
-	}
-	
-	// For small to medium FT transfers, use optimized processing
-	if len(ti) >= 10 {
-		w.log.Info("Using optimized FT receiver with batch downloads", 
-			"ft_count", len(ti),
-			"ft_name", ftInfo.FTName)
-		return w.OptimizedFTTokensReceived(did, ti, b, senderPeerId, receiverPeerId, ipfsShell, ftInfo)
-	}
-	
+	// Always use parallel FT receiver for consistent performance and no global locks
+	w.log.Info("Using parallel FT receiver", 
+		"ft_count", len(ti),
+		"ft_name", ftInfo.FTName)
+	parallelReceiver := NewParallelFTReceiver(w)
+	return parallelReceiver.ParallelFTTokensReceived(did, ti, b, senderPeerId, receiverPeerId, ipfsShell, ftInfo)
+}
+
+// FTTokensReceivedLegacy is the old implementation with global wallet lock
+// Kept for reference but should not be used in production
+func (w *Wallet) FTTokensReceivedLegacy(did string, ti []contract.TokenInfo, b *block.Block, senderPeerId string, receiverPeerId string, ipfsShell *ipfsnode.Shell, ftInfo FTToken) ([]string, error) {
 	w.l.Lock()
 	defer w.l.Unlock()
 	// TODO :: Needs to be address
