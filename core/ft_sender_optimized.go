@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rubixchain/rubixgoplatform/contract"
 	"github.com/rubixchain/rubixgoplatform/core/model"
 	"github.com/rubixchain/rubixgoplatform/core/wallet"
 )
@@ -27,88 +28,6 @@ func NewOptimizedFTSender(c *Core) *OptimizedFTSender {
 	}
 }
 
-// OptimizedInitiateFTTransfer handles FT transfers with memory optimization
-func (ofs *OptimizedFTSender) OptimizedInitiateFTTransfer(reqID string, req *model.TransferFTReq) *model.BasicResponse {
-	startTime := time.Now()
-	
-	// Setup memory optimization for large transfers
-	if req.FTCount > 1000 {
-		ofs.memoryOptimizer.OptimizeForLargeOperation(req.FTCount)
-		defer ofs.memoryOptimizer.RestoreDefaults()
-		
-		// Start memory monitoring
-		monitorDone := make(chan struct{})
-		go ofs.memoryOptimizer.MonitorMemoryPressure(monitorDone)
-		defer close(monitorDone)
-		
-		// Start periodic GC for very large transfers
-		if req.FTCount > 5000 {
-			gcDone := make(chan struct{})
-			go ofs.memoryOptimizer.PeriodicGC(gcDone, 30*time.Second)
-			defer close(gcDone)
-		}
-	}
-	
-	resp := &model.BasicResponse{
-		Status: false,
-	}
-	
-	// Get DID and validate
-	dc := ofs.c.GetWebReq(reqID)
-	if dc == nil {
-		resp.Message = "Failed to get DID"
-		return resp
-	}
-	
-	did := dc.GetDID()
-	rdid := req.Receiver
-	
-	// Validate receiver
-	if did == rdid {
-		resp.Message = "Sender and receiver cannot be same"
-		return resp
-	}
-	
-	// Check FT availability using streaming approach for large counts
-	availableCount, creatorDID, err := ofs.streamingCheckFTAvailability(req, did)
-	if err != nil {
-		resp.Message = err.Error()
-		return resp
-	}
-	
-	if req.FTCount > availableCount {
-		resp.Message = fmt.Sprintf("Insufficient balance, Available FT balance is %d, trnx value is %d", 
-			availableCount, req.FTCount)
-		return resp
-	}
-	
-	// Get receiver peer info
-	receiverPeerID, err := ofs.c.getPeer(req.Receiver)
-	if err != nil {
-		resp.Message = "Failed to get receiver peer, " + err.Error()
-		return resp
-	}
-	defer receiverPeerID.Close()
-	
-	// Fetch and lock tokens in batches for memory efficiency
-	tokenInfo, lockingErr := ofs.batchFetchAndLockTokens(req, did, creatorDID)
-	if lockingErr != nil {
-		resp.Message = "Failed to lock FT tokens: " + lockingErr.Error()
-		return resp
-	}
-	
-	// Continue with standard consensus flow
-	// (The rest of the flow remains the same as the original implementation)
-	
-	ofs.c.log.Info("Optimized FT transfer preparation completed",
-		"ft_count", req.FTCount,
-		"duration", time.Since(startTime))
-	
-	// Return tokenInfo to be used in the consensus process
-	resp.Status = true
-	resp.Message = "Tokens prepared for transfer"
-	return resp
-}
 
 // streamingCheckFTAvailability checks FT availability without loading all tokens into memory
 func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFTReq, did string) (int, string, error) {
@@ -117,29 +36,39 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 	
 	// First check if we need to determine creator DID
 	if req.CreatorDID == "" {
-		info, err := ofs.c.w.GetFTInfoByFTName(req.FTName)
+		info, err := ofs.c.GetFTInfoByDID(did)
 		if err != nil {
 			return 0, "", fmt.Errorf("failed to get FT info: %v", err)
 		}
 		
-		// Check for multiple creators
-		creators := make(map[string]bool)
+		// Check for multiple creators for the same FT name
+		ftNameToCreators := make(map[string][]string)
 		for _, ft := range info {
-			creators[ft.CreatorDID] = true
+			if ft.FTName == req.FTName {
+				ftNameToCreators[ft.FTName] = append(ftNameToCreators[ft.FTName], ft.CreatorDID)
+			}
 		}
 		
-		if len(creators) > 1 {
-			return 0, "", fmt.Errorf("multiple creators found for FT %s, use -creatorDID flag", req.FTName)
+		for ftName, creators := range ftNameToCreators {
+			if len(creators) > 1 {
+				return 0, "", fmt.Errorf("multiple creators found for FT %s, use -creatorDID flag", ftName)
+			}
 		}
 		
-		if len(info) > 0 {
-			creatorDID = info[0].CreatorDID
+		// Get the creator DID for this FT
+		for _, ft := range info {
+			if ft.FTName == req.FTName {
+				creatorDID = ft.CreatorDID
+				break
+			}
 		}
 	} else {
 		creatorDID = req.CreatorDID
 	}
 	
 	// Count available FTs without loading all into memory
+	// Since we don't have a Count method, we'll count manually with a query
+	var fts []wallet.FTToken
 	query := "ft_name=? AND token_status=? AND owner_did=?"
 	args := []interface{}{req.FTName, wallet.TokenIsFree, did}
 	
@@ -148,17 +77,19 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 		args = append(args, creatorDID)
 	}
 	
-	// Use a counting query instead of loading all tokens
-	err := ofs.c.s.Count(wallet.FTTokenStorage, &count, query, args...)
+	// Read with limit 0 to just get count
+	err := ofs.c.s.Read(wallet.FTTokenStorage, &fts, query, args...)
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to count available FTs: %v", err)
 	}
+	count = len(fts)
 	
 	return count, creatorDID, nil
 }
 
 // batchFetchAndLockTokens fetches and locks tokens in memory-efficient batches
 func (ofs *OptimizedFTSender) batchFetchAndLockTokens(req *model.TransferFTReq, did, creatorDID string) ([]contract.TokenInfo, error) {
+	startTime := time.Now()
 	const batchSize = 500 // Process 500 tokens at a time to limit memory usage
 	
 	tokenInfos := make([]contract.TokenInfo, 0, req.FTCount)
@@ -222,6 +153,10 @@ func (ofs *OptimizedFTSender) batchFetchAndLockTokens(req *model.TransferFTReq, 
 		// Clear the batch from memory
 		batchTokens = nil
 	}
+	
+	ofs.c.log.Info("Batch fetch and lock completed",
+		"total_tokens", req.FTCount,
+		"duration", time.Since(startTime))
 	
 	return tokenInfos, nil
 }

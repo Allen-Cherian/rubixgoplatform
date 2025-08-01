@@ -1086,26 +1086,29 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				tokenCount := len(ti)
 				var initialDelay time.Duration
 				
-				// Proportional delay calculation based on token count
-				// Base: 1s + (tokenCount * 10ms) for first 1000 tokens
-				// Then more aggressive scaling for larger counts
+				// Delay calculation based on observed parallel processing performance
+				// From logs: ~12.5 tokens/second for 101 tokens
+				// Add minimal buffer since receiver confirms as it processes
+				baseDelay := 2 * time.Second // Network latency + setup
+				
+				// Simple linear scaling with observed performance
+				// Using 10 tokens/sec as conservative estimate
+				processingTime := time.Duration(tokenCount/10) * time.Second
+				
+				// Add small buffer based on token count
+				var buffer time.Duration
 				switch {
 				case tokenCount <= 100:
-					// 1s + (count * 10ms), so 100 tokens = 2s, 50 tokens = 1.5s
-					initialDelay = time.Second + time.Duration(tokenCount*10)*time.Millisecond
+					buffer = 1 * time.Second
 				case tokenCount <= 1000:
-					// 2s + (count * 8ms), so 1000 tokens = 10s, 500 tokens = 6s
-					initialDelay = 2*time.Second + time.Duration(tokenCount*8)*time.Millisecond
+					buffer = 3 * time.Second
 				case tokenCount <= 5000:
-					// For larger counts, use original conservative approach
-					initialDelay = 30 * time.Second
-				case tokenCount <= 10000:
-					// Scale up for very large transfers (assuming ~130ms per token processing)
-					initialDelay = 90 * time.Second
+					buffer = 5 * time.Second
 				default:
-					// Extremely large transfers need significant time
-					initialDelay = 180 * time.Second
+					buffer = 10 * time.Second
 				}
+				
+				initialDelay = baseDelay + processingTime + buffer
 				
 				// Sleep before first attempt to let receiver process
 				c.log.Info("Waiting for receiver to process tokens before confirmation",
