@@ -1084,11 +1084,24 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 			go func() {
 				// Calculate initial delay based on token count to allow receiver processing
 				tokenCount := len(ti)
-				initialDelay := 10 * time.Second
-				if tokenCount > 5000 {
-					initialDelay = 60 * time.Second
-				} else if tokenCount > 1000 {
+				var initialDelay time.Duration
+				
+				// More granular delays based on token count
+				switch {
+				case tokenCount <= 100:
+					initialDelay = 2 * time.Second  // Small transfers need minimal delay
+				case tokenCount <= 500:
+					initialDelay = 5 * time.Second
+				case tokenCount <= 1000:
+					initialDelay = 10 * time.Second
+				case tokenCount <= 2500:
+					initialDelay = 20 * time.Second
+				case tokenCount <= 5000:
 					initialDelay = 30 * time.Second
+				case tokenCount <= 10000:
+					initialDelay = 45 * time.Second
+				default:
+					initialDelay = 60 * time.Second  // Very large transfers
 				}
 				
 				// Sleep before first attempt to let receiver process
@@ -1098,10 +1111,18 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				time.Sleep(initialDelay)
 				
 				// Adaptive retry parameters based on token count
-				backoff := 20 * time.Second
-				if tokenCount > 1000 {
+				var backoff time.Duration
+				switch {
+				case tokenCount <= 100:
+					backoff = 5 * time.Second
+				case tokenCount <= 1000:
+					backoff = 10 * time.Second
+				case tokenCount <= 5000:
+					backoff = 20 * time.Second
+				default:
 					backoff = 30 * time.Second
 				}
+				
 				maxBackoff := 5 * time.Minute
 				maxRetries := 10
 				totalTimeout := 30 * time.Minute
