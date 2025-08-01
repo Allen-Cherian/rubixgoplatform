@@ -585,6 +585,10 @@ func (cmd *Command) runApp() {
 	cmd.log.Info("Core version : " + version)
 	cmd.log.Info("Starting server...")
 	go s.Start()
+	
+	// Start the pending token monitor for self-healing
+	c.StartPendingTokenMonitor()
+	
 	cmd.log.Info("Syncing Details...")
 	dids := c.ExplorerUserCreate() //Checking if all the DIDs are in the ExplorerUserDetailtable or not.
 	if len(dids) != 0 {
@@ -602,6 +606,8 @@ func (cmd *Command) runApp() {
 	case <-ch:
 	case <-sc:
 	}
+	// Stop the pending token monitor
+	c.StopPendingTokenMonitor()
 	s.Shutdown()
 	cmd.log.Info("Shutting down...")
 	//c.ExpireUserAPIKey()

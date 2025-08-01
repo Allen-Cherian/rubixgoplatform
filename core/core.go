@@ -149,6 +149,7 @@ type Core struct {
 	tokenPool            *TokenInfoPool
 	batchSyncTokenPool   *BatchSyncTokenInfoPool
 	tokenSlicePool       *TokenSlicePool
+	pendingTokenMonitor  *PendingTokenMonitor
 }
 
 func InitConfig(configFile string, encKey string, node uint16, addr string) error {
@@ -352,6 +353,10 @@ func NewCore(cfg *config.Config, cfgFile string, encKey string, log logger.Logge
 	c.tokenPool = NewTokenInfoPool()
 	c.batchSyncTokenPool = NewBatchSyncTokenInfoPool()
 	c.tokenSlicePool = NewTokenSlicePool()
+	
+	// Initialize pending token monitor for self-healing
+	// Check every 5 minutes for tokens pending > 10 minutes
+	c.pendingTokenMonitor = NewPendingTokenMonitor(c, 5*time.Minute, 10*time.Minute)
 	
 	// Wrap storage with tracking if performance tracker is enabled
 	if c.perfTracker != nil && c.perfTracker.enabled && c.s != nil {
@@ -787,6 +792,22 @@ func (c *Core) InitialiseDID(didStr string, didType int) (did.DIDCrypto, error) 
 		return did.InitDIDBasic(didStr, c.didDir, nil), nil
 	default:
 		return did.InitDIDBasic(didStr, c.didDir, nil), nil
+	}
+}
+
+// StartPendingTokenMonitor starts the self-healing monitor for pending tokens
+func (c *Core) StartPendingTokenMonitor() {
+	if c.pendingTokenMonitor != nil {
+		c.pendingTokenMonitor.Start()
+		c.log.Info("Started pending token monitor for self-healing")
+	}
+}
+
+// StopPendingTokenMonitor stops the pending token monitor
+func (c *Core) StopPendingTokenMonitor() {
+	if c.pendingTokenMonitor != nil {
+		c.pendingTokenMonitor.Stop()
+		c.log.Info("Stopped pending token monitor")
 	}
 }
 
