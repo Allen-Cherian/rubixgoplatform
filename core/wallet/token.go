@@ -893,8 +893,8 @@ func (w *Wallet) FTTokensReceived(did string, ti []contract.TokenInfo, b *block.
 		return parallelReceiver.ParallelFTTokensReceived(did, ti, b, senderPeerId, receiverPeerId, ipfsShell, ftInfo)
 	}
 	
-	// For large FT transfers, use optimized processing with batch downloads
-	if len(ti) > 50 {
+	// For small to medium FT transfers, use optimized processing
+	if len(ti) >= 10 {
 		w.log.Info("Using optimized FT receiver with batch downloads", 
 			"ft_count", len(ti),
 			"ft_name", ftInfo.FTName)
