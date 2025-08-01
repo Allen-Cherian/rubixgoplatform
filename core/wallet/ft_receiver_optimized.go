@@ -167,137 +167,131 @@ func (w *Wallet) OptimizedFTTokensReceived(did string, ti []contract.TokenInfo, 
 	genesisOptimizer := NewGenesisGroupOptimizer(w)
 	genesisGroups := genesisOptimizer.GroupTokensByGenesis(ti)
 	
-	// Phase 4: Process downloaded FT tokens
+	// Phase 4: Process all tokens (both downloaded and existing)
 	processStart := time.Now()
 	processedCount := 0
 	lastLoggedPercent = 0
 
+	// Create a map to quickly check if a token was downloaded
+	downloadedTokensMap := make(map[string]int) // token -> index in getRequests
 	for idx, req := range getRequests {
-		tokenInfo := ti[req.Index]
+		downloadedTokensMap[ti[req.Index].Token] = idx
+	}
 
-		// Get owner from genesis groups (optimized lookup)
-		FTOwner := genesisOptimizer.GetOwnerForToken(tokenInfo, genesisGroups)
-		if FTOwner == "" {
-			w.log.Error("Failed to get owner from genesis groups",
-				"token", tokenInfo.Token)
-			continue
-		}
+	for idx, tokenInfo := range ti {
+		// Check if this token was downloaded or already existed
+		if downloadIdx, wasDownloaded := downloadedTokensMap[tokenInfo.Token]; wasDownloaded {
+			// Process downloaded token
+			req := getRequests[downloadIdx]
 
-		// Create new FT token entry
-		var tokenStatus int
-		if senderPeerId != receiverPeerId {
-			tokenStatus = TokenIsPending
+			// Get owner from genesis groups (optimized lookup)
+			FTOwner := genesisOptimizer.GetOwnerForToken(tokenInfo, genesisGroups)
+			if FTOwner == "" {
+				w.log.Error("Failed to get owner from genesis groups",
+					"token", tokenInfo.Token)
+				continue
+			}
+
+			// Create new FT token entry
+			var tokenStatus int
+			if senderPeerId != receiverPeerId {
+				tokenStatus = TokenIsPending
+			} else {
+				tokenStatus = TokenIsFree
+			}
+
+			FTInfo := FTToken{
+				TokenID:        tokenInfo.Token,
+				TokenValue:     tokenInfo.TokenValue,
+				CreatorDID:     FTOwner,
+				FTName:         ftInfo.FTName,
+				DID:            did,
+				TokenStatus:    tokenStatus,
+				TransactionID:  b.GetTid(),
+				TokenStateHash: tokenHashMap[tokenInfo.Token],
+				CreatedAt:      time.Now(),
+				UpdatedAt:      time.Now(),
+			}
+
+			err = w.s.Write(FTTokenStorage, &FTInfo)
+			if err != nil {
+				w.log.Error("Failed to write FT token to db",
+					"token", tokenInfo.Token,
+					"error", err)
+				// Continue processing other tokens
+				continue
+			}
+
+			// Cleanup the download directory
+			os.RemoveAll(req.Path)
 		} else {
-			tokenStatus = TokenIsFree
+			// Process existing token - just update status
+			var FTInfo FTToken
+			err := w.s.Read(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
+			if err != nil {
+				w.log.Error("Failed to read FT token for update",
+					"token", tokenInfo.Token,
+					"error", err)
+				continue
+			}
+
+			var tokenStatus int
+			if senderPeerId != receiverPeerId {
+				tokenStatus = TokenIsPending
+			} else {
+				tokenStatus = TokenIsFree
+			}
+			
+			// Update token status
+			FTInfo.FTName = ftInfo.FTName
+			FTInfo.DID = did
+			FTInfo.TokenStatus = tokenStatus
+			FTInfo.TransactionID = b.GetTid()
+			FTInfo.TokenStateHash = tokenHashMap[tokenInfo.Token]
+
+			err = w.s.Update(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
+			if err != nil {
+				w.log.Error("Failed to update FT token in db",
+					"token", tokenInfo.Token,
+					"error", err)
+				continue
+			}
 		}
 
-		FTInfo := FTToken{
-			TokenID:        tokenInfo.Token,
-			TokenValue:     tokenInfo.TokenValue,
-			CreatorDID:     FTOwner,
-			FTName:         ftInfo.FTName,
-			DID:            did,
-			TokenStatus:    tokenStatus,
-			TransactionID:  b.GetTid(),
-			TokenStateHash: tokenHashMap[tokenInfo.Token],
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+		// Pin the token (for both new and existing tokens)
+		senderAddress := senderPeerId + "." + b.GetSenderDID()
+		receiverAddress := receiverPeerId + "." + b.GetReceiverDID()
+		
+		if senderPeerId != receiverPeerId {
+			_, err = w.Pin(tokenInfo.Token, OwnerRole, did, b.GetTid(), senderAddress, receiverAddress, tokenInfo.TokenValue, true)
+			if err != nil {
+				w.log.Error("Failed to pin FT token",
+					"token", tokenInfo.Token,
+					"error", err)
+				continue
+			}
 		}
-
-		err = w.s.Write(FTTokenStorage, &FTInfo)
-		if err != nil {
-			w.log.Error("Failed to write FT token to db",
-				"token", tokenInfo.Token,
-				"error", err)
-			// Continue processing other tokens
-			continue
-		}
-
-		// Cleanup the download directory
-		os.RemoveAll(req.Path)
 		processedCount++
 
 		// Log progress every 10%
-		currentPercent := ((idx + 1) * 100) / len(getRequests)
-		if currentPercent >= lastLoggedPercent+10 || idx == len(getRequests)-1 {
-			w.log.Info("Phase 4 - Processing downloaded tokens progress",
+		currentPercent := ((idx + 1) * 100) / len(ti)
+		if currentPercent >= lastLoggedPercent+10 || idx == len(ti)-1 {
+			w.log.Info("Phase 4 - Processing tokens progress",
 				"percent", currentPercent,
 				"processed", idx+1,
-				"total", len(getRequests),
+				"total", len(ti),
 				"successful", processedCount)
 			lastLoggedPercent = (currentPercent / 10) * 10
 		}
 	}
 
-	// Phase 5: Process existing tokens (update status and pin)
-	pinnedCount := 0
-	lastLoggedPercent = 0
-
-	for idx, tokenInfo := range ti {
-		// For tokens that already existed, just update status
-		var FTInfo FTToken
-		err := w.s.Read(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
-		if err != nil {
-			w.log.Error("Failed to read FT token for update",
-				"token", tokenInfo.Token,
-				"error", err)
-			continue
-		}
-
-		var tokenStatus int
-		if senderPeerId != receiverPeerId {
-			tokenStatus = TokenIsPending
-		} else {
-			tokenStatus = TokenIsFree
-		}
-		
-		// Update token status
-		FTInfo.FTName = ftInfo.FTName
-		FTInfo.DID = did
-		FTInfo.TokenStatus = tokenStatus
-		FTInfo.TransactionID = b.GetTid()
-		FTInfo.TokenStateHash = tokenHashMap[tokenInfo.Token]
-
-		err = w.s.Update(FTTokenStorage, &FTInfo, "token_id=?", tokenInfo.Token)
-		if err != nil {
-			w.log.Error("Failed to update FT token in db",
-				"token", tokenInfo.Token,
-				"error", err)
-			continue
-		}
-
-		senderAddress := senderPeerId + "." + b.GetSenderDID()
-		receiverAddress := receiverPeerId + "." + b.GetReceiverDID()
-
-		// Pin the token
-		_, err = w.Pin(tokenInfo.Token, OwnerRole, did, b.GetTid(), senderAddress, receiverAddress, tokenInfo.TokenValue, true)
-		if err != nil {
-			w.log.Error("Failed to pin FT token",
-				"token", tokenInfo.Token,
-				"error", err)
-			continue
-		}
-		pinnedCount++
-
-		// Log progress every 10%
-		currentPercent := ((idx + 1) * 100) / len(ti)
-		if currentPercent >= lastLoggedPercent+10 || idx == len(ti)-1 {
-			w.log.Info("Phase 5 - Pinning and status update progress",
-				"percent", currentPercent,
-				"processed", idx+1,
-				"total", len(ti),
-				"pinned", pinnedCount)
-			lastLoggedPercent = (currentPercent / 10) * 10
-		}
-	}
-
 	w.log.Info("FT token processing completed",
-		"downloaded", processedCount,
-		"pinned", pinnedCount,
+		"downloaded", len(getRequests),
+		"processed", processedCount,
 		"total", len(ti),
 		"duration", time.Since(processStart))
 
-	// Phase 6: Handle provider details
+	// Phase 5: Handle provider details
 	providerStart := time.Now()
 	// Use async processing for 500+ tokens to ensure consistent performance
 	if len(allProviderMaps) >= 100 && w.asyncProviderMgr != nil {

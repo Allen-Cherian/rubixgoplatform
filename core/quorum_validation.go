@@ -187,6 +187,8 @@ func (c *Core) syncParentToken(p *ipfsport.Peer, pt string) (int, error) {
 			TokenValue:  tv,
 			DID:         p.GetPeerDID(),
 			TokenStatus: wallet.TokenIsBurnt,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
 		}
 		if c.TokenType(PartString) == tt {
 			gb := c.w.GetGenesisTokenBlock(pt, tt)
@@ -328,6 +330,8 @@ func (c *Core) validateSingleToken(cr *ConensusRequest, sc *contract.Contract, q
 			TokenValue:    ti.TokenValue,
 			ParentTokenID: "",
 			DID:           ti.OwnerDID,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		}
 		dbWriteSem <- struct{}{}
 		err := util.RetrySQLiteWrite(func() error {

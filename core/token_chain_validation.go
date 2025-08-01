@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rubixchain/rubixgoplatform/block"
 	"github.com/rubixchain/rubixgoplatform/core/model"
@@ -420,6 +421,8 @@ func (c *Core) ValidateParentTokenLatestBlock(parentTokenId string, userDID stri
 			TokenValue:  tokenValue,
 			TokenStatus: wallet.TokenIsBurnt,
 			DID:         tokenOwner,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
 		}
 	}
 

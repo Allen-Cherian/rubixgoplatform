@@ -560,6 +560,8 @@ func (c *Core) migrateNode(reqID string, m *MigrateRequest, didDir string) error
 							DID:         did,
 							TokenValue:  1,
 							TokenStatus: wallet.TokenIsFree,
+							CreatedAt:   time.Now(),
+							UpdatedAt:   time.Now(),
 						}
 						err = c.w.CreateToken(tkn)
 						if err != nil {

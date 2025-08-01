@@ -811,6 +811,8 @@ func (w *Wallet) TokensReceived(did string, ti []contract.TokenInfo, b *block.Bl
 				TokenValue:    tokenInfo.TokenValue,
 				ParentTokenID: parentTokenID,
 				DID:           tokenInfo.OwnerDID,
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
 			}
 
 			err = w.s.Write(TokenStorage, &t)
