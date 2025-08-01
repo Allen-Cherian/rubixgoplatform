@@ -55,15 +55,17 @@ const (
 )
 
 type Token struct {
-	TokenID        string  `gorm:"column:token_id;primaryKey"`
-	ParentTokenID  string  `gorm:"column:parent_token_id"`
-	TokenValue     float64 `gorm:"column:token_value"`
-	DID            string  `gorm:"column:did"`
-	TokenStatus    int     `gorm:"column:token_status;"`
-	TokenStateHash string  `gorm:"column:token_state_hash"`
-	TransactionID  string  `gorm:"column:transaction_id"`
-	Added          bool    `gorm:"column:added"`
-	SyncStatus     int     `gorm:"column:sync_status"`
+	TokenID        string    `gorm:"column:token_id;primaryKey"`
+	ParentTokenID  string    `gorm:"column:parent_token_id"`
+	TokenValue     float64   `gorm:"column:token_value"`
+	DID            string    `gorm:"column:did"`
+	TokenStatus    int       `gorm:"column:token_status;"`
+	TokenStateHash string    `gorm:"column:token_state_hash"`
+	TransactionID  string    `gorm:"column:transaction_id"`
+	Added          bool      `gorm:"column:added"`
+	SyncStatus     int       `gorm:"column:sync_status"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (w *Wallet) CreateToken(t *Token) error {

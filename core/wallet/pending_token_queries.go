@@ -10,14 +10,12 @@ func (w *Wallet) GetPendingFTTokensOlderThan(duration time.Duration) (map[string
 	w.l.Lock()
 	defer w.l.Unlock()
 	
-	// Query for pending FT tokens
-	// Note: FTToken doesn't have updated_at column, so we can't filter by time
-	// For now, return all pending tokens regardless of age
-	// TODO: Add timestamp tracking to FTToken table for better filtering
+	// Query for pending FT tokens older than the specified duration
+	cutoffTime := time.Now().Add(-duration)
 	var pendingTokens []FTToken
 	err := w.s.Read(FTTokenStorage, &pendingTokens, 
-		"token_status = ?", 
-		TokenIsPending)
+		"token_status = ? AND created_at < ?", 
+		TokenIsPending, cutoffTime)
 	
 	if err != nil {
 		// No pending tokens found is not an error
@@ -44,14 +42,12 @@ func (w *Wallet) GetPendingTokensOlderThan(duration time.Duration) (map[string][
 	w.l.Lock()
 	defer w.l.Unlock()
 	
-	// Query for pending tokens
-	// Note: Token doesn't have updated_at column, so we can't filter by time
-	// For now, return all pending tokens regardless of age
-	// TODO: Add timestamp tracking to Token table for better filtering
+	// Query for pending tokens older than the specified duration
+	cutoffTime := time.Now().Add(-duration)
 	var pendingTokens []Token
 	err := w.s.Read(TokenStorage, &pendingTokens, 
-		"token_status = ?", 
-		TokenIsPending)
+		"token_status = ? AND created_at < ?", 
+		TokenIsPending, cutoffTime)
 	
 	if err != nil {
 		// No pending tokens found is not an error
