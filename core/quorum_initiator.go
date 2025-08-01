@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -1081,11 +1082,45 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 		receiverAddr := cr.ReceiverPeerID + "." + sc.GetReceiverDID()
 		if cr.SenderPeerID != cr.ReceiverPeerID {
 			go func() {
-				backoff := 30 * time.Second
-				maxBackoff := 3 * time.Hour
-				maxRetries := 15
+				// Calculate initial delay based on token count to allow receiver processing
+				tokenCount := len(ti)
+				initialDelay := 10 * time.Second
+				if tokenCount > 5000 {
+					initialDelay = 60 * time.Second
+				} else if tokenCount > 1000 {
+					initialDelay = 30 * time.Second
+				}
+				
+				// Sleep before first attempt to let receiver process
+				c.log.Info("Waiting for receiver to process tokens before confirmation",
+					"delay", initialDelay,
+					"token_count", tokenCount)
+				time.Sleep(initialDelay)
+				
+				// Adaptive retry parameters based on token count
+				backoff := 20 * time.Second
+				if tokenCount > 1000 {
+					backoff = 30 * time.Second
+				}
+				maxBackoff := 5 * time.Minute
+				maxRetries := 10
+				totalTimeout := 30 * time.Minute
+				
+				// Create timeout context
+				ctx, cancel := context.WithTimeout(context.Background(), totalTimeout)
+				defer cancel()
 				
 				for currAttempt := 1; currAttempt <= maxRetries; currAttempt++ {
+					// Check if context is cancelled
+					select {
+					case <-ctx.Done():
+						c.log.Warn("Token confirmation cancelled due to timeout",
+							"receiver", receiverAddr,
+							"transaction_id", tid,
+							"attempt", currAttempt)
+						return
+					default:
+					}
 					err = c.sendTokenConfirmation(receiverAddr, tid, ti, tkn.FTTokenType)
 					if err != nil {
 						c.log.Error(fmt.Sprintf(
@@ -1095,7 +1130,22 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 							receiverAddr,
 						))
 						
-						time.Sleep(backoff)
+						// If this is the last attempt, log the final error
+						if currAttempt == maxRetries {
+							c.log.Error("Failed to send FT token confirmation after all retries",
+								"receiver", receiverAddr,
+								"transaction_id", tid,
+								"attempts", maxRetries,
+								"error", err)
+						}
+						
+						// Wait with context awareness
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(backoff):
+						}
+						
 						backoff = time.Duration(float64(backoff) * 1.5)
 						if backoff > maxBackoff {
 							backoff = maxBackoff
