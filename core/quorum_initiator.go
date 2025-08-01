@@ -1099,9 +1099,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				case tokenCount <= 5000:
 					// For larger counts, use original conservative approach
 					initialDelay = 30 * time.Second
+				case tokenCount <= 10000:
+					// Scale up for very large transfers (assuming ~130ms per token processing)
+					initialDelay = 90 * time.Second
 				default:
-					// Very large transfers remain very conservative
-					initialDelay = 60 * time.Second
+					// Extremely large transfers need significant time
+					initialDelay = 180 * time.Second
 				}
 				
 				// Sleep before first attempt to let receiver process
@@ -1119,9 +1122,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				case tokenCount <= 1000:
 					// 5s + (count * 5ms), so 1000 tokens = 10s, 500 tokens = 7.5s
 					backoff = 5*time.Second + time.Duration(tokenCount*5)*time.Millisecond
+				case tokenCount <= 10000:
+					// Larger transfers need more time between retries
+					backoff = 60 * time.Second
 				default:
-					// Keep conservative for larger transfers
-					backoff = 30 * time.Second
+					// Very large transfers need significant retry spacing
+					backoff = 120 * time.Second
 				}
 				
 				maxBackoff := 5 * time.Minute
