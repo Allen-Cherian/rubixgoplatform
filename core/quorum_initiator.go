@@ -498,12 +498,12 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 	c.quorumRequest[cr.ReqID] = &cs
 	c.pd[cr.ReqID] = &pd
 	c.qlock.Unlock()
-	// defer func() {
-	// 	c.qlock.Lock()
-	// 	delete(c.quorumRequest, cr.ReqID)
-	// 	delete(c.pd, cr.ReqID)
-	// 	c.qlock.Unlock()
-	// }()
+	defer func() {
+		c.qlock.Lock()
+		delete(c.quorumRequest, cr.ReqID)
+		delete(c.pd, cr.ReqID)
+		c.qlock.Unlock()
+	}()
 
 	c.quorumCount = QuorumRequired - len(cr.QuorumList)
 	c.noBalanceQuorumCount = QuorumRequired - len(cr.QuorumList)
