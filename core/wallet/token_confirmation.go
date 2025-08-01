@@ -27,6 +27,14 @@ func (w *Wallet) ConfirmPendingTokens(txID string, tokenIDs []string) error {
 		}
 		
 		if t.TokenStatus != TokenIsPending {
+			// If token is already free, it's not an error - just skip it
+			if t.TokenStatus == TokenIsFree {
+				w.log.Debug("Token already confirmed",
+					"token_id", tokenID,
+					"current_status", t.TokenStatus)
+				confirmedCount++
+				continue
+			}
 			w.log.Warn("Token not in pending state",
 				"token_id", tokenID,
 				"current_status", t.TokenStatus,
@@ -75,6 +83,14 @@ func (w *Wallet) ConfirmPendingFTTokens(txID string, tokenIDs []string) error {
 		}
 		
 		if ft.TokenStatus != TokenIsPending {
+			// If token is already free, it's not an error - just skip it
+			if ft.TokenStatus == TokenIsFree {
+				w.log.Debug("FT token already confirmed",
+					"token_id", tokenID,
+					"current_status", ft.TokenStatus)
+				confirmedCount++
+				continue
+			}
 			w.log.Warn("FT token not in pending state",
 				"token_id", tokenID,
 				"current_status", ft.TokenStatus,
