@@ -1102,29 +1102,39 @@ func (c *Core) initiateConsensus(cr *ConensusRequest, sc *contract.Contract, dc 
 				tokenCount := len(ti)
 				var initialDelay time.Duration
 				
-				// Delay calculation based on observed parallel processing performance
-				// From logs: ~12.5 tokens/second for 101 tokens
-				// Add minimal buffer since receiver confirms as it processes
+				// Since we already waited for explorer submission, receiver has had time to start processing
+				// Use more realistic delays based on observed parallel performance
 				baseDelay := 2 * time.Second // Network latency + setup
 				
-				// Simple linear scaling with observed performance
-				// Using 10 tokens/sec as conservative estimate
-				processingTime := time.Duration(tokenCount/10) * time.Second
+				// Adjusted processing time based on parallel receiver performance
+				// Observed: ~12.5 tokens/second with parallel processing
+				// Use 15 tokens/sec for calculation since receiver started during explorer wait
+				processingTime := time.Duration(tokenCount/15) * time.Second
 				
-				// Add small buffer based on token count
+				// Reduced buffer since we already waited for explorer
 				var buffer time.Duration
 				switch {
 				case tokenCount <= 100:
-					buffer = 1 * time.Second
+					buffer = 500 * time.Millisecond
 				case tokenCount <= 1000:
-					buffer = 3 * time.Second
+					buffer = 1 * time.Second
 				case tokenCount <= 5000:
-					buffer = 5 * time.Second
+					buffer = 2 * time.Second
 				default:
-					buffer = 10 * time.Second
+					buffer = 3 * time.Second
 				}
 				
 				initialDelay = baseDelay + processingTime + buffer
+				
+				// Cap maximum delay at 30 seconds since we already waited for explorer
+				maxDelay := 30 * time.Second
+				if initialDelay > maxDelay {
+					c.log.Info("Capping confirmation delay to maximum",
+						"calculated_delay", initialDelay,
+						"max_delay", maxDelay,
+						"token_count", tokenCount)
+					initialDelay = maxDelay
+				}
 				
 				// Sleep before first attempt to let receiver process
 				c.log.Info("Waiting for receiver to process tokens before confirmation",
