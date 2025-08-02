@@ -67,22 +67,42 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 	}
 	
 	// Count available FTs without loading all into memory
-	// Since we don't have a Count method, we'll count manually with a query
-	var fts []wallet.FTToken
-	query := "ft_name=? AND token_status=? AND owner_did=?"
-	args := []interface{}{req.FTName, wallet.TokenIsFree, did}
+	// Use pagination to count in batches
+	countBatchSize := 1000
+	offset := 0
 	
-	if creatorDID != "" {
-		query += " AND creator_did=?"
-		args = append(args, creatorDID)
+	for {
+		var fts []wallet.FTToken
+		query := "ft_name=? AND token_status=? AND owner_did=?"
+		args := []interface{}{req.FTName, wallet.TokenIsFree, did}
+		
+		if creatorDID != "" {
+			query += " AND creator_did=?"
+			args = append(args, creatorDID)
+		}
+		
+		// Add LIMIT and OFFSET for counting in batches
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, countBatchSize, offset)
+		
+		err := ofs.c.s.Read(wallet.FTTokenStorage, &fts, query, args...)
+		if err != nil {
+			return 0, "", fmt.Errorf("failed to count available FTs: %v", err)
+		}
+		
+		batchCount := len(fts)
+		count += batchCount
+		
+		// If we got less than batch size, we've reached the end
+		if batchCount < countBatchSize {
+			break
+		}
+		
+		offset += countBatchSize
+		
+		// Clear the batch from memory
+		fts = nil
 	}
-	
-	// Read with limit 0 to just get count
-	err := ofs.c.s.Read(wallet.FTTokenStorage, &fts, query, args...)
-	if err != nil {
-		return 0, "", fmt.Errorf("failed to count available FTs: %v", err)
-	}
-	count = len(fts)
 	
 	return count, creatorDID, nil
 }
@@ -92,7 +112,8 @@ func (ofs *OptimizedFTSender) batchFetchAndLockTokens(req *model.TransferFTReq, 
 	startTime := time.Now()
 	const batchSize = 500 // Process 500 tokens at a time to limit memory usage
 	
-	tokenInfos := make([]contract.TokenInfo, 0, req.FTCount)
+	// Don't pre-allocate full capacity to save memory
+	tokenInfos := make([]contract.TokenInfo, 0)
 	processedCount := 0
 	
 	for processedCount < req.FTCount {
