@@ -1011,12 +1011,8 @@ func (c *Core) UnlockFTs() error {
 
 // Helper to check config flag
 func (c *Core) IsAsyncFTResponse() bool {
-	// Default to true for better performance, can be overridden by config
-	if c.cfg.CfgData.AsyncFTResponse {
-		return true
-	}
-	// For backward compatibility, default to true even if not set
-	return true
+	// Return the actual config value
+	return c.cfg.CfgData.AsyncFTResponse
 }
 
 // FixAllFTTokensWithPeerIDAsCreator fixes all FT tokens that have peer ID as CreatorDID
