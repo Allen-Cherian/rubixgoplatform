@@ -779,6 +779,12 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 			return
 		}
 		
+		// Store in new FT transaction history table
+		if err := c.w.AddFTTransactionHistory(td, req.FTName, creatorDID, req.FTCount); err != nil {
+			c.log.Error("Failed to store FT transaction history", "err", err)
+			// Don't fail the transaction, just log the error
+		}
+		
 		// Store FT token metadata for sent transactions
 		if err := c.w.AddFTTransactionTokens(td.TransactionID, creatorDID, req.FTName, req.FTCount, "sent"); err != nil {
 			c.log.Error("Failed to store FT transaction token metadata", "err", err)
