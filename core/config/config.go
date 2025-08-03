@@ -62,6 +62,7 @@ type ConfigData struct {
 func NewDefaultConfigData() ConfigData {
 	return ConfigData{
 		AsyncFTResponse: true,
+		EnableOptimizedUnpledge: true,
 	}
 }
 
