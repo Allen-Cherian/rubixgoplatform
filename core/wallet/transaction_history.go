@@ -157,8 +157,42 @@ func (w *Wallet) GetTransactionByDIDAndDateRange(did string, startDate time.Time
 // }
 
 func (w *Wallet) GetAllFTTransactionDetailsByDID(did string) ([]model.TransactionDetails, error) {
+	// Try new FT transaction history table first
+	ftHistories, err := w.GetAllFTTransactionsByDID(did)
+	if err == nil && len(ftHistories) > 0 {
+		// Convert to TransactionDetails format
+		var ftTransactions []model.TransactionDetails
+		for _, ft := range ftHistories {
+			td := model.TransactionDetails{
+				TransactionID:   ft.TransactionID,
+				TransactionType: ft.TransactionType,
+				BlockID:         ft.BlockID,
+				Mode:            ft.Mode,
+				SenderDID:       ft.SenderDID,
+				ReceiverDID:     ft.ReceiverDID,
+				Amount:          ft.Amount,
+				TotalTime:       ft.TotalTime,
+				Comment:         ft.Comment,
+				DateTime:        ft.DateTime,
+				Status:          ft.Status,
+				DeployerDID:     ft.DeployerDID,
+				Epoch:           ft.Epoch,
+				Tokens: []model.FTTokenSummary{
+					{
+						CreatorDID: ft.CreatorDID,
+						FTName:     ft.FTName,
+						Count:      ft.TokenCount,
+					},
+				},
+			}
+			ftTransactions = append(ftTransactions, td)
+		}
+		return ftTransactions, nil
+	}
+	
+	// Fallback to old method
 	var ftTransactions []model.TransactionDetails
-	err := w.s.Read(TransactionStorage, &ftTransactions, "mode=? AND (sender_did=? OR receiver_did=?)", FTTransferMode, did, did)
+	err = w.s.Read(TransactionStorage, &ftTransactions, "mode=? AND (sender_did=? OR receiver_did=?)", FTTransferMode, did, did)
 	if err != nil {
 		w.log.Error("Failed to get FT transaction details with did", did, "err", err)
 		return nil, err
@@ -189,8 +223,42 @@ func (w *Wallet) GetAllFTTransactionDetailsByDID(did string) ([]model.Transactio
 }
 
 func (w *Wallet) GetFTTransactionByReceiver(receiver string) ([]model.TransactionDetails, error) {
+	// Try new FT transaction history table first
+	ftHistories, err := w.GetFTTransactionsByReceiver(receiver)
+	if err == nil && len(ftHistories) > 0 {
+		// Convert to TransactionDetails format
+		var ftTransactions []model.TransactionDetails
+		for _, ft := range ftHistories {
+			td := model.TransactionDetails{
+				TransactionID:   ft.TransactionID,
+				TransactionType: ft.TransactionType,
+				BlockID:         ft.BlockID,
+				Mode:            ft.Mode,
+				SenderDID:       ft.SenderDID,
+				ReceiverDID:     ft.ReceiverDID,
+				Amount:          ft.Amount,
+				TotalTime:       ft.TotalTime,
+				Comment:         ft.Comment,
+				DateTime:        ft.DateTime,
+				Status:          ft.Status,
+				DeployerDID:     ft.DeployerDID,
+				Epoch:           ft.Epoch,
+				Tokens: []model.FTTokenSummary{
+					{
+						CreatorDID: ft.CreatorDID,
+						FTName:     ft.FTName,
+						Count:      ft.TokenCount,
+					},
+				},
+			}
+			ftTransactions = append(ftTransactions, td)
+		}
+		return ftTransactions, nil
+	}
+	
+	// Fallback to old method
 	var ftTransactions []model.TransactionDetails
-	err := w.s.Read(TransactionStorage, &ftTransactions, "receiver_did=? AND mode=?", receiver, FTTransferMode)
+	err = w.s.Read(TransactionStorage, &ftTransactions, "receiver_did=? AND mode=?", receiver, FTTransferMode)
 	if err != nil {
 		w.log.Error("Failed to get transaction details with did as Receiver ", "err", err)
 		return nil, err
@@ -221,9 +289,43 @@ func (w *Wallet) GetFTTransactionByReceiver(receiver string) ([]model.Transactio
 }
 
 func (w *Wallet) GetFTTransactionBySender(sender string) ([]model.TransactionDetails, error) {
+	// Try new FT transaction history table first
+	ftHistories, err := w.GetFTTransactionsBySender(sender)
+	if err == nil && len(ftHistories) > 0 {
+		// Convert to TransactionDetails format
+		var ftTransactions []model.TransactionDetails
+		for _, ft := range ftHistories {
+			td := model.TransactionDetails{
+				TransactionID:   ft.TransactionID,
+				TransactionType: ft.TransactionType,
+				BlockID:         ft.BlockID,
+				Mode:            ft.Mode,
+				SenderDID:       ft.SenderDID,
+				ReceiverDID:     ft.ReceiverDID,
+				Amount:          ft.Amount,
+				TotalTime:       ft.TotalTime,
+				Comment:         ft.Comment,
+				DateTime:        ft.DateTime,
+				Status:          ft.Status,
+				DeployerDID:     ft.DeployerDID,
+				Epoch:           ft.Epoch,
+				Tokens: []model.FTTokenSummary{
+					{
+						CreatorDID: ft.CreatorDID,
+						FTName:     ft.FTName,
+						Count:      ft.TokenCount,
+					},
+				},
+			}
+			ftTransactions = append(ftTransactions, td)
+		}
+		return ftTransactions, nil
+	}
+	
+	// Fallback to old method
 	var ftTransactions []model.TransactionDetails
 
-	err := w.s.Read(TransactionStorage, &ftTransactions, "sender_did=? AND mode=?", sender, FTTransferMode)
+	err = w.s.Read(TransactionStorage, &ftTransactions, "sender_did=? AND mode=?", sender, FTTransferMode)
 	if err != nil {
 		w.log.Error("Failed to get transaction details with did as sender", "err", err)
 		return nil, err
