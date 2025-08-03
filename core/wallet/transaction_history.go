@@ -301,16 +301,11 @@ func (w *Wallet) getFTTokenSummariesGroupedByTransactionID() (map[string][]model
 	// Fall back to reading from FTTokenStorage for backward compatibility
 	w.log.Debug("Falling back to FTTokenStorage for backward compatibility")
 	
-	type FTToken struct {
-		TransactionID string `gorm:"column:transaction_id"`
-		CreatorDID    string `gorm:"column:creator_did"`
-		FTName        string `gorm:"column:ft_name"`
-	}
-
 	var allTokens []FTToken
 
 	err = w.s.Read(FTTokenStorage, &allTokens, "1 = 1")
 	if err != nil {
+		w.log.Error("Failed to read from FTTokenStorage", "error", err)
 		return nil, fmt.Errorf("failed to read FT tokens: %w", err)
 	}
 
@@ -322,6 +317,11 @@ func (w *Wallet) getFTTokenSummariesGroupedByTransactionID() (map[string][]model
 	grouped := make(map[string]map[string]*model.FTTokenSummary)
 
 	for _, token := range allTokens {
+		// Skip tokens without transaction ID
+		if token.TransactionID == "" {
+			continue
+		}
+		
 		txID := token.TransactionID
 		key := token.CreatorDID + "|" + token.FTName
 
