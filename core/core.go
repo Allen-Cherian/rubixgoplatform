@@ -586,6 +586,11 @@ func (c *Core) updateConfig() error {
 	return nil
 }
 
+// GetConfig returns the core configuration
+func (c *Core) GetConfig() *config.Config {
+	return c.cfg
+}
+
 func (c *Core) AddWebReq(req *ensweb.Request) {
 	c.rlock.Lock()
 	defer c.rlock.Unlock()

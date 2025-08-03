@@ -34,6 +34,16 @@ type IPFSRecoveryConfig struct {
 	MonitorInterval time.Duration `json:"monitor_interval"` // Health monitoring interval
 }
 
+// UnpledgePoolConfig defines unpledge worker pool configuration
+type UnpledgePoolConfig struct {
+	MaxWorkers        int           `json:"max_workers"`
+	QueueSize         int           `json:"queue_size"`
+	BatchSize         int           `json:"batch_size"`
+	TokenConcurrency  int           `json:"token_concurrency"`
+	ShutdownTimeout   time.Duration `json:"shutdown_timeout"`
+	EnableMetrics     bool          `json:"enable_metrics"`
+}
+
 // ConfigData defines configuration data
 type ConfigData struct {
 	Ports             Ports              `json:"ports"`
@@ -45,6 +55,8 @@ type ConfigData struct {
 	AsyncFTResponse   bool               `json:"async_ft_response"`
 	IPFSRecovery      *IPFSRecoveryConfig `json:"ipfs_recovery"`
 	TrustedNetwork    bool               `json:"trusted_network"` // Skip DHT/pin checks for trusted networks
+	UnpledgeConfig    *UnpledgePoolConfig `json:"unpledge_config"`
+	EnableOptimizedUnpledge bool         `json:"enable_optimized_unpledge"`
 }
 
 func NewDefaultConfigData() ConfigData {
