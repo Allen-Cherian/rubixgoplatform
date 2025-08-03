@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rubixchain/rubixgoplatform/core/model"
@@ -24,6 +25,39 @@ func (w *Wallet) AddTransactionHistory(td *model.TransactionDetails) error {
 	} else {
 		w.log.Info("Transaction history added", "transaction_id", td.TransactionID)
 	}
+	return nil
+}
+
+// AddFTTransactionTokens stores FT token metadata for a transaction
+func (w *Wallet) AddFTTransactionTokens(transactionID string, creatorDID string, ftName string, tokenCount int, direction string) error {
+	ftTxToken := &model.FTTransactionToken{
+		TransactionID: transactionID,
+		CreatorDID:    creatorDID,
+		FTName:        ftName,
+		TokenCount:    tokenCount,
+		Direction:     direction,
+		CreatedAt:     time.Now(),
+	}
+	
+	err := w.s.Write(FTTransactionTokenStorage, ftTxToken)
+	if err != nil {
+		// Check if it's a table doesn't exist error
+		if strings.Contains(err.Error(), "no such table") {
+			w.log.Warn("FT transaction token table doesn't exist, skipping metadata storage", "err", err)
+			// Don't fail the transaction for backward compatibility
+			return nil
+		}
+		w.log.Error("Failed to store FT transaction token metadata", "err", err)
+		// Still don't fail the transaction, just log the error
+		return nil
+	}
+	
+	w.log.Debug("FT transaction token metadata stored", 
+		"transaction_id", transactionID,
+		"ft_name", ftName,
+		"token_count", tokenCount,
+		"direction", direction)
+	
 	return nil
 }
 
@@ -220,6 +254,53 @@ func (w *Wallet) GetFTTransactionBySender(sender string) ([]model.TransactionDet
 }
 
 func (w *Wallet) getFTTokenSummariesGroupedByTransactionID() (map[string][]model.FTTokenSummary, error) {
+	// First try to read from the new FTTransactionTokenStorage (historical data)
+	var txTokens []model.FTTransactionToken
+	err := w.s.Read(FTTransactionTokenStorage, &txTokens, "1 = 1")
+	
+	if err != nil && !strings.Contains(err.Error(), "no such table") {
+		return nil, fmt.Errorf("failed to read FT transaction tokens: %w", err)
+	}
+
+	// If we have transaction token data, use it
+	if err == nil && len(txTokens) > 0 {
+		// Group tokens by transaction_id and aggregate by creator_did, ft_name
+		grouped := make(map[string]map[string]*model.FTTokenSummary)
+
+		for _, token := range txTokens {
+			txID := token.TransactionID
+			key := token.CreatorDID + "|" + token.FTName
+
+			if _, exists := grouped[txID]; !exists {
+				grouped[txID] = make(map[string]*model.FTTokenSummary)
+			}
+
+			if summary, exists := grouped[txID][key]; exists {
+				// Add the token count from the stored record
+				summary.Count += token.TokenCount
+			} else {
+				grouped[txID][key] = &model.FTTokenSummary{
+					CreatorDID: token.CreatorDID,
+					FTName:     token.FTName,
+					Count:      token.TokenCount,
+				}
+			}
+		}
+
+		// Convert inner maps to slices
+		finalResult := make(map[string][]model.FTTokenSummary)
+		for txID, tokenMap := range grouped {
+			for _, summary := range tokenMap {
+				finalResult[txID] = append(finalResult[txID], *summary)
+			}
+		}
+
+		return finalResult, nil
+	}
+
+	// Fall back to reading from FTTokenStorage for backward compatibility
+	w.log.Debug("Falling back to FTTokenStorage for backward compatibility")
+	
 	type FTToken struct {
 		TransactionID string `gorm:"column:transaction_id"`
 		CreatorDID    string `gorm:"column:creator_did"`
@@ -228,7 +309,7 @@ func (w *Wallet) getFTTokenSummariesGroupedByTransactionID() (map[string][]model
 
 	var allTokens []FTToken
 
-	err := w.s.Read(FTTokenStorage, &allTokens, "1 = 1")
+	err = w.s.Read(FTTokenStorage, &allTokens, "1 = 1")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read FT tokens: %w", err)
 	}

@@ -1698,6 +1698,15 @@ func (c *Core) updateFTToken(senderAddress string, receiverAddress string, token
 		if err != nil {
 			c.log.Error("failed to add transaction history on the receiver", "err", err)
 		}
+		
+		// Store FT token metadata for received transactions
+		// For now, use the sender DID as creator DID since we might not have 
+		// the actual creator DID in ftinfo. This can be improved later.
+		creatorDID := sc.GetSenderDID()
+		if err := c.w.AddFTTransactionTokens(td.TransactionID, creatorDID, ftinfo.FTName, len(tokenInfo), "received"); err != nil {
+			c.log.Error("Failed to store FT transaction token metadata on receiver", "err", err)
+			// Don't fail the transaction, just log the error
+		}
 	}
 	//Adding quorums to DIDPeerTable of receiver
 	for _, qrm := range quorumInfo {
