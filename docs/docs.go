@@ -1253,7 +1253,7 @@ const docTemplate = `{
         },
         "/api/sign": {
             "post": {
-                "description": "Accepts a DID and message hash to request an arbitrary signature asynchronously.",
+                "description": "Accepts a DID and message to request an arbitrary signature asynchronously.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1444,7 +1444,7 @@ const docTemplate = `{
         },
         "/api/verify-signature": {
             "get": {
-                "description": "Verifies a signature for a given DID and signed message hash.",
+                "description": "Verifies a signature for a given DID and signed message.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1460,14 +1460,14 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "DID of the signer",
-                        "name": "did",
+                        "name": "signer_did",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Signed message hash",
-                        "name": "msg_hash",
+                        "description": "Signed message",
+                        "name": "signed_msg",
                         "in": "query",
                         "required": true
                     },
@@ -1500,10 +1500,10 @@ const docTemplate = `{
         "model.ArbitrarySignRequest": {
             "type": "object",
             "properties": {
-                "did": {
+                "msg_to_sign": {
                     "type": "string"
                 },
-                "msg_hash": {
+                "signer_did": {
                     "type": "string"
                 }
             }

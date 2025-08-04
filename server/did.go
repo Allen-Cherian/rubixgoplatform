@@ -302,7 +302,7 @@ func (s *Server) APICreateDIDFromPubKey(req *ensweb.Request) *ensweb.Result {
 
 // arbitrary signature API
 // @Summary     Request Arbitrary Signature
-// @Description Accepts a DID and message hash to request an arbitrary signature asynchronously.
+// @Description Accepts a DID and message to request an arbitrary signature asynchronously.
 // @Tags        Signature
 // @ID          arbitrary-signature
 // @Accept      json
@@ -326,13 +326,13 @@ func (s *Server) APIArbitrarySignature(req *ensweb.Request) *ensweb.Result {
 
 // arbitrary signature verification API
 // @Summary     Verify Arbitrary Signature
-// @Description Verifies a signature for a given DID and signed message hash.
+// @Description Verifies a signature for a given DID and signed message.
 // @Tags        Signature
 // @ID          verify-arbitrary-signature
 // @Accept      json
 // @Produce     json
-// @Param       did        query string true "DID of the signer"
-// @Param       msg_hash   query string true "Signed message hash"
+// @Param       signer_did        query string true "DID of the signer"
+// @Param       signed_msg   query string true "Signed message"
 // @Param       signature  query string true "Signature to verify"
 // @Success     200 {object} model.BasicResponse
 // @Failure     400 {object} model.BasicResponse

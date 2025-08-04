@@ -1,9 +1,9 @@
 definitions:
   model.ArbitrarySignRequest:
     properties:
-      did:
+      msg_to_sign:
         type: string
-      msg_hash:
+      signer_did:
         type: string
     type: object
   model.BasicResponse:
@@ -1133,8 +1133,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Accepts a DID and message hash to request an arbitrary signature
-        asynchronously.
+      description: Accepts a DID and message to request an arbitrary signature asynchronously.
       operationId: arbitrary-signature
       parameters:
       - description: Arbitrary Signature Request
@@ -1261,17 +1260,17 @@ paths:
     get:
       consumes:
       - application/json
-      description: Verifies a signature for a given DID and signed message hash.
+      description: Verifies a signature for a given DID and signed message.
       operationId: verify-arbitrary-signature
       parameters:
       - description: DID of the signer
         in: query
-        name: did
+        name: signer_did
         required: true
         type: string
-      - description: Signed message hash
+      - description: Signed message
         in: query
-        name: msg_hash
+        name: signed_msg
         required: true
         type: string
       - description: Signature to verify
