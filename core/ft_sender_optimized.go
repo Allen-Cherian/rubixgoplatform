@@ -112,6 +112,41 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 		if err != nil {
 			// Check if this is just "no records found" - which means we've processed all tokens
 			if err.Error() == "no records found" {
+				// If this is the first batch, it means no tokens are available
+				if offset == 0 {
+					ofs.c.log.Info("No available FT tokens found", 
+						"ft_name", req.FTName, 
+						"owner_did", did,
+						"creator_did", creatorDID,
+						"token_status", wallet.TokenIsFree)
+					
+					// Let's check if there are any tokens at all (regardless of status)
+					var allTokens []wallet.FTToken
+					checkQuery := "ft_name=? AND owner_did=?"
+					checkArgs := []interface{}{req.FTName, did}
+					if creatorDID != "" {
+						checkQuery += " AND creator_did=?"
+						checkArgs = append(checkArgs, creatorDID)
+					}
+					checkQuery += " LIMIT 10"
+					
+					checkErr := ofs.c.s.Read(wallet.FTTokenStorage, &allTokens, checkQuery, checkArgs...)
+					if checkErr == nil && len(allTokens) > 0 {
+						ofs.c.log.Info("Found tokens but none are free",
+							"total_found", len(allTokens),
+							"first_token_status", allTokens[0].TokenStatus,
+							"sample_statuses", func() []int {
+								statuses := make([]int, 0, len(allTokens))
+								for _, t := range allTokens {
+									statuses = append(statuses, t.TokenStatus)
+								}
+								return statuses
+							}())
+					}
+					
+					return 0, creatorDID, nil
+				}
+				// Otherwise, we've just reached the end of available tokens
 				break
 			}
 			return 0, "", fmt.Errorf("failed to count available FTs: %v", err)
