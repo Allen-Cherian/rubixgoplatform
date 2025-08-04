@@ -34,33 +34,52 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 	var count int
 	var creatorDID string
 	
+	ofs.c.log.Debug("Starting FT availability check", "ft_name", req.FTName, "requested_count", req.FTCount)
+	
 	// First check if we need to determine creator DID
 	if req.CreatorDID == "" {
 		info, err := ofs.c.GetFTInfoByDID(did)
 		if err != nil {
+			// If no FT info found, it means no FTs exist for this user
+			if err.Error() == "no records found" {
+				return 0, "", fmt.Errorf("no FT tokens found for the specified FT name: %s", req.FTName)
+			}
 			return 0, "", fmt.Errorf("failed to get FT info: %v", err)
 		}
 		
 		// Check for multiple creators for the same FT name
-		ftNameToCreators := make(map[string][]string)
+		ftNameToCreators := make(map[string]map[string]bool)
 		for _, ft := range info {
 			if ft.FTName == req.FTName {
-				ftNameToCreators[ft.FTName] = append(ftNameToCreators[ft.FTName], ft.CreatorDID)
+				if ftNameToCreators[ft.FTName] == nil {
+					ftNameToCreators[ft.FTName] = make(map[string]bool)
+				}
+				ftNameToCreators[ft.FTName][ft.CreatorDID] = true
 			}
 		}
 		
 		for ftName, creators := range ftNameToCreators {
 			if len(creators) > 1 {
-				return 0, "", fmt.Errorf("multiple creators found for FT %s, use -creatorDID flag", ftName)
+				creatorList := make([]string, 0, len(creators))
+				for creator := range creators {
+					creatorList = append(creatorList, creator)
+				}
+				return 0, "", fmt.Errorf("multiple creators found for FT %s: %v, use -creatorDID flag", ftName, creatorList)
 			}
 		}
 		
 		// Get the creator DID for this FT
+		foundFT := false
 		for _, ft := range info {
 			if ft.FTName == req.FTName {
 				creatorDID = ft.CreatorDID
+				foundFT = true
 				break
 			}
+		}
+		
+		if !foundFT {
+			return 0, "", fmt.Errorf("FT with name %s not found", req.FTName)
 		}
 	} else {
 		creatorDID = req.CreatorDID
@@ -70,6 +89,8 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 	// Use pagination to count in batches
 	countBatchSize := 1000
 	offset := 0
+	
+	ofs.c.log.Debug("Counting available FTs", "creator_did", creatorDID)
 	
 	for {
 		var fts []wallet.FTToken
@@ -85,8 +106,14 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 		query += " LIMIT ? OFFSET ?"
 		args = append(args, countBatchSize, offset)
 		
+		ofs.c.log.Debug("Counting batch", "offset", offset, "limit", countBatchSize)
+		
 		err := ofs.c.s.Read(wallet.FTTokenStorage, &fts, query, args...)
 		if err != nil {
+			// Check if this is just "no records found" - which means we've processed all tokens
+			if err.Error() == "no records found" {
+				break
+			}
 			return 0, "", fmt.Errorf("failed to count available FTs: %v", err)
 		}
 		
@@ -103,6 +130,8 @@ func (ofs *OptimizedFTSender) streamingCheckFTAvailability(req *model.TransferFT
 		// Clear the batch from memory
 		fts = nil
 	}
+	
+	ofs.c.log.Info("FT availability check completed", "total_available", count, "requested", req.FTCount)
 	
 	return count, creatorDID, nil
 }
@@ -146,6 +175,10 @@ func (ofs *OptimizedFTSender) batchFetchAndLockTokens(req *model.TransferFTReq, 
 		var batchTokens []wallet.FTToken
 		err := ofs.c.s.Read(wallet.FTTokenStorage, &batchTokens, query, args...)
 		if err != nil {
+			// Check if this is just "no records found" - which means we've processed all tokens
+			if err.Error() == "no records found" {
+				break
+			}
 			// Rollback previously locked tokens
 			ofs.rollbackLockedTokens(tokenInfos)
 			return nil, fmt.Errorf("failed to fetch token batch: %v", err)
