@@ -613,6 +613,18 @@ func (pfr *ParallelFTReceiver) processSingleToken(
 	if item.IsNewToken && item.DownloadResult != nil {
 		if item.DownloadResult.Error != nil {
 			result.Error = fmt.Errorf("download failed: %w", item.DownloadResult.Error)
+			
+			// Record failed download for retry
+			pfr.w.RecordFailedFTDownload(
+				b.GetTid(),
+				item.Token.Token,
+				ftInfo.FTName,
+				b.GetSenderDID(),
+				b.GetReceiverDID(),
+				item.DownloadResult.Task.Dir,
+				item.DownloadResult.Error.Error(),
+			)
+			
 			return result
 		}
 		

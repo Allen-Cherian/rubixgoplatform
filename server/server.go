@@ -196,6 +196,8 @@ func (s *Server) RegisterRoutes() {
 	s.AddRoute(setup.APIGetTokenStatus, "GET", s.AuthHandle(s.APIGetTokenStatus, false, s.AuthError, false))
 	s.AddRoute(setup.APIMigrateFTTransactions, "POST", s.AuthHandle(s.APIMigrateFTTransactions, false, s.AuthError, false))
 	s.AddRoute(setup.APIGetFTMigrationStatus, "GET", s.AuthHandle(s.APIGetFTMigrationStatus, false, s.AuthError, false))
+	s.AddRoute(setup.APIRetryFailedFTDownloads, "POST", s.AuthHandle(s.RetryFailedFTDownloads, false, s.AuthError, false))
+	s.AddRoute(setup.APIGetFailedFTDownloadStatus, "POST", s.AuthHandle(s.GetFailedFTDownloadStatus, false, s.AuthError, false))
 }
 
 func (s *Server) ExitFunc() error {

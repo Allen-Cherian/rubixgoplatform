@@ -159,11 +159,13 @@ func (w *Wallet) BatchGetWithProviderMaps(requests []GetRequest) ([]model.TokenP
 	// Collect results and check for failures
 	providerMaps := make([]model.TokenProviderMap, 0, len(requests))
 	successfulPaths := make([]string, 0, len(requests))
-	var failedDownloads []string
+	var failedDownloads []GetResult
+	var failureMessages []string
 	
 	for i, result := range results {
 		if result.Error != nil {
-			failedDownloads = append(failedDownloads, 
+			failedDownloads = append(failedDownloads, result)
+			failureMessages = append(failureMessages,
 				fmt.Sprintf("token[%d]=%s: %v", i, result.Request.Hash, result.Error))
 		} else {
 			providerMaps = append(providerMaps, result.ProviderMap)
@@ -171,9 +173,9 @@ func (w *Wallet) BatchGetWithProviderMaps(requests []GetRequest) ([]model.TokenP
 		}
 	}
 	
-	// Handle failures with rollback
+	// Handle failures - allow partial success instead of all-or-nothing
 	if len(failedDownloads) > 0 {
-		w.log.Error("Batch download failed, starting rollback", 
+		w.log.Warn("Batch download completed with failures", 
 			"failed_count", len(failedDownloads),
 			"success_count", len(successfulPaths),
 			"total_count", len(requests),
@@ -181,36 +183,35 @@ func (w *Wallet) BatchGetWithProviderMaps(requests []GetRequest) ([]model.TokenP
 		
 		// Log first few failures for debugging
 		maxFailureLogs := 5
-		if len(failedDownloads) < maxFailureLogs {
-			maxFailureLogs = len(failedDownloads)
+		if len(failureMessages) < maxFailureLogs {
+			maxFailureLogs = len(failureMessages)
 		}
 		for i := 0; i < maxFailureLogs; i++ {
-			w.log.Error("Download failure details", "failure", failedDownloads[i])
+			w.log.Error("Download failure details", "failure", failureMessages[i])
 		}
-		if len(failedDownloads) > maxFailureLogs {
+		if len(failureMessages) > maxFailureLogs {
 			w.log.Error("Additional failures omitted", 
-				"omitted_count", len(failedDownloads)-maxFailureLogs)
+				"omitted_count", len(failureMessages)-maxFailureLogs)
 		}
 		
-		// Rollback: Delete all successfully downloaded files
-		rollbackStart := time.Now()
-		var rollbackErrors int
-		for _, path := range successfulPaths {
-			if err := os.RemoveAll(path); err != nil {
-				rollbackErrors++
-				w.log.Error("Failed to rollback downloaded file", 
-					"path", path, 
-					"error", err)
+		// CRITICAL FIX: Do NOT rollback successful downloads
+		// Allow partial success to prevent token loss
+		// Mark failed tokens in results instead
+		for _, failure := range failedDownloads {
+			for i := range results {
+				if results[i].Request.Hash == failure.Request.Hash {
+					results[i].Error = failure.Error
+					break
+				}
 			}
 		}
 		
-		w.log.Info("Rollback completed", 
-			"files_deleted", len(successfulPaths)-rollbackErrors,
-			"rollback_errors", rollbackErrors,
-			"rollback_duration", time.Since(rollbackStart))
+		w.log.Info("Partial batch success", 
+			"successful", len(successfulPaths),
+			"failed", len(failedDownloads),
+			"success_rate", fmt.Sprintf("%.1f%%", float64(len(successfulPaths))*100/float64(len(requests))))
 		
-		return nil, fmt.Errorf("batch download failed: %d/%d downloads failed after retries", 
-			len(failedDownloads), len(requests))
+		// Continue with successful downloads instead of failing entire batch
 	}
 	
 	// All successful

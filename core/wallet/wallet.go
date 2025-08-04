@@ -35,6 +35,7 @@ const (
 	FTChainStorage                 string = "FTchainstorage"
 	FTStorage                      string = "FTTable"
 	FTTransactionTokenStorage      string = "FTTransactionTokens"
+	FailedFTDownloadStorage        string = "FailedFTDownloads"
 )
 
 type WalletConfig struct {
@@ -67,6 +68,16 @@ type Wallet struct {
 	smartContractTokenChainStorage *ChainDB
 	FTChainStorage                 *ChainDB
 	asyncProviderMgr               *AsyncProviderDetailsManager
+}
+
+// GetStorage returns the storage interface
+func (w *Wallet) GetStorage() storage.Storage {
+	return w.s
+}
+
+// GetIpfsOps returns the IPFS operations interface
+func (w *Wallet) GetIpfsOps() IPFSOperations {
+	return w.ipfsOps
 }
 
 func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, error) {
