@@ -529,161 +529,101 @@ func (c *Core) initiateFTTransfer(reqID string, req *model.TransferFTReq) *model
 			creatorDID = info[0].CreatorDID
 		}
 	}
-	// Use optimized memory-efficient sender for large transfers
+	// Get all available FT tokens
+	var AllFTs []wallet.FTToken
 	var TokenInfo []contract.TokenInfo
 	var lockingErr error
 	
-	if req.FTCount > 1000 {
-		c.log.Info("Using memory-optimized FT sender for large transfer", "ft_count", req.FTCount)
-		
-		// Create optimized sender
-		optimizedSender := NewOptimizedFTSender(c)
-		
-		// Check availability without loading all tokens into memory
-		availableCount, finalCreatorDID, err := optimizedSender.streamingCheckFTAvailability(req, did)
+	if req.CreatorDID != "" {
+		AllFTs, err = c.w.GetFreeFTsByNameAndCreatorDID(req.FTName, did, req.CreatorDID)
+		creatorDID = req.CreatorDID
+	} else {
+		AllFTs, err = c.w.GetFreeFTsByNameAndDID(req.FTName, did)
+	}
+	
+	AvailableFTCount := len(AllFTs)
+	if err != nil {
+		c.log.Error("Failed to get FTs", "err", err)
+		resp.Message = "Insufficient FTs or FTs are locked or " + err.Error()
+		return resp
+	} else {
+		if req.FTCount > AvailableFTCount {
+			c.log.Error(fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount))
+			resp.Message = fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount)
+			return resp
+		}
+	}
+	
+	FTsForTxn := AllFTs[:req.FTCount]
+	
+	// Fetching peer's peer id
+	if !c.w.IsDIDExist(req.Receiver) {
+		peerInfo, err := c.GetPeerDIDInfo(req.Receiver)
 		if err != nil {
-			c.log.Error("Failed to check FT availability", "err", err)
-			resp.Message = err.Error()
-			return resp
-		}
-		
-		if req.FTCount > availableCount {
-			c.log.Error(fmt.Sprint("Insufficient balance, Available FT balance is ", availableCount, " trnx value is ", req.FTCount))
-			resp.Message = fmt.Sprint("Insufficient balance, Available FT balance is ", availableCount, " trnx value is ", req.FTCount)
-			return resp
-		}
-		
-		// Update creatorDID if it was determined
-		if creatorDID == "" && finalCreatorDID != "" {
-			creatorDID = finalCreatorDID
-		}
-		
-		// Fetching peer's peer id before locking tokens
-		if !c.w.IsDIDExist(req.Receiver) {
-			peerInfo, err := c.GetPeerDIDInfo(req.Receiver)
-			if err != nil {
-				if peerInfo == nil {
-					c.log.Error("could not get peerId of receiver ", req.Receiver, "error", err)
-					resp.Message = fmt.Sprintf("could not get peerId of receiver : %v, error: %v", req.Receiver, err)
-					return resp
-				}
-				if strings.Contains(err.Error(), "retry") {
-					c.AddPeerDetails(*peerInfo)
-				}
-			}
-			if peerInfo.PeerID == "" {
-				c.log.Error("failed to get peerId of receiver ", req.Receiver, "error", err)
-				resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
+			if peerInfo == nil {
+				c.log.Error("could not get peerId of receiver ", req.Receiver, "error", err)
+				resp.Message = fmt.Sprintf("could not get peerId of receiver : %v, error: %v", req.Receiver, err)
 				return resp
 			}
+			if strings.Contains(err.Error(), "retry") {
+				c.AddPeerDetails(*peerInfo)
+			}
 		}
-		
-		receiverPeerID, err := c.getPeer(req.Receiver)
-		if err != nil {
-			resp.Message = "Failed to get receiver peer, " + err.Error()
+		if peerInfo.PeerID == "" {
+			c.log.Error("failed to get peerId of receiver ", req.Receiver, "error", err)
+			resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
 			return resp
 		}
-		defer receiverPeerID.Close()
-		
-		// Fetch and lock tokens in memory-efficient batches
-		TokenInfo, lockingErr = optimizedSender.batchFetchAndLockTokens(req, did, finalCreatorDID)
+	}
+	
+	receiverPeerID, err := c.getPeer(req.Receiver)
+	if err != nil {
+		resp.Message = "Failed to get receiver peer, " + err.Error()
+		return resp
+	}
+	defer receiverPeerID.Close()
+
+	// Use optimized locking for transfers > 100 tokens
+	if c.shouldUseOptimizedFTLocking(req.FTCount) {
+		c.log.Info("Using optimized FT locking", "ft_count", req.FTCount)
+		TokenInfo, lockingErr = c.OptimizedFTTransferLocking(FTsForTxn, did, req.FTCount)
 		if lockingErr != nil {
-			c.log.Error("Failed to fetch and lock FT tokens", "err", lockingErr)
-			resp.Message = "Failed to fetch and lock FT tokens: " + lockingErr.Error()
+			c.log.Error("Failed to lock FT tokens optimized", "err", lockingErr)
+			resp.Message = "Failed to lock FT tokens: " + lockingErr.Error()
 			return resp
 		}
 	} else {
-		// Original logic for smaller transfers
-		var AllFTs []wallet.FTToken
-		if req.CreatorDID != "" {
-			AllFTs, err = c.w.GetFreeFTsByNameAndCreatorDID(req.FTName, did, req.CreatorDID)
-			creatorDID = req.CreatorDID
-		} else {
-			AllFTs, err = c.w.GetFreeFTsByNameAndDID(req.FTName, did)
-		}
-		AvailableFTCount := len(AllFTs)
-		if err != nil {
-			c.log.Error("Failed to get FTs", "err", err)
-			resp.Message = "Insufficient FTs or FTs are locked or " + err.Error()
-			return resp
-		} else {
-			if req.FTCount > AvailableFTCount {
-				c.log.Error(fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount))
-				resp.Message = fmt.Sprint("Insufficient balance, Available FT balance is ", AvailableFTCount, " trnx value is ", req.FTCount)
+		// Original logic for small transfers
+		TokenInfo = make([]contract.TokenInfo, 0)
+		for i := range FTsForTxn {
+			FTsForTxn[i].TokenStatus = wallet.TokenIsLocked
+			lockFTErr := c.s.Update(wallet.FTTokenStorage, &FTsForTxn[i], "token_id=?", FTsForTxn[i].TokenID)
+			if lockFTErr != nil {
+				c.log.Error("Failed to update FT token status", "err", lockFTErr)
+				resp.Message = "Failed to update FT token status"
 				return resp
 			}
-		}
-		FTsForTxn := AllFTs[:req.FTCount]
-		
-		// Fetching peer's peer id
-		if !c.w.IsDIDExist(req.Receiver) {
-			peerInfo, err := c.GetPeerDIDInfo(req.Receiver)
+			tt := c.TokenType(FTString)
+			blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
+			if blk == nil {
+				c.log.Error("failed to get latest block, invalid token chain")
+				resp.Message = "failed to get latest block, invalid token chain"
+				return resp
+			}
+			bid, err := blk.GetBlockID(FTsForTxn[i].TokenID)
 			if err != nil {
-				if peerInfo == nil {
-					c.log.Error("could not get peerId of receiver ", req.Receiver, "error", err)
-					resp.Message = fmt.Sprintf("could not get peerId of receiver : %v, error: %v", req.Receiver, err)
-					return resp
-				}
-				if strings.Contains(err.Error(), "retry") {
-					c.AddPeerDetails(*peerInfo)
-				}
-			}
-			if peerInfo.PeerID == "" {
-				c.log.Error("failed to get peerId of receiver ", req.Receiver, "error", err)
-				resp.Message = fmt.Sprintf("failed to get peerId of receiver : %v, error: %v", req.Receiver, err)
+				c.log.Error("failed to get block id", "err", err)
+				resp.Message = "failed to get block id, " + err.Error()
 				return resp
 			}
-		}
-		
-		receiverPeerID, err := c.getPeer(req.Receiver)
-		if err != nil {
-			resp.Message = "Failed to get receiver peer, " + err.Error()
-			return resp
-		}
-		defer receiverPeerID.Close()
-
-		// Use optimized locking for transfers > 100 tokens but < 1000
-		if c.shouldUseOptimizedFTLocking(req.FTCount) {
-			c.log.Info("Using optimized FT locking", "ft_count", req.FTCount)
-			TokenInfo, lockingErr = c.OptimizedFTTransferLocking(FTsForTxn, did, req.FTCount)
-			if lockingErr != nil {
-				c.log.Error("Failed to lock FT tokens optimized", "err", lockingErr)
-				resp.Message = "Failed to lock FT tokens: " + lockingErr.Error()
-				return resp
+			ti := contract.TokenInfo{
+				Token:      FTsForTxn[i].TokenID,
+				TokenType:  tt,
+				TokenValue: FTsForTxn[i].TokenValue,
+				OwnerDID:   did,
+				BlockID:    bid,
 			}
-		} else {
-			// Original logic for very small transfers
-			TokenInfo = make([]contract.TokenInfo, 0)
-			for i := range FTsForTxn {
-				FTsForTxn[i].TokenStatus = wallet.TokenIsLocked
-				lockFTErr := c.s.Update(wallet.FTTokenStorage, &FTsForTxn[i], "token_id=?", FTsForTxn[i].TokenID)
-				if lockFTErr != nil {
-					c.log.Error("Failed to update FT token status", "err", lockFTErr)
-					resp.Message = "Failed to update FT token status"
-					return resp
-				}
-				tt := c.TokenType(FTString)
-				blk := c.w.GetLatestTokenBlock(FTsForTxn[i].TokenID, tt)
-				if blk == nil {
-					c.log.Error("failed to get latest block, invalid token chain")
-					resp.Message = "failed to get latest block, invalid token chain"
-					return resp
-				}
-				bid, err := blk.GetBlockID(FTsForTxn[i].TokenID)
-				if err != nil {
-					c.log.Error("failed to get block id", "err", err)
-					resp.Message = "failed to get block id, " + err.Error()
-					return resp
-				}
-				ti := contract.TokenInfo{
-					Token:      FTsForTxn[i].TokenID,
-					TokenType:  tt,
-					TokenValue: FTsForTxn[i].TokenValue,
-					OwnerDID:   did,
-					BlockID:    bid,
-				}
-				TokenInfo = append(TokenInfo, ti)
-			}
+			TokenInfo = append(TokenInfo, ti)
 		}
 	}
 	
