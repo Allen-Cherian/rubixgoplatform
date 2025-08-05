@@ -212,11 +212,28 @@ func (ofs *OptimizedFTSender) batchFetchAndLockTokens(req *model.TransferFTReq, 
 		if err != nil {
 			// Check if this is just "no records found" - which means we've processed all tokens
 			if err.Error() == "no records found" {
+				// Check if we have enough tokens
+				if processedCount < req.FTCount {
+					// Rollback previously locked tokens
+					ofs.rollbackLockedTokens(tokenInfos)
+					return nil, fmt.Errorf("insufficient FT tokens: requested %d, but only %d available", req.FTCount, processedCount)
+				}
 				break
 			}
 			// Rollback previously locked tokens
 			ofs.rollbackLockedTokens(tokenInfos)
 			return nil, fmt.Errorf("failed to fetch token batch: %v", err)
+		}
+		
+		// Check if we got fewer tokens than expected (but not zero)
+		if len(batchTokens) == 0 {
+			// No more tokens available
+			if processedCount < req.FTCount {
+				// Rollback previously locked tokens
+				ofs.rollbackLockedTokens(tokenInfos)
+				return nil, fmt.Errorf("insufficient FT tokens: requested %d, but only %d available", req.FTCount, processedCount)
+			}
+			break
 		}
 		
 		// Lock tokens in this batch
@@ -243,8 +260,16 @@ func (ofs *OptimizedFTSender) batchFetchAndLockTokens(req *model.TransferFTReq, 
 		batchTokens = nil
 	}
 	
+	// Final check to ensure we locked the requested amount
+	if len(tokenInfos) < req.FTCount {
+		// Rollback all locked tokens
+		ofs.rollbackLockedTokens(tokenInfos)
+		return nil, fmt.Errorf("insufficient FT tokens: requested %d, but only %d could be locked", req.FTCount, len(tokenInfos))
+	}
+	
 	ofs.c.log.Info("Batch fetch and lock completed",
-		"total_tokens", req.FTCount,
+		"requested_tokens", req.FTCount,
+		"locked_tokens", len(tokenInfos),
 		"duration", time.Since(startTime))
 	
 	return tokenInfos, nil
