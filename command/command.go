@@ -355,6 +355,7 @@ type Command struct {
 	nftValue                     float64
 	ftNumStartIndex              int
 	enableTrustedNetwork         bool
+	disableTrustedNetwork        bool
 	backupDB                     bool
 }
 
@@ -545,10 +546,15 @@ func (cmd *Command) runApp() {
 		}
 	}
 	
-	// Override trusted network setting if flag is provided
-	if cmd.enableTrustedNetwork {
+	// Apply trusted network setting (enabled by default)
+	// Check if user explicitly wants to disable trusted network
+	if cmd.disableTrustedNetwork {
+		cmd.cfg.CfgData.TrustedNetwork = false
+		cmd.log.Info("Trusted network mode explicitly disabled via -disableTrustedNetwork flag")
+	} else {
+		// Trusted network is enabled by default
 		cmd.cfg.CfgData.TrustedNetwork = true
-		cmd.log.Info("Trusted network mode enabled via command line flag")
+		cmd.log.Info("Trusted network mode enabled (default)")
 	}
 	
 	sc := make(chan bool, 1)
@@ -730,7 +736,8 @@ func Run(args []string) {
 	flag.StringVar(&cmd.apiKey, "apikey", "", "Give the API Key corresponding to the DID")
 	flag.Float64Var(&cmd.nftValue, "nftValue", 0.0, "Value of the NFT")
 	flag.IntVar(&cmd.ftNumStartIndex, "ftStartIndex", 0, "Start index of the FTs to be created")
-	flag.BoolVar(&cmd.enableTrustedNetwork, "enableTrustedNetwork", false, "Enable trusted network mode (skips DHT checks)")
+	flag.BoolVar(&cmd.enableTrustedNetwork, "enableTrustedNetwork", true, "Enable trusted network mode (skips DHT checks) - enabled by default")
+	flag.BoolVar(&cmd.disableTrustedNetwork, "disableTrustedNetwork", false, "Disable trusted network mode to enable full DHT checks")
 	flag.BoolVar(&cmd.backupDB, "backupDB", false, "Create backup of database before starting node")
 
 	if len(os.Args) < 2 {
