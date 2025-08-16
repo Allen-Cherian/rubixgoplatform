@@ -628,12 +628,12 @@ func (c *Core) fetchTransactionFromExplorer(explorerURL, transactionID string) (
 	var explorerResp struct {
 		Status bool `json:"status"`
 		Data   struct {
-			TransactionID string  `json:"transactionId"`
-			Sender        string  `json:"sender"`
-			ReceiverDID   string  `json:"receiverDid"`
-			Amount        float64 `json:"amount"`
-			TokenType     string  `json:"tokenType"`
-			DateTime      string  `json:"dateTime"`
+			TransactionID   string  `json:"transactionId"`
+			Sender          string  `json:"sender"`
+			ReceiverDID     string  `json:"receiverDid"`
+			Amount          float64 `json:"amount"`
+			TransactionType string  `json:"transactionType"`
+			Timestamp       string  `json:"timestamp"`
 		} `json:"data"`
 		Message string `json:"message"`
 	}
@@ -646,20 +646,24 @@ func (c *Core) fetchTransactionFromExplorer(explorerURL, transactionID string) (
 		return nil, fmt.Errorf("network returned error: %s", explorerResp.Message)
 	}
 
-	// Parse date time
-	dateTime, err := time.Parse("2006-01-02T15:04:05Z", explorerResp.Data.DateTime)
+	// Parse timestamp
+	dateTime, err := time.Parse("2006-01-02T15:04:05.000Z", explorerResp.Data.Timestamp)
 	if err != nil {
 		// Try alternative format
-		dateTime, err = time.Parse("2006-01-02 15:04:05", explorerResp.Data.DateTime)
+		dateTime, err = time.Parse("2006-01-02T15:04:05Z", explorerResp.Data.Timestamp)
 		if err != nil {
-			dateTime = time.Now() // Fallback
+			// Try without timezone
+			dateTime, err = time.Parse("2006-01-02 15:04:05", explorerResp.Data.Timestamp)
+			if err != nil {
+				dateTime = time.Now() // Fallback
+			}
 		}
 	}
 
 	// Convert to TransactionDetails
 	transactionDetails := &model.TransactionDetails{
 		TransactionID:   explorerResp.Data.TransactionID,
-		TransactionType: explorerResp.Data.TokenType,
+		TransactionType: explorerResp.Data.TransactionType,
 		SenderDID:       explorerResp.Data.Sender,
 		ReceiverDID:     explorerResp.Data.ReceiverDID,
 		Amount:          explorerResp.Data.Amount,
@@ -704,11 +708,12 @@ func (c *Core) fetchTokensFromExplorer(explorerURL, transactionID, tokenType str
 	var explorerResp struct {
 		Status bool `json:"status"`
 		Data   struct {
-			FTTokenList  []string `json:"ftTokenList"`
-			RBTTokenList []string `json:"rbtTokenList"`
-			SenderDID    string   `json:"sender"`
-			ReceiverDID  string   `json:"receiverDid"`
-			Amount       float64  `json:"amount"`
+			FTTokenList     []string `json:"ftTokenList"`
+			TokenList       []string `json:"tokenList"`     // RBT tokens
+			Sender          string   `json:"sender"`
+			ReceiverDID     string   `json:"receiverDid"`
+			Amount          float64  `json:"amount"`
+			TransactionType string   `json:"transactionType"`
 		} `json:"data"`
 		Message string `json:"message"`
 	}
@@ -726,7 +731,8 @@ func (c *Core) fetchTokensFromExplorer(explorerURL, transactionID, tokenType str
 	if tokenType == "FT" {
 		tokens = explorerResp.Data.FTTokenList
 	} else {
-		tokens = explorerResp.Data.RBTTokenList
+		// For RBT tokens, use tokenList field
+		tokens = explorerResp.Data.TokenList
 	}
 
 	if len(tokens) == 0 {
@@ -737,7 +743,7 @@ func (c *Core) fetchTokensFromExplorer(explorerURL, transactionID, tokenType str
 		"transaction_id", transactionID,
 		"token_type", tokenType,
 		"token_count", len(tokens),
-		"sender", explorerResp.Data.SenderDID,
+		"sender", explorerResp.Data.Sender,
 		"receiver", explorerResp.Data.ReceiverDID)
 
 	return tokens, nil
