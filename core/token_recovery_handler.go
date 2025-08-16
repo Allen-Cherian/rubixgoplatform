@@ -216,7 +216,7 @@ func (c *Core) getTransactionFromHistory(senderDID, transactionID string) (*mode
 
 	// First try to get from FT transaction history
 	var ftHistory []model.FTTransactionHistory
-	err := c.w.GetStorage().Read("ft_transaction_history", &ftHistory,
+	err := c.w.GetStorage().Read(wallet.FTTransactionHistoryStorage, &ftHistory,
 		"sender_did=? AND transaction_id=?", senderDID, transactionID)
 
 	if err == nil && len(ftHistory) > 0 {
@@ -236,7 +236,7 @@ func (c *Core) getTransactionFromHistory(senderDID, transactionID string) (*mode
 
 	// If not found in FT history, try regular transaction history
 	var txHistory []model.TransactionDetails
-	err = c.w.GetStorage().Read("transaction_history", &txHistory,
+	err = c.w.GetStorage().Read(wallet.TransactionStorage, &txHistory,
 		"sender_did=? AND transaction_id=?", senderDID, transactionID)
 
 	if err != nil || len(txHistory) == 0 {
@@ -270,7 +270,7 @@ func (c *Core) isTransactionAlreadyRecovered(transaction *model.TransactionDetai
 
 	// Check token_recovery table - this is the primary source of truth
 	var recovery model.TokenRecovery
-	err := c.w.GetStorage().Read("token_recovery", &recovery,
+	err := c.w.GetStorage().Read("TokenRecovery", &recovery,
 		"transaction_id=?", transaction.TransactionID)
 
 	if err == nil {
@@ -409,20 +409,110 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 		"token_count", tokenCount,
 		"token_ids", tokensToRecover)
 
-	// Step 2: Change token status from pledged to free
+	// Step 2: Change token status from pledged to free (or create if missing)
 	for _, tokenID := range tokensToRecover {
 		if transactionDetails.TransactionType == "FT" {
-			// Update FT token status
+			// Try to read FT token
 			var ftToken wallet.FTToken
 			err := c.w.GetStorage().Read(wallet.FTTokenStorage, &ftToken, "token_id=?", tokenID)
-			if err == nil && ftToken.TokenStatus == wallet.TokenIsPledged {
-				ftToken.TokenStatus = wallet.TokenIsFree
-				ftToken.TransactionID = "" // Clear transaction ID
-				err = c.w.GetStorage().Update(wallet.FTTokenStorage, &ftToken, "token_id=?", tokenID)
+			if err != nil {
+				// Token doesn't exist locally (was fetched from explorer), create it
+				c.log.Info("Creating FT token from explorer data",
+					"token_id", tokenID,
+					"owner", senderDID)
+				
+				// Get FT info from explorer if needed
+				ftInfo, err := c.getFTInfoFromExplorer(transactionID)
 				if err != nil {
-					c.log.Error("Failed to update FT token status",
+					c.log.Error("Failed to get FT info from explorer", "error", err)
+					// Use default values if we can't get FT info
+					ftInfo = &FTInfo{
+						CreatorDID: "",
+						FTName: "RECOVERED",
+					}
+				}
+				
+				ftToken = wallet.FTToken{
+					TokenID:       tokenID,
+					DID:           senderDID,  // Owner DID
+					TokenStatus:   wallet.TokenIsFree,
+					TransactionID: "", // Clear - token is now free
+					CreatorDID:    ftInfo.CreatorDID,
+					FTName:        ftInfo.FTName,
+					TokenValue:    0.001, // Standard FT token value
+				}
+				err = c.w.GetStorage().Write(wallet.FTTokenStorage, &ftToken)
+				if err != nil {
+					c.log.Error("Failed to create recovered FT token",
 						"token_id", tokenID,
 						"error", err)
+				} else {
+					c.log.Info("Successfully created recovered FT token",
+						"token_id", tokenID,
+						"owner", senderDID,
+						"status", "free")
+				}
+			} else {
+				// Token exists - check if it belongs to this transaction or has wrong transaction ID
+				c.log.Info("FT token exists, checking ownership and transaction",
+					"token_id", tokenID,
+					"current_owner", ftToken.DID,
+					"current_txn_id", ftToken.TransactionID,
+					"current_status", ftToken.TokenStatus,
+					"expected_txn_id", transactionID,
+					"expected_owner", senderDID)
+				
+				// Check if token has the wrong transaction ID or wrong owner
+				needsUpdate := false
+				
+				// If token is pledged with this transaction ID, it needs recovery
+				if ftToken.TransactionID == transactionID || ftToken.TokenStatus == wallet.TokenIsPledged {
+					ftToken.TokenStatus = wallet.TokenIsFree
+					ftToken.TransactionID = "" // Clear transaction ID
+					needsUpdate = true
+				}
+				
+				// If token doesn't belong to sender, update owner
+				if ftToken.DID != senderDID {
+					c.log.Info("Updating token owner during recovery",
+						"token_id", tokenID,
+						"old_owner", ftToken.DID,
+						"new_owner", senderDID)
+					ftToken.DID = senderDID
+					ftToken.TokenStatus = wallet.TokenIsFree
+					ftToken.TransactionID = "" // Clear transaction ID
+					needsUpdate = true
+				}
+				
+				// If token has a different transaction ID but should be recovered, free it
+				if ftToken.TransactionID != "" && ftToken.TransactionID != transactionID {
+					c.log.Warn("Token has different transaction ID, recovering anyway",
+						"token_id", tokenID,
+						"stored_txn_id", ftToken.TransactionID,
+						"recovery_txn_id", transactionID)
+					ftToken.TokenStatus = wallet.TokenIsFree
+					ftToken.TransactionID = "" // Clear transaction ID
+					ftToken.DID = senderDID    // Update owner
+					needsUpdate = true
+				}
+				
+				if needsUpdate {
+					err = c.w.GetStorage().Update(wallet.FTTokenStorage, &ftToken, "token_id=?", tokenID)
+					if err != nil {
+						c.log.Error("Failed to update FT token during recovery",
+							"token_id", tokenID,
+							"error", err)
+					} else {
+						c.log.Info("Successfully recovered FT token",
+							"token_id", tokenID,
+							"owner", senderDID,
+							"status", "free")
+					}
+				} else {
+					c.log.Info("Token already in correct state",
+						"token_id", tokenID,
+						"owner", ftToken.DID,
+						"status", ftToken.TokenStatus)
 				}
 			}
 		} else {
@@ -453,7 +543,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 		RecoveryNotes: "Token recovery completed successfully",
 	}
 
-	err := c.w.GetStorage().Write("token_recovery", recovery)
+	err := c.w.GetStorage().Write("TokenRecovery", recovery)
 	if err != nil {
 		c.log.Error("Failed to record recovery in tracking table",
 			"transaction_id", transactionID,
@@ -467,7 +557,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 	if transactionDetails.TransactionType == "FT" {
 		// Remove from FT transaction history - transaction never happened
 		// Remove ALL instances of this transaction ID, regardless of sender/receiver
-		err := c.w.GetStorage().Delete("ft_transaction_history",
+		err := c.w.GetStorage().Delete(wallet.FTTransactionHistoryStorage,
 			"transaction_id=?", transactionID)
 		if err != nil {
 			c.log.Error("Failed to remove FT transaction from history",
@@ -483,7 +573,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 	} else {
 		// Remove from regular transaction history - transaction never happened
 		// Remove ALL instances of this transaction ID, regardless of sender/receiver
-		err := c.w.GetStorage().Delete("transaction_history",
+		err := c.w.GetStorage().Delete(wallet.TransactionStorage,
 			"transaction_id=?", transactionID)
 		if err != nil {
 			c.log.Error("Failed to remove transaction from history",
@@ -684,6 +774,59 @@ func (c *Core) fetchTransactionFromExplorer(explorerURL, transactionID string) (
 		"amount", transactionDetails.Amount)
 
 	return transactionDetails, nil
+}
+
+// FTInfo holds FT metadata
+type FTInfo struct {
+	CreatorDID string
+	FTName     string
+}
+
+// getFTInfoFromExplorer retrieves FT metadata from explorer
+func (c *Core) getFTInfoFromExplorer(transactionID string) (*FTInfo, error) {
+	explorers := c.getConfiguredExplorers()
+	if len(explorers) == 0 {
+		return nil, fmt.Errorf("no explorers configured")
+	}
+
+	for _, explorerURL := range explorers {
+		fullURL := fmt.Sprintf("%s/api/Transaction/GetById/%s", explorerURL, transactionID)
+		
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get(fullURL)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			continue
+		}
+
+		var explorerResp struct {
+			Status bool `json:"status"`
+			Data   struct {
+				Tokens []struct {
+					CreatorDID string `json:"creatorDid"`
+					FTName     string `json:"ftName"`
+				} `json:"tokens"`
+			} `json:"data"`
+		}
+
+		if err := json.Unmarshal(body, &explorerResp); err != nil {
+			continue
+		}
+
+		if explorerResp.Status && len(explorerResp.Data.Tokens) > 0 {
+			return &FTInfo{
+				CreatorDID: explorerResp.Data.Tokens[0].CreatorDID,
+				FTName:     explorerResp.Data.Tokens[0].FTName,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("could not get FT info from any explorer")
 }
 
 // fetchTokensFromExplorer makes HTTP request to explorer for token list
