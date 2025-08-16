@@ -291,7 +291,8 @@ func (c *Core) isTransactionWithinRecoveryWindow(transactionDate time.Time) bool
 
 	// Allow recovery for transactions older than 7 days but less than 14 days
 	// For testing/development, we might be more lenient
-	return ageDays >= 7 && ageDays <= 14
+	//return ageDays >= 7 && ageDays <= 14
+	return ageDays <= 14
 }
 
 // isExceptionTransaction checks if this transaction is marked for exception handling
