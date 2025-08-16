@@ -557,8 +557,10 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 	if transactionDetails.TransactionType == "FT" {
 		// Remove from FT transaction history - transaction never happened
 		// Remove ALL instances of this transaction ID, regardless of sender/receiver
+		// Delete expects: (storageName, model, query, values...)
+		// Use empty model instance like in token_rollback.go
 		err := c.w.GetStorage().Delete(wallet.FTTransactionHistoryStorage,
-			"transaction_id=?", transactionID)
+			&model.FTTransactionHistory{}, "transaction_id = ?", transactionID)
 		if err != nil {
 			c.log.Error("Failed to remove FT transaction from history",
 				"transaction_id", transactionID,
@@ -570,11 +572,23 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 				"sender_did", senderDID,
 				"note", "Removed all instances of transaction")
 		}
+		
+		// Also remove from regular transaction history (FT transactions are stored in both)
+		err = c.w.GetStorage().Delete(wallet.TransactionStorage,
+			&model.TransactionDetails{}, "transaction_id = ?", transactionID)
+		if err != nil {
+			c.log.Error("Failed to remove transaction from regular history",
+				"transaction_id", transactionID,
+				"error", err)
+		} else {
+			c.log.Info("Successfully removed transaction from regular history",
+				"transaction_id", transactionID)
+		}
 	} else {
 		// Remove from regular transaction history - transaction never happened
 		// Remove ALL instances of this transaction ID, regardless of sender/receiver
 		err := c.w.GetStorage().Delete(wallet.TransactionStorage,
-			"transaction_id=?", transactionID)
+			&model.TransactionDetails{}, "transaction_id = ?", transactionID)
 		if err != nil {
 			c.log.Error("Failed to remove transaction from history",
 				"transaction_id", transactionID,
