@@ -104,6 +104,8 @@ const (
 	APIGetFTMigrationStatus             string = "/api/get-ft-migration-status"
 	APIRetryFailedFTDownloads           string = "/api/retry-failed-ft-downloads"
 	APIGetFailedFTDownloadStatus        string = "/api/get-failed-ft-download-status"
+	APIRecoverLostTokens                string = "/api/recover-lost-tokens"
+	APIRemoteRecoverTokens              string = "/api/remote-recover-tokens"
 )
 
 // jwt.RegisteredClaims
