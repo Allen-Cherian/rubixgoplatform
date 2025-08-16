@@ -420,7 +420,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 				c.log.Info("Creating FT token from explorer data",
 					"token_id", tokenID,
 					"owner", senderDID)
-				
+
 				// Get FT info from explorer if needed
 				ftInfo, err := c.getFTInfoFromExplorer(transactionID)
 				if err != nil {
@@ -428,13 +428,13 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 					// Use default values if we can't get FT info
 					ftInfo = &FTInfo{
 						CreatorDID: "",
-						FTName: "RECOVERED",
+						FTName:     "TRI",
 					}
 				}
-				
+
 				ftToken = wallet.FTToken{
 					TokenID:       tokenID,
-					DID:           senderDID,  // Owner DID
+					DID:           senderDID, // Owner DID
 					TokenStatus:   wallet.TokenIsFree,
 					TransactionID: "", // Clear - token is now free
 					CreatorDID:    ftInfo.CreatorDID,
@@ -461,17 +461,17 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 					"current_status", ftToken.TokenStatus,
 					"expected_txn_id", transactionID,
 					"expected_owner", senderDID)
-				
+
 				// Check if token has the wrong transaction ID or wrong owner
 				needsUpdate := false
-				
+
 				// If token is pledged with this transaction ID, it needs recovery
 				if ftToken.TransactionID == transactionID || ftToken.TokenStatus == wallet.TokenIsPledged {
 					ftToken.TokenStatus = wallet.TokenIsFree
 					ftToken.TransactionID = "" // Clear transaction ID
 					needsUpdate = true
 				}
-				
+
 				// If token doesn't belong to sender, update owner
 				if ftToken.DID != senderDID {
 					c.log.Info("Updating token owner during recovery",
@@ -483,7 +483,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 					ftToken.TransactionID = "" // Clear transaction ID
 					needsUpdate = true
 				}
-				
+
 				// If token has a different transaction ID but should be recovered, free it
 				if ftToken.TransactionID != "" && ftToken.TransactionID != transactionID {
 					c.log.Warn("Token has different transaction ID, recovering anyway",
@@ -495,7 +495,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 					ftToken.DID = senderDID    // Update owner
 					needsUpdate = true
 				}
-				
+
 				if needsUpdate {
 					err = c.w.GetStorage().Update(wallet.FTTokenStorage, &ftToken, "token_id=?", tokenID)
 					if err != nil {
@@ -557,7 +557,6 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 	if transactionDetails.TransactionType == "FT" {
 		// Remove from FT transaction history - transaction never happened
 		// Remove ALL instances of this transaction ID, regardless of sender/receiver
-		// Delete expects: (storageName, model, query, values...)
 		// Use empty model instance like in token_rollback.go
 		err := c.w.GetStorage().Delete(wallet.FTTransactionHistoryStorage,
 			&model.FTTransactionHistory{}, "transaction_id = ?", transactionID)
@@ -572,7 +571,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 				"sender_did", senderDID,
 				"note", "Removed all instances of transaction")
 		}
-		
+
 		// Also remove from regular transaction history (FT transactions are stored in both)
 		err = c.w.GetStorage().Delete(wallet.TransactionStorage,
 			&model.TransactionDetails{}, "transaction_id = ?", transactionID)
@@ -805,7 +804,7 @@ func (c *Core) getFTInfoFromExplorer(transactionID string) (*FTInfo, error) {
 
 	for _, explorerURL := range explorers {
 		fullURL := fmt.Sprintf("%s/api/Transaction/GetById/%s", explorerURL, transactionID)
-		
+
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Get(fullURL)
 		if err != nil {
@@ -871,7 +870,7 @@ func (c *Core) fetchTokensFromExplorer(explorerURL, transactionID, tokenType str
 		Status bool `json:"status"`
 		Data   struct {
 			FTTokenList     []string `json:"ftTokenList"`
-			TokenList       []string `json:"tokenList"`     // RBT tokens
+			TokenList       []string `json:"tokenList"` // RBT tokens
 			Sender          string   `json:"sender"`
 			ReceiverDID     string   `json:"receiverDid"`
 			Amount          float64  `json:"amount"`
