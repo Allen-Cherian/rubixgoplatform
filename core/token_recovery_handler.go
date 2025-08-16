@@ -463,10 +463,12 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 
 	// Step 4: Remove transaction from history since it's being rolled back
 	// When tokens are recovered, the transaction effectively never happened, so we remove it from history
+	// IMPORTANT: Remove ALL instances of the transaction (both sender and receiver copies)
 	if transactionDetails.TransactionType == "FT" {
 		// Remove from FT transaction history - transaction never happened
+		// Remove ALL instances of this transaction ID, regardless of sender/receiver
 		err := c.w.GetStorage().Delete("ft_transaction_history",
-			"transaction_id=? AND sender_did=?", transactionID, senderDID)
+			"transaction_id=?", transactionID)
 		if err != nil {
 			c.log.Error("Failed to remove FT transaction from history",
 				"transaction_id", transactionID,
@@ -475,12 +477,14 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 		} else {
 			c.log.Info("Successfully removed FT transaction from history",
 				"transaction_id", transactionID,
-				"sender_did", senderDID)
+				"sender_did", senderDID,
+				"note", "Removed all instances of transaction")
 		}
 	} else {
 		// Remove from regular transaction history - transaction never happened
+		// Remove ALL instances of this transaction ID, regardless of sender/receiver
 		err := c.w.GetStorage().Delete("transaction_history",
-			"transaction_id=? AND sender_did=?", transactionID, senderDID)
+			"transaction_id=?", transactionID)
 		if err != nil {
 			c.log.Error("Failed to remove transaction from history",
 				"transaction_id", transactionID,
@@ -489,7 +493,8 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 		} else {
 			c.log.Info("Successfully removed transaction from history",
 				"transaction_id", transactionID,
-				"sender_did", senderDID)
+				"sender_did", senderDID,
+				"note", "Removed all instances of transaction")
 		}
 	}
 
