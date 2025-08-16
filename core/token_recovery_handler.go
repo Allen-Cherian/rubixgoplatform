@@ -1,7 +1,10 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"time"
 
 	"github.com/rubixchain/rubixgoplatform/core/model"
@@ -237,7 +240,21 @@ func (c *Core) getTransactionFromHistory(senderDID, transactionID string) (*mode
 		"sender_did=? AND transaction_id=?", senderDID, transactionID)
 
 	if err != nil || len(txHistory) == 0 {
-		return nil, fmt.Errorf("transaction not found in history")
+		// If not found locally, try to get from explorer as fallback
+		c.log.Info("Transaction not found locally, trying from network",
+			"sender_did", senderDID,
+			"transaction_id", transactionID)
+
+		explorerTransaction, err := c.getTransactionFromExplorer(senderDID, transactionID)
+		if err != nil {
+			return nil, fmt.Errorf("transaction not found in local history or network: %v", err)
+		}
+
+		c.log.Info("Transaction found in network",
+			"transaction_id", transactionID,
+			"sender_did", senderDID)
+
+		return explorerTransaction, nil
 	}
 
 	return &txHistory[0], nil
@@ -330,28 +347,56 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 		err := c.w.GetStorage().Read(wallet.FTTokenStorage, &ftTokens,
 			"transaction_id=? AND token_status=?", transactionID, wallet.TokenIsPledged)
 
-		if err != nil {
-			return nil, fmt.Errorf("failed to find pledged FT tokens: %v", err)
-		}
+		if err != nil || len(ftTokens) == 0 {
+			// If tokens not found locally, try to get from explorer
+			c.log.Info("FT tokens not found locally, trying to get from network",
+				"transaction_id", transactionID)
 
-		for _, token := range ftTokens {
-			tokensToRecover = append(tokensToRecover, token.TokenID)
+			explorerTokens, err := c.getTokensFromExplorer(transactionID, "FT")
+			if err != nil {
+				return nil, fmt.Errorf("failed to find pledged FT tokens locally or in network: %v", err)
+			}
+
+			tokensToRecover = explorerTokens
+			tokenCount = len(explorerTokens)
+
+			c.log.Info("Found FT tokens in network",
+				"transaction_id", transactionID,
+				"token_count", tokenCount)
+		} else {
+			for _, token := range ftTokens {
+				tokensToRecover = append(tokensToRecover, token.TokenID)
+			}
+			tokenCount = len(ftTokens)
 		}
-		tokenCount = len(ftTokens)
 	} else {
 		// For RBT tokens
 		var tokens []wallet.Token
 		err := c.w.GetStorage().Read(wallet.TokenStorage, &tokens,
 			"transaction_id=? AND token_status=?", transactionID, wallet.TokenIsPledged)
 
-		if err != nil {
-			return nil, fmt.Errorf("failed to find pledged tokens: %v", err)
-		}
+		if err != nil || len(tokens) == 0 {
+			// If tokens not found locally, try to get from explorer
+			c.log.Info("RBT tokens not found locally, trying to get from network",
+				"transaction_id", transactionID)
 
-		for _, token := range tokens {
-			tokensToRecover = append(tokensToRecover, token.TokenID)
+			explorerTokens, err := c.getTokensFromExplorer(transactionID, "RBT")
+			if err != nil {
+				return nil, fmt.Errorf("failed to find pledged RBT tokens locally or in network: %v", err)
+			}
+
+			tokensToRecover = explorerTokens
+			tokenCount = len(explorerTokens)
+
+			c.log.Info("Found RBT tokens in network",
+				"transaction_id", transactionID,
+				"token_count", tokenCount)
+		} else {
+			for _, token := range tokens {
+				tokensToRecover = append(tokensToRecover, token.TokenID)
+			}
+			tokenCount = len(tokens)
 		}
-		tokenCount = len(tokens)
 	}
 
 	if len(tokensToRecover) == 0 {
@@ -419,7 +464,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 	// When tokens are recovered, the transaction effectively never happened, so we remove it from history
 	if transactionDetails.TransactionType == "FT" {
 		// Remove from FT transaction history - transaction never happened
-		err := c.w.GetStorage().Delete("ft_transaction_history", 
+		err := c.w.GetStorage().Delete("ft_transaction_history",
 			"transaction_id=? AND sender_did=?", transactionID, senderDID)
 		if err != nil {
 			c.log.Error("Failed to remove FT transaction from history",
@@ -433,7 +478,7 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 		}
 	} else {
 		// Remove from regular transaction history - transaction never happened
-		err := c.w.GetStorage().Delete("transaction_history", 
+		err := c.w.GetStorage().Delete("transaction_history",
 			"transaction_id=? AND sender_did=?", transactionID, senderDID)
 		if err != nil {
 			c.log.Error("Failed to remove transaction from history",
@@ -464,4 +509,235 @@ func (c *Core) performTokenRecovery(senderDID, transactionID string, transaction
 		"sender_did", senderDID)
 
 	return result, nil
+}
+
+// getTransactionFromExplorer retrieves transaction details from explorer
+func (c *Core) getTransactionFromExplorer(senderDID, transactionID string) (*model.TransactionDetails, error) {
+	c.log.Info("Fetching transaction from network",
+		"sender_did", senderDID,
+		"transaction_id", transactionID)
+
+	// Get configured explorers
+	explorers := c.getConfiguredExplorers()
+	if len(explorers) == 0 {
+		return nil, fmt.Errorf("unable to get network configured")
+	}
+
+	// Try each explorer until we find the transaction
+	for _, explorerURL := range explorers {
+		transaction, err := c.fetchTransactionFromExplorer(explorerURL, transactionID)
+		if err != nil {
+			c.log.Debug("Failed to get transaction from network",
+				"explorer", explorerURL,
+				"transaction_id", transactionID,
+				"error", err)
+			continue
+		}
+
+		// Validate the transaction matches our criteria
+		if transaction.SenderDID == senderDID && transaction.TransactionID == transactionID {
+			c.log.Info("Successfully retrieved transaction from network",
+				"explorer", explorerURL,
+				"transaction_id", transactionID)
+			return transaction, nil
+		}
+	}
+
+	return nil, fmt.Errorf("transaction not found in any configured network")
+}
+
+// getTokensFromExplorer retrieves token list for a transaction from explorer
+func (c *Core) getTokensFromExplorer(transactionID, tokenType string) ([]string, error) {
+	c.log.Info("Fetching tokens from network",
+		"transaction_id", transactionID,
+		"token_type", tokenType)
+
+	// Get configured explorers
+	explorers := c.getConfiguredExplorers()
+	if len(explorers) == 0 {
+		return nil, fmt.Errorf("no network configured")
+	}
+
+	// Try each explorer until we find the tokens
+	for _, explorerURL := range explorers {
+		tokens, err := c.fetchTokensFromExplorer(explorerURL, transactionID, tokenType)
+		if err != nil {
+			c.log.Debug("Failed to get tokens from network",
+				"explorer", explorerURL,
+				"transaction_id", transactionID,
+				"error", err)
+			continue
+		}
+
+		if len(tokens) > 0 {
+			c.log.Info("Successfully retrieved tokens from network",
+				"explorer", explorerURL,
+				"transaction_id", transactionID,
+				"token_count", len(tokens))
+			return tokens, nil
+		}
+	}
+
+	return nil, fmt.Errorf("tokens not found in any configured network")
+}
+
+// getConfiguredExplorers returns list of configured explorer URLs
+func (c *Core) getConfiguredExplorers() []string {
+	// Return hardcoded explorer URLs based on network type
+	var explorers []string
+
+	if c.testNet {
+		// TestNet explorer
+		explorers = []string{"https://testnet-app-api.rubixexplorer.com"}
+	} else {
+		// MainNet explorer
+		explorers = []string{"https://rexplorerapi.azurewebsites.net"}
+	}
+
+	c.log.Debug("Using configured network",
+		"explorers", explorers,
+		"testnet", c.testNet)
+
+	return explorers
+}
+
+// fetchTransactionFromExplorer makes HTTP request to explorer for transaction details
+func (c *Core) fetchTransactionFromExplorer(explorerURL, transactionID string) (*model.TransactionDetails, error) {
+	c.log.Debug("Fetching transaction from network API",
+		"explorer_url", explorerURL,
+		"transaction_id", transactionID)
+
+	// Construct the full API URL
+	fullURL := fmt.Sprintf("%s/api/Transaction/GetById/%s", explorerURL, transactionID)
+
+	// Make HTTP request to explorer
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(fullURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from network: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read network response: %v", err)
+	}
+
+	// Parse the response
+	var explorerResp struct {
+		Status bool `json:"status"`
+		Data   struct {
+			TransactionID string  `json:"transactionId"`
+			Sender        string  `json:"sender"`
+			ReceiverDID   string  `json:"receiverDid"`
+			Amount        float64 `json:"amount"`
+			TokenType     string  `json:"tokenType"`
+			DateTime      string  `json:"dateTime"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal(body, &explorerResp); err != nil {
+		return nil, fmt.Errorf("failed to parse network response: %v", err)
+	}
+
+	if !explorerResp.Status {
+		return nil, fmt.Errorf("network returned error: %s", explorerResp.Message)
+	}
+
+	// Parse date time
+	dateTime, err := time.Parse("2006-01-02T15:04:05Z", explorerResp.Data.DateTime)
+	if err != nil {
+		// Try alternative format
+		dateTime, err = time.Parse("2006-01-02 15:04:05", explorerResp.Data.DateTime)
+		if err != nil {
+			dateTime = time.Now() // Fallback
+		}
+	}
+
+	// Convert to TransactionDetails
+	transactionDetails := &model.TransactionDetails{
+		TransactionID:   explorerResp.Data.TransactionID,
+		TransactionType: explorerResp.Data.TokenType,
+		SenderDID:       explorerResp.Data.Sender,
+		ReceiverDID:     explorerResp.Data.ReceiverDID,
+		Amount:          explorerResp.Data.Amount,
+		DateTime:        dateTime,
+		Comment:         "",
+		Status:          true,
+	}
+
+	c.log.Info("Successfully fetched transaction from network",
+		"transaction_id", transactionID,
+		"sender", transactionDetails.SenderDID,
+		"receiver", transactionDetails.ReceiverDID,
+		"amount", transactionDetails.Amount)
+
+	return transactionDetails, nil
+}
+
+// fetchTokensFromExplorer makes HTTP request to explorer for token list
+func (c *Core) fetchTokensFromExplorer(explorerURL, transactionID, tokenType string) ([]string, error) {
+	c.log.Debug("Fetching tokens from network API",
+		"explorer_url", explorerURL,
+		"transaction_id", transactionID,
+		"token_type", tokenType)
+
+	// Construct the full API URL
+	fullURL := fmt.Sprintf("%s/api/Transaction/GetById/%s", explorerURL, transactionID)
+
+	// Make HTTP request to explorer
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(fullURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from network: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read network response: %v", err)
+	}
+
+	// Parse the response
+	var explorerResp struct {
+		Status bool `json:"status"`
+		Data   struct {
+			FTTokenList  []string `json:"ftTokenList"`
+			RBTTokenList []string `json:"rbtTokenList"`
+			SenderDID    string   `json:"sender"`
+			ReceiverDID  string   `json:"receiverDid"`
+			Amount       float64  `json:"amount"`
+		} `json:"data"`
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal(body, &explorerResp); err != nil {
+		return nil, fmt.Errorf("failed to parse network response: %v", err)
+	}
+
+	if !explorerResp.Status {
+		return nil, fmt.Errorf("network returned error: %s", explorerResp.Message)
+	}
+
+	// Return appropriate token list based on type
+	var tokens []string
+	if tokenType == "FT" {
+		tokens = explorerResp.Data.FTTokenList
+	} else {
+		tokens = explorerResp.Data.RBTTokenList
+	}
+
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("no %s tokens found in network response", tokenType)
+	}
+
+	c.log.Info("Successfully fetched tokens from network",
+		"transaction_id", transactionID,
+		"token_type", tokenType,
+		"token_count", len(tokens),
+		"sender", explorerResp.Data.SenderDID,
+		"receiver", explorerResp.Data.ReceiverDID)
+
+	return tokens, nil
 }
