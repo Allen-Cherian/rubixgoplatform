@@ -601,6 +601,11 @@ func (c *Core) AddWebReq(req *ensweb.Request) {
 		Finish:  make(chan bool),
 		Req:     req,
 		Timeout: 3 * time.Minute,
+		
+		// Initialize password caching fields
+		CachedPassword: "",
+		PasswordSet:    false,
+		PasswordMutex:  sync.RWMutex{},
 	}
 }
 
@@ -632,6 +637,13 @@ func (c *Core) RemoveWebReq(reqID string) *ensweb.Request {
 	if !ok {
 		return nil
 	}
+	
+	// Clear cached password for security before removing request
+	req.PasswordMutex.Lock()
+	req.CachedPassword = ""
+	req.PasswordSet = false
+	req.PasswordMutex.Unlock()
+	
 	delete(c.webReq, reqID)
 	return req.Req
 }
