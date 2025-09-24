@@ -82,6 +82,8 @@ const (
 	APIDumpFTTokenChainBlock            string = "/api/dump-ft-token-chain"
 	APIInitiateFTTransfer               string = "/api/initiate-ft-transfer"
 	APIGetFTInfo                        string = "/api/get-ft-info-by-did"
+	APIFixFTCreator                     string = "/api/fix-ft-creator"
+	APIGetFTCreatorStats                string = "/api/get-ft-creator-stats"
 	APIValidateToken                    string = "/api/validate-token"
 	APIAddUserAPIKey                    string = "/api/add-user-api-key"
 	APIDeployNFT                        string = "/api/deploy-nft"
@@ -98,6 +100,12 @@ const (
 	APIGetFTTxnByDID                    string = "/api/get-ft-txn-by-did"
 	APIUpdateTokenStatus                string = "/api/update-token-status"
 	APIGetTokenStatus                   string = "/api/get-token-status"
+	APIMigrateFTTransactions            string = "/api/migrate-ft-transactions"
+	APIGetFTMigrationStatus             string = "/api/get-ft-migration-status"
+	APIRetryFailedFTDownloads           string = "/api/retry-failed-ft-downloads"
+	APIGetFailedFTDownloadStatus        string = "/api/get-failed-ft-download-status"
+	APIRecoverLostTokens                string = "/api/recover-lost-tokens"
+	APIRemoteRecoverTokens              string = "/api/remote-recover-tokens"
 )
 
 // jwt.RegisteredClaims
