@@ -194,6 +194,8 @@ func (s *Server) RegisterRoutes() {
 	s.AddRoute(setup.APIGetFTTxnByDID, "GET", s.AuthHandle(s.APIGetFTTxnByDID, true, s.AuthError, false))
 	s.AddRoute(setup.APIUpdateTokenStatus, "PUT", s.AuthHandle(s.APIUpdateTokenStatus, false, s.AuthError, false))
 	s.AddRoute(setup.APIGetTokenStatus, "GET", s.AuthHandle(s.APIGetTokenStatus, false, s.AuthError, false))
+	s.AddRoute(setup.APIArbitrarySign, "POST", s.AuthHandle(s.APIArbitrarySignature, true, s.AuthError, true))
+	s.AddRoute(setup.APISignVerification, "GET", s.AuthHandle(s.APISignVerification, false, s.AuthError, false))
 	s.AddRoute(setup.APIMigrateFTTransactions, "POST", s.AuthHandle(s.APIMigrateFTTransactions, false, s.AuthError, false))
 	s.AddRoute(setup.APIGetFTMigrationStatus, "GET", s.AuthHandle(s.APIGetFTMigrationStatus, false, s.AuthError, false))
 	s.AddRoute(setup.APIRetryFailedFTDownloads, "POST", s.AuthHandle(s.RetryFailedFTDownloads, false, s.AuthError, false))

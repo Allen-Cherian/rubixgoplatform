@@ -111,7 +111,9 @@ const (
 	AddUserAPIKeyCmd               string = "adduserapikey"
 	AddPeerDetailsFromExplorer     string = "exppeerdetails"
 	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
-	AsyncFTStatusCmd               string = "asyncftstatus"
+	ArbitrarySignCmd               string = "sign"
+	VerifySignatureCmd             string = "verify-signature"
+  AsyncFTStatusCmd               string = "asyncftstatus"
 	SetAsyncFTStatusCmd            string = "setasyncftstatus"
 	FixFTCreatorCmd                string = "fix-ft-creator"
 	GetFTCreatorStatsCmd           string = "get-ft-creator-stats"
@@ -184,6 +186,8 @@ var commands = []string{VersionCmd,
 	AddUserAPIKeyCmd,
 	AddPeerDetailsFromExplorer,
 	GetFTTxnDetailsCmd,
+	ArbitrarySignCmd,
+	VerifySignatureCmd,
 	AsyncFTStatusCmd,
 	SetAsyncFTStatusCmd,
 	FixFTCreatorCmd,
@@ -354,6 +358,9 @@ type Command struct {
 	apiKey                       string
 	nftValue                     float64
 	ftNumStartIndex              int
+	message                      string
+	signature                    string
+	signerDID                    string
 	enableTrustedNetwork         bool
 	disableTrustedNetwork        bool
 	backupDB                     bool
@@ -736,6 +743,9 @@ func Run(args []string) {
 	flag.StringVar(&cmd.apiKey, "apikey", "", "Give the API Key corresponding to the DID")
 	flag.Float64Var(&cmd.nftValue, "nftValue", 0.0, "Value of the NFT")
 	flag.IntVar(&cmd.ftNumStartIndex, "ftStartIndex", 0, "Start index of the FTs to be created")
+	flag.StringVar(&cmd.message, "message", "", "Value to be signed on")
+	flag.StringVar(&cmd.signature, "signature", "", "signature to be verified")
+	flag.StringVar(&cmd.signerDID, "signerdid", "", "DID of the signer")
 	flag.BoolVar(&cmd.enableTrustedNetwork, "enableTrustedNetwork", true, "Enable trusted network mode (skips DHT checks) - enabled by default")
 	flag.BoolVar(&cmd.disableTrustedNetwork, "disableTrustedNetwork", false, "Disable trusted network mode to enable full DHT checks")
 	flag.BoolVar(&cmd.backupDB, "backupDB", false, "Create backup of database before starting node")
@@ -950,6 +960,10 @@ func Run(args []string) {
 		cmd.addPeerDetailsFromExplorer()
 	case GetFTTxnDetailsCmd:
 		cmd.getFTTxnDetails()
+	case ArbitrarySignCmd:
+		cmd.ArbitrarySign()
+	case VerifySignatureCmd:
+		cmd.SignVerification()
 	case AsyncFTStatusCmd:
 		cmd.asyncFTStatus()
 	case SetAsyncFTStatusCmd:

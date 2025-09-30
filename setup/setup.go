@@ -100,6 +100,8 @@ const (
 	APIGetFTTxnByDID                    string = "/api/get-ft-txn-by-did"
 	APIUpdateTokenStatus                string = "/api/update-token-status"
 	APIGetTokenStatus                   string = "/api/get-token-status"
+	APIArbitrarySign                    string = "/api/sign"
+	APISignVerification                 string = "/api/verify-signature"
 	APIMigrateFTTransactions            string = "/api/migrate-ft-transactions"
 	APIGetFTMigrationStatus             string = "/api/get-ft-migration-status"
 	APIRetryFailedFTDownloads           string = "/api/retry-failed-ft-downloads"

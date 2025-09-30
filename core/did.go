@@ -523,3 +523,96 @@ func (c *Core) GetPeerDIDInfo(didStr string) (*wallet.DIDPeerMap, error) {
 		DIDType: &didType,
 	}, nil
 }
+
+func (c *Core) ArbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) {
+	signResp := c.arbitrarySign(reqID, signReq)
+	dc := c.GetWebReq(reqID)
+	if dc == nil {
+		c.log.Error("arbitrary sign failed, Failed to get did channels")
+		return
+	}
+	dc.OutChan <- signResp
+}
+func (c *Core) arbitrarySign(reqID string, signReq *model.ArbitrarySignRequest) *model.BasicResponse {
+	signResp := &model.BasicResponse{
+		Status: false,
+	}
+
+	// initiate the did with did crypto
+	didCrypto, err := c.SetupDID(reqID, signReq.SignerDID)
+	if err != nil {
+		errMsg := fmt.Sprintf("arbitrary sign failed, failed to setup did, err : %v", err)
+		c.log.Error(errMsg)
+		signResp.Message = errMsg
+		return signResp
+	}
+
+	// sign the given message with private key
+	signatureBytes, err := didCrypto.PvtSign([]byte(signReq.MsgToSign))
+	if err != nil {
+		errMsg := fmt.Sprintf("arbitrary sign failed, err : %v", err)
+		c.log.Error(errMsg)
+		signResp.Message = errMsg
+		return signResp
+	}
+	// convert signature bytes into string
+	signature := util.HexToStr(signatureBytes)
+
+	// verify the signature before returning
+	verificationResult, err := didCrypto.PvtVerify([]byte(signReq.MsgToSign), signatureBytes)
+	if err != nil {
+		errMsg := fmt.Sprintf("arbitrary sign failed, failed to verify signature, err : %v", err)
+		c.log.Error(errMsg)
+		signResp.Message = errMsg
+		return signResp
+	}
+
+	if !verificationResult {
+		c.log.Error("verification failed, signature is invalid")
+		signResp.Message = "arbitrary sign failed, verification failed, signature is invalid"
+	} else {
+		signResp.Message = "arbitrary sign successful"
+		signMap := model.Signature{
+			Signature: signature,
+		}
+		signResp.Result = signMap
+	}
+
+	signResp.Status = true
+	return signResp
+}
+
+func (c *Core) ArbitrarySignVerification(reqID string, verificationReq *model.SignVerificationRequest) (*model.BasicResponse, error) {
+	verificationResp := &model.BasicResponse{
+		Status: false,
+	}
+
+	// initiate the did with did crypto
+	didCrypto, err := c.SetupForienDID(verificationReq.SignerDID, "")
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to setup did for sign verification, err : %v", err)
+		c.log.Error(errMsg)
+		verificationResp.Message = errMsg
+		return verificationResp, fmt.Errorf("%v", errMsg)
+	}
+
+	signatureBytes := util.StrToHex(verificationReq.Signature)
+
+	verificationResult, err := didCrypto.PvtVerify([]byte(verificationReq.SignedMsg), signatureBytes)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to verify signature, err : %v", err)
+		c.log.Error(errMsg)
+		verificationResp.Message = errMsg
+		return verificationResp, fmt.Errorf("%v", errMsg)
+	}
+
+	if verificationResult {
+		verificationResp.Message = "verification passed, signature is valid"
+	} else {
+		c.log.Error("verification failed, signature is invalid")
+		verificationResp.Message = "verification failed, signature is invalid"
+	}
+
+	verificationResp.Status = verificationResult
+	return verificationResp, nil
+}
