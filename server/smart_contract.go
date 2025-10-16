@@ -124,6 +124,13 @@ func (s *Server) APIGenerateSmartContract(req *ensweb.Request) *ensweb.Result {
 		return s.BasicResponse(req, false, "Generate smart contract failed, failed to retrieve Binary File", nil)
 	}
 
+	// Validate binary code file extension - must be .wasm
+	if strings.ToLower(filepath.Ext(binaryHeader.Filename)) != ".wasm" {
+		binaryCodeFile.Close()
+		s.log.Error("Generate smart contract failed, binary file must have .wasm extension")
+		return s.BasicResponse(req, false, "Binary code file must be a .wasm file", nil)
+	}
+
 	binaryCodeDest := filepath.Join(deploySC.SCPath, binaryHeader.Filename)
 	binaryCodeDestFile, err := os.Create(binaryCodeDest)
 	if err != nil {
@@ -147,6 +154,14 @@ func (s *Server) APIGenerateSmartContract(req *ensweb.Request) *ensweb.Result {
 		binaryCodeDestFile.Close()
 		s.log.Error("Generate smart contract failed, failed to retrieve Raw Code file", "err", err)
 		return s.BasicResponse(req, false, "Generate smart contract failed, failed to retrieve Raw Code file", nil)
+	}
+
+	// Validate raw code file extension - must be .rs
+	if strings.ToLower(filepath.Ext(rawHeader.Filename)) != ".rs" {
+		rawCodeFile.Close()
+		binaryCodeDestFile.Close()
+		s.log.Error("Generate smart contract failed, raw code file must have .rs extension")
+		return s.BasicResponse(req, false, "Raw code file must be a .rs file", nil)
 	}
 
 	rawCodeDest := filepath.Join(deploySC.SCPath, rawHeader.Filename)

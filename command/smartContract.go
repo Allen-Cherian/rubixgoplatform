@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -29,8 +30,18 @@ func (cmd *Command) generateSmartContractToken() {
 		cmd.log.Error("Please provide Binary code file")
 		return
 	}
+	// Preflight check: binary file must be .wasm
+	if strings.ToLower(filepath.Ext(cmd.binaryCodePath)) != ".wasm" {
+		cmd.log.Error("Binary code file must be a .wasm file")
+		return
+	}
 	if cmd.rawCodePath == "" {
 		cmd.log.Error("Please provide Raw code file")
+		return
+	}
+	// Preflight check: raw code file must be .rs
+	if strings.ToLower(filepath.Ext(cmd.rawCodePath)) != ".rs" {
+		cmd.log.Error("Raw code file must be a .rs file")
 		return
 	}
 	if cmd.schemaFilePath == "" {
