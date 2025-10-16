@@ -44,21 +44,15 @@ func (cmd *Command) generateSmartContractToken() {
 		cmd.log.Error("Raw code file must be a .rs file")
 		return
 	}
-	if cmd.schemaFilePath == "" {
-		cmd.log.Error("Please provide Schema file")
-		return
-	}
 	smartContractTokenRequest := core.GenerateSmartContractRequest{
 		BinaryCode: cmd.binaryCodePath,
 		RawCode:    cmd.rawCodePath,
-		SchemaCode: cmd.schemaFilePath,
 		DID:        cmd.did,
 	}
 
 	request := client.SmartContractRequest{
 		BinaryCode: smartContractTokenRequest.BinaryCode,
 		RawCode:    smartContractTokenRequest.RawCode,
-		SchemaCode: smartContractTokenRequest.SchemaCode,
 		DID:        smartContractTokenRequest.DID,
 	}
 

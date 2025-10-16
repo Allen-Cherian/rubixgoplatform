@@ -12,7 +12,6 @@ type SmartContract struct {
 	Deployer          string `gorm:"column:deployer" json:"deployer"`
 	BinaryCodeHash    string `gorm:"column:binary_code_hash" json:"binary_code_hash"`
 	RawCodeHash       string `gorm:"column:raw_code_hash" json:"raw_code_hash"`
-	SchemaCodeHash    string `gorm:"column:schema_code_hash" json:"schema_code_hash"`
 	ContractStatus    int    `gorm:"column:contract_status" json:"contract_status"`
 }
 

@@ -113,7 +113,7 @@ const (
 	GetFTTxnDetailsCmd             string = "get-ft-txn-details"
 	ArbitrarySignCmd               string = "sign"
 	VerifySignatureCmd             string = "verify-signature"
-  AsyncFTStatusCmd               string = "asyncftstatus"
+	AsyncFTStatusCmd               string = "asyncftstatus"
 	SetAsyncFTStatusCmd            string = "setasyncftstatus"
 	FixFTCreatorCmd                string = "fix-ft-creator"
 	GetFTCreatorStatsCmd           string = "get-ft-creator-stats"
@@ -331,7 +331,6 @@ type Command struct {
 	deployerAddr                 string
 	binaryCodePath               string
 	rawCodePath                  string
-	schemaFilePath               string
 	smartContractToken           string
 	newContractBlock             string
 	publishType                  int
@@ -718,7 +717,6 @@ func Run(args []string) {
 	flag.StringVar(&cmd.deployerAddr, "deployerAddr", "", "Smart contract Deployer Address")
 	flag.StringVar(&cmd.binaryCodePath, "binCode", "", "Binary code path")
 	flag.StringVar(&cmd.rawCodePath, "rawCode", "", "Raw code path")
-	flag.StringVar(&cmd.schemaFilePath, "schemaFile", "", "Schema file path")
 	flag.StringVar(&cmd.smartContractToken, "sct", "", "Smart contract token")
 	flag.StringVar(&cmd.newContractBlock, "sctBlockHash", "", "Contract block hash")
 	flag.IntVar(&cmd.publishType, "pubType", 0, "Smart contract event publishing type(Deploy & Execute)")
