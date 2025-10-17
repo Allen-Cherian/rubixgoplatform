@@ -14,7 +14,6 @@ import (
 
 const (
 	TokenStorage                   string = "TokensTable"
-	DataTokenStorage               string = "DataTokensTable"
 	NFTTokenStorage                string = "NFTTokensTable"
 	CreditStorage                  string = "CreditsTable"
 	DIDStorage                     string = "DIDTable"
@@ -24,7 +23,6 @@ const (
 	TokenProvider                  string = "TokenProviderTable"
 	TokenChainStorage              string = "tokenchainstorage"
 	NFTChainStorage                string = "nftchainstorage"
-	DataChainStorage               string = "datachainstorage"
 	SmartContractTokenChainStorage string = "smartcontractokenchainstorage"
 	SmartContractStorage           string = "smartcontract"
 	CallBackUrlStorage             string = "callbackurl"
@@ -63,7 +61,6 @@ type Wallet struct {
 	log                            logger.Logger
 	wl                             sync.Mutex
 	tcs                            *ChainDB
-	dtcs                           *ChainDB
 	ntcs                           *ChainDB
 	smartContractTokenChainStorage *ChainDB
 	FTChainStorage                 *ChainDB
@@ -87,7 +84,6 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 		s:   s,
 	}
 	w.tcs = &ChainDB{}
-	w.dtcs = &ChainDB{}
 	w.ntcs = &ChainDB{}
 	w.smartContractTokenChainStorage = &ChainDB{}
 	w.FTChainStorage = &ChainDB{}
@@ -107,12 +103,6 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 		return nil, fmt.Errorf("failed to configure NFT chain block storage")
 	}
 	w.ntcs.DB = ntdb
-	dtdb, err := leveldb.OpenFile(dir+DataChainStorage, op)
-	if err != nil {
-		w.log.Error("failed to configure data chain block storage", "err", err)
-		return nil, fmt.Errorf("failed to configure data chain block storage")
-	}
-	w.dtcs.DB = dtdb
 	err = w.s.Init(DIDStorage, &DIDType{}, true)
 	if err != nil {
 		w.log.Error("Failed to initialize DID storage", "err", err)
@@ -121,11 +111,6 @@ func InitWallet(s storage.Storage, dir string, log logger.Logger) (*Wallet, erro
 	err = w.s.Init(TokenStorage, &Token{}, true)
 	if err != nil {
 		w.log.Error("Failed to initialize whole token storage", "err", err)
-		return nil, err
-	}
-	err = w.s.Init(DataTokenStorage, &model.DataToken{}, true)
-	if err != nil {
-		w.log.Error("Failed to initialize data token storage", "err", err)
 		return nil, err
 	}
 	err = w.s.Init(NFTTokenStorage, &NFT{}, true)

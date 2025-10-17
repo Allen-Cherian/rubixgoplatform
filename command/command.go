@@ -62,8 +62,6 @@ const (
 	ShutDownCmd                    string = "shutdown"
 	MirgateNodeCmd                 string = "migratenode"
 	LockTokensCmd                  string = "locktokens"
-	CreateDataTokenCmd             string = "createdatatoken"
-	CommitDataTokenCmd             string = "commitdatatoken"
 	SetupDBCmd                     string = "setupdb"
 	GetTxnDetailsCmd               string = "gettxndetails"
 	CreateNFTCmd                   string = "create-nft"
@@ -144,8 +142,6 @@ var commands = []string{VersionCmd,
 	ShutDownCmd,
 	MirgateNodeCmd,
 	LockTokensCmd,
-	CreateDataTokenCmd,
-	CommitDataTokenCmd,
 	SetupDBCmd,
 	GetTxnDetailsCmd,
 	PublishContractCmd,
@@ -219,8 +215,6 @@ var commandsHelp = []string{"To get tool version",
 	"This command will shutdown the rubix node",
 	"This command will migrate node to newer node",
 	"This command will lock the tokens on the arbitary node",
-	"This command will create data token token",
-	"This command will commit data token token",
 	"This command will setup the DB",
 	"This command will get transaction details",
 	"This command will publish a smart contract token",
@@ -864,10 +858,6 @@ func Run(args []string) {
 		cmd.ShutDownCmd()
 	case MirgateNodeCmd:
 		cmd.MigrateNodeCmd()
-	case CreateDataTokenCmd:
-		cmd.createDataToken()
-	case CommitDataTokenCmd:
-		cmd.commitDataToken()
 	case SetupDBCmd:
 		cmd.setupDB()
 	case GetTxnDetailsCmd:
