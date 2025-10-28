@@ -38,6 +38,7 @@ type SCTDataReply struct {
 	Epoch              int
 	InitiatorSignature string
 	ExecutorDID        string
+	DeployerDID        string
 	InitiatorSignData  string
 }
 

@@ -231,6 +231,7 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 		}
 
 		executorDID := latestBlock.GetExecutorDID()
+		deployerDID := latestBlock.GetDeployerDID()
 
 		sctData := model.SCTDataReply{
 			BlockNo:            blockNo,
@@ -239,6 +240,7 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 			Epoch:              epoch,
 			InitiatorSignature: initiatorSignature,
 			ExecutorDID:        executorDID,
+			DeployerDID:        deployerDID,
 			InitiatorSignData:  initiatorSignData,
 		}
 
@@ -254,6 +256,8 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 		reply.Message = "unable to fetch token blocks for contract: " + getReq.Token
 		return reply
 	}
+
+	var deployerDIDFromFirstBlock string
 
 	for _, blk := range blks {
 		block := block.InitBlock(blk, nil)
@@ -287,7 +291,19 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 		}
 
 		executorDID := block.GetExecutorDID()
+		deployerDID := block.GetDeployerDID()
 
+		// Save deployer DID from block 0
+		if blockNo == 0 && deployerDID != "" {
+			deployerDIDFromFirstBlock = deployerDID
+		}
+
+		// If current block doesn't have deployer DID, use the one from block 0
+		if deployerDID == "" && deployerDIDFromFirstBlock != "" {
+			deployerDID = deployerDIDFromFirstBlock
+		}
+
+		fmt.Println("The deployer did is :", deployerDID)
 		sctData := model.SCTDataReply{
 			BlockNo:            blockNo,
 			BlockId:            blockId,
@@ -295,6 +311,7 @@ func (c *Core) GetSmartContractTokenChainData(getReq *model.SmartContractTokenCh
 			Epoch:              epoch,
 			InitiatorSignature: executorSignature,
 			ExecutorDID:        executorDID,
+			DeployerDID:        deployerDID,
 			InitiatorSignData:  executorSignData,
 		}
 
