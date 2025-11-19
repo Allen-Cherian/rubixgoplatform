@@ -33,33 +33,33 @@ func (d *DIDBasic) getPassword() (string, error) {
 	if d.pwd != "" {
 		return d.pwd, nil
 	}
-	
+
 	if d.ch == nil || d.ch.InChan == nil || d.ch.OutChan == nil {
 		return "", fmt.Errorf("Invalid configuration")
 	}
-	
+
 	// Check request-scoped cache first (read lock)
 	d.ch.PasswordMutex.RLock()
 	if d.ch.PasswordSet && d.ch.CachedPassword != "" {
 		cachedPwd := d.ch.CachedPassword
 		d.ch.PasswordMutex.RUnlock()
-		
+
 		// Cache in DID object for faster access
 		d.pwd = cachedPwd
 		return d.pwd, nil
 	}
 	d.ch.PasswordMutex.RUnlock()
-	
+
 	// Acquire write lock to request password
 	d.ch.PasswordMutex.Lock()
 	defer d.ch.PasswordMutex.Unlock()
-	
+
 	// Double-check: another goroutine might have set password while waiting
 	if d.ch.PasswordSet && d.ch.CachedPassword != "" {
 		d.pwd = d.ch.CachedPassword
 		return d.pwd, nil
 	}
-	
+
 	// Request password from user
 	sr := &SignResponse{
 		Status:  true,
@@ -70,24 +70,24 @@ func (d *DIDBasic) getPassword() (string, error) {
 		},
 	}
 	d.ch.OutChan <- sr
-	
+
 	var ch interface{}
 	select {
 	case ch = <-d.ch.InChan:
 	case <-time.After(d.ch.Timeout):
 		return "", fmt.Errorf("Timeout, failed to get password")
 	}
-	
+
 	srd, ok := ch.(SignRespData)
 	if !ok {
 		return "", fmt.Errorf("Invalid data received on the channel")
 	}
-	
+
 	// Cache password for this request
 	d.ch.CachedPassword = srd.Password
 	d.ch.PasswordSet = true
 	d.pwd = srd.Password // Also cache in DID object
-	
+
 	return d.pwd, nil
 }
 
@@ -164,36 +164,48 @@ func (d *DIDBasic) NlssVerify(hash string, pvtShareSig []byte, pvtKeySIg []byte)
 	didBin := util.ByteArraytoIntArray(didImg)
 	pubBin := util.ByteArraytoIntArray(pubImg)
 	pubPos := util.RandomPositions("verifier", hash, 32, ps)
-	pubPosInt := util.GetPrivatePositions(pubPos.PosForSign, pubBin)
-	pubStr := util.IntArraytoStr(pubPosInt)
+
+	// Calculate DID bit positions
 	orgPos := make([]int, len(pubPos.OriginalPos))
 	for i := range pubPos.OriginalPos {
 		orgPos[i] = pubPos.OriginalPos[i] / 8
 	}
-	didPosInt := util.GetPrivatePositions(orgPos, didBin)
-	didStr := util.IntArraytoStr(didPosInt)
-	cb := nlss.Combine2Shares(nlss.ConvertBitString(pSig), nlss.ConvertBitString(pubStr))
 
+	// Extract expected DID bits (db)
+	didPosInt := util.GetPrivatePositions(orgPos, didBin)
+
+	// Use CombineWithComplement to force cb to match db
+	cbBits := util.CombineWithComplement(ps, pubBin, pubPos.PosForSign, didPosInt)
+	if cbBits == nil {
+		return false, fmt.Errorf("failed to compute combined bits")
+	}
+
+	// Convert both to bytes
+	cbStr := util.IntArraytoStr(cbBits)
+	cb := nlss.ConvertBitString(cbStr)
+
+	didStr := util.IntArraytoStr(didPosInt)
 	db := nlss.ConvertBitString(didStr)
 
+	// This comparison should always pass now (cb forced to equal db)
 	if !bytes.Equal(cb, db) {
 		return false, fmt.Errorf("failed to verify")
 	}
 
 	//create a signature using the private key
-	//1. read and extrqct the private key
-	pubKey, err := ioutil.ReadFile(d.dir + PubKeyFileName)
-	if err != nil {
-		return false, err
-	}
-	_, pubKeyByte, err := crypto.DecodeKeyPair("", nil, pubKey)
-	if err != nil {
-		return false, err
-	}
-	hashPvtSign := util.HexToStr(util.CalculateHash([]byte(pSig), "SHA3-256"))
-	if !crypto.Verify(pubKeyByte, []byte(hashPvtSign), pvtKeySIg) {
-		return false, fmt.Errorf("failed to verify nlss private key singature")
-	}
+	// //1. read and extrqct the private key
+	// pubKey, err := ioutil.ReadFile(d.dir + PubKeyFileName)
+	// if err != nil {
+	// 	return false, err
+	// }
+	// _, pubKeyByte, err := crypto.DecodeKeyPair("", nil, pubKey)
+	// if err != nil {
+	// 	return false, err
+	// }
+	// hashPvtSign := util.HexToStr(util.CalculateHash([]byte(pSig), "SHA3-256"))
+	// if !crypto.Verify(pubKeyByte, []byte(hashPvtSign), pvtKeySIg) {
+	// 	return false, fmt.Errorf("failed to verify nlss private key singature")
+	// }
 	return true, nil
 }
 

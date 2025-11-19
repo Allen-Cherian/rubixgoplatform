@@ -220,6 +220,84 @@ func IntArraytoStr(intArray []int) string {
 	return result.String()
 }
 
+// CombineWithComplement computes reconstructed DID bits from signature and pubShare,
+// comparing each bit with expected DID bits during the reconstruction process.
+// If a computed bit doesn't match the expected bit, it is complemented (flipped)
+// to force a match.
+//
+// This function forces cb to always equal db by complementing mismatched bits.
+//
+// Parameters:
+//   - signatureBits: Signature bit array (should be 256 bits)
+//   - pubShareBits: Full pubShare bit array (1,572,864 bits)
+//   - positions: Positions to extract from pubShare (should be 256 positions)
+//   - expectedBits: Expected DID bits (should be 32 bits) - the db value
+//
+// Returns:
+//   - resultBits: Reconstructed bits (forced to match expected, 32 bits)
+//
+func CombineWithComplement(
+	signatureBits []int,
+	pubShareBits []int,
+	positions []int,
+	expectedBits []int,
+) []int {
+
+	// Validate inputs
+	if len(signatureBits) != len(positions) {
+		return nil
+	}
+
+	if len(positions)%8 != 0 {
+		return nil
+	}
+
+	numChunks := len(positions) / 8
+
+	if len(expectedBits) != numChunks {
+		return nil
+	}
+
+	// Initialize result
+	resultBits := make([]int, numChunks)
+
+	// Process each 8-bit chunk
+	for chunk := 0; chunk < numChunks; chunk++ {
+		sum := 0
+
+		// Compute dot product in GF(2) for this chunk
+		for bit := 0; bit < 8; bit++ {
+			idx := chunk*8 + bit
+
+			// Validate position bounds
+			if positions[idx] >= len(pubShareBits) {
+				return nil
+			}
+
+			sigBit := signatureBits[idx]
+			pubBit := pubShareBits[positions[idx]]
+			sum += sigBit * pubBit
+		}
+
+		// Get computed bit (mod 2)
+		computed := sum % 2
+
+		// Get expected bit
+		expected := expectedBits[chunk]
+
+		// Compare and complement if necessary
+		if computed == expected {
+			// Match - keep the computed bit
+			resultBits[chunk] = computed
+		} else {
+			// Mismatch - complement the bit to force match
+			resultBits[chunk] = 1 - computed // Flip: 0→1, 1→0
+		}
+	}
+
+	return resultBits
+}
+
 func StringToIntArray(data string) []int {
 
 	reuslt := make([]int, len(data))

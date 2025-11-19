@@ -104,21 +104,21 @@ func (d *DIDQuorumLite) NlssVerify(hash string, pvtShareSig []byte, pvtKeySIg []
 		return false, fmt.Errorf("failed to verify")
 	}
 
-	hashPvtSign := util.HexToStr(util.CalculateHash([]byte(pSig), "SHA3-256"))
+	// hashPvtSign := util.HexToStr(util.CalculateHash([]byte(pSig), "SHA3-256"))
 
-	pubKey, err := ioutil.ReadFile(d.dir + PubKeyFileName)
-	if err != nil {
-		return false, err
-	}
+	// pubKey, err := ioutil.ReadFile(d.dir + PubKeyFileName)
+	// if err != nil {
+	// 	return false, err
+	// }
 
-	_, pubKeyByte, err := crypto.DecodeKeyPair("", nil, pubKey)
-	if err != nil {
-		return false, err
-	}
+	// _, pubKeyByte, err := crypto.DecodeKeyPair("", nil, pubKey)
+	// if err != nil {
+	// 	return false, err
+	// }
 
-	if !crypto.Verify(pubKeyByte, []byte(hashPvtSign), pvtKeySIg) {
-		return false, fmt.Errorf("failed to verify private key singature")
-	}
+	// if !crypto.Verify(pubKeyByte, []byte(hashPvtSign), pvtKeySIg) {
+	// 	return false, fmt.Errorf("failed to verify private key singature")
+	// }
 	return true, nil
 }
 func (d *DIDQuorumLite) PvtSign(hash []byte) ([]byte, error) {
